@@ -1,5 +1,6 @@
 import React from 'react';
 import { UserRole } from '@nestyk/types';
+import { NestykLogo } from '../components/NestykLogo';
 import { tokens } from '../theme/tokens';
 
 export interface WebPageLayoutProps {
@@ -54,26 +55,17 @@ export const WebPageLayout: React.FC<WebPageLayoutProps> = ({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <NestykLogo variant="wordmark" height={28} />
             <div
               style={{
-                width: '12px',
-                height: '12px',
+                width: '8px',
+                height: '8px',
                 borderRadius: '50%',
                 backgroundColor: roleColor,
               }}
+              aria-hidden
             />
-            <span
-              style={{
-                fontSize: '20px',
-                fontWeight: 600,
-                fontFamily: 'var(--font-baloo2), "Baloo 2", cursive, sans-serif',
-                color: tokens.colors.primary,
-                letterSpacing: '0.3px',
-              }}
-            >
-              NESTYK
-            </span>
           </div>
 
           <nav style={{ display: 'flex', gap: '16px' }}>

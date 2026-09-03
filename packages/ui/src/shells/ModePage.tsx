@@ -1,5 +1,6 @@
 import React from 'react';
 import { UserRole } from '@nestyk/types';
+import { NestykLogo } from '../components/NestykLogo';
 import { tokens } from '../theme/tokens';
 
 export interface ModePageProps {
@@ -53,9 +54,16 @@ export const ModePage: React.FC<ModePageProps> = ({
         }}
       >
         <div>
-          <h1 style={{ fontSize: '18px', margin: 0, fontWeight: 700, fontFamily: tokens.typography.fonts.headingTh }}>
-            {title || 'NESTYK'}
-          </h1>
+          {title ? (
+            <h1 style={{ fontSize: '18px', margin: 0, fontWeight: 700, fontFamily: tokens.typography.fonts.headingTh }}>
+              {title}
+            </h1>
+          ) : (
+            <NestykLogo
+              variant={role === 'guest' ? 'wordmark' : 'mark'}
+              height={role === 'guest' ? 24 : 32}
+            />
+          )}
           {subtitle && (
             <p style={{ fontSize: '12px', margin: '2px 0 0 0', opacity: 0.9 }}>
               {subtitle}

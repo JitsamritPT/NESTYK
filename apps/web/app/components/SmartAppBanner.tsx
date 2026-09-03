@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { AppButton, AppIcon, tokens } from '@nestyk/ui';
+import { AppButton, AppIcon, NestykLogo, tokens } from '@nestyk/ui';
 
 export interface SmartAppBannerProps {
   defaultScheme?: string;
@@ -45,17 +45,11 @@ export const SmartAppBanner: React.FC<SmartAppBannerProps> = ({
               width: '38px',
               height: '38px',
               borderRadius: '10px',
-              backgroundColor: tokens.colors.brand[500],
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 700,
-              fontSize: '18px',
-              color: '#211E1E',
-              fontFamily: 'var(--font-baloo2), "Baloo 2", sans-serif',
+              overflow: 'hidden',
+              flexShrink: 0,
             }}
           >
-            N
+            <NestykLogo variant="mark" height={38} style={{ borderRadius: 10 }} />
           </div>
           <div>
             <div style={{ fontWeight: 500, fontSize: '14px', letterSpacing: '0.2px' }}>

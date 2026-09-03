@@ -43,6 +43,14 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
       return t.mobile.screens.dashboard;
     case 'listings':
       return t.mobile.screens.listings;
+    case 'listingRoom':
+      return t.mobile.screens.listingRoom;
+    case 'listingLead':
+      return t.mobile.screens.listingLead;
+    case 'contact':
+      return t.mobile.screens.contact;
+    case 'calendar':
+      return t.mobile.screens.calendar;
     case 'income':
       return t.mobile.screens.income;
     case 'deals':
@@ -116,9 +124,7 @@ export default function AppHomeScreen() {
   };
 
   const accentColor =
-    activeTab === 'services'
-      ? tokens.colors.roles.services
-      : tokens.colors.roles[activeRole as keyof typeof tokens.colors.roles] || tokens.colors.accent;
+    tokens.colors.roles[activeRole as keyof typeof tokens.colors.roles] || tokens.colors.accent;
 
   const cardStyle = {
     backgroundColor: theme.card,
@@ -290,6 +296,45 @@ export default function AppHomeScreen() {
       );
     }
 
+    if (activeTab === 'listingLead') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.listingLead}</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>
+              8 warm leads · 3 viewings this week · follow up today
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (activeTab === 'contact') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.contact}</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>
+              Owners · buyers · co-broke partners (mock contact book)
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (activeTab === 'calendar') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.calendar}</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>
+              Viewings · deal deadlines · follow-ups (mock calendar)
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
     if (activeTab === 'tickets') {
       return (
         <View style={styles.bodyContainer}>
@@ -320,6 +365,24 @@ export default function AppHomeScreen() {
       );
     }
 
+    if (activeTab === 'listingRoom') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <View style={styles.listingTopRow}>
+              <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.listingRoom}</Text>
+              <MobileBadge role="agent" label="Active Partner" />
+            </View>
+            <Text style={[styles.sectionDesc, secondaryText]}>Stock: 24 rooms · Commission: 45,000 THB</Text>
+          </View>
+          <MobileCreateListingWizardBody
+            config={defaultAgentListingConfig}
+            onSubmitListing={(data) => Alert.alert('Co-Broke Submitted', JSON.stringify(data))}
+          />
+        </View>
+      );
+    }
+
     if (activeTab === 'listings') {
       if (activeRole === 'owner') {
         return (
@@ -327,23 +390,6 @@ export default function AppHomeScreen() {
             <MobileCreateListingWizardBody
               config={defaultOwnerListingConfig}
               onSubmitListing={(data) => Alert.alert('Listing Published', JSON.stringify(data))}
-            />
-          </View>
-        );
-      }
-      if (activeRole === 'agent') {
-        return (
-          <View style={styles.bodyContainer}>
-            <View style={[styles.card, cardStyle]}>
-              <View style={styles.listingTopRow}>
-                <Text style={[styles.sectionHeader, headingText]}>Agent Co-Broke Dashboard</Text>
-                <MobileBadge role="agent" label="Active Partner" />
-              </View>
-              <Text style={[styles.sectionDesc, secondaryText]}>Stock: 24 listings · Commission: 45,000 THB</Text>
-            </View>
-            <MobileCreateListingWizardBody
-              config={defaultAgentListingConfig}
-              onSubmitListing={(data) => Alert.alert('Co-Broke Submitted', JSON.stringify(data))}
             />
           </View>
         );
@@ -391,6 +437,17 @@ export default function AppHomeScreen() {
           setDrawerOpen(false);
         }}
         onSignOut={() => Alert.alert('Sign Out', 'Signed out (mock)')}
+        onMenuAction={(action) => {
+          if (action.type === 'tab') {
+            setActiveTab(action.tab);
+            return;
+          }
+          if (action.type === 'route') {
+            Alert.alert('Open', action.path);
+            return;
+          }
+          Alert.alert('Action', action.id);
+        }}
       />
 
       <MobileNotificationsPanel

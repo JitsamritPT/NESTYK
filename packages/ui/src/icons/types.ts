@@ -8,6 +8,7 @@ export type AppIconName =
   | 'moon'
   | 'chevron-left'
   | 'chevron-right'
+  | 'chevron-down'
   | 'dots-vertical'
   | 'trash'
   | 'calendar'

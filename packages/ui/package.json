@@ -12,7 +12,9 @@
     "./native": {
       "types": "./src/native.ts",
       "default": "./src/native.ts"
-    }
+    },
+    "./assets/logo/*": "./assets/logo/*",
+    "./assets/logo/IconApp/*": "./assets/logo/IconApp/*"
   },
   "scripts": {
     "build": "tsc",
