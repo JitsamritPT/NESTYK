@@ -1,0 +1,10 @@
+{
+  "extends": "@nestyk/config/typescript/base.json",
+  "compilerOptions": {
+    "jsx": "react-native"
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ]
+}

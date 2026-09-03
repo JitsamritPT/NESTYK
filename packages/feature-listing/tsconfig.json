@@ -1,0 +1,9 @@
+{
+  "extends": "@nestyk/config/typescript/base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"]
+}

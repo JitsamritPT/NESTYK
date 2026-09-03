@@ -1,0 +1,12 @@
+{
+  "name": "@nestyk/config",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./theme/colors.json",
+  "types": "./theme/colors.json",
+  "exports": {
+    "./theme/colors.json": "./theme/colors.json",
+    "./tailwind": "./tailwind/preset.js",
+    "./typescript/base.json": "./typescript/base.json"
+  }
+}

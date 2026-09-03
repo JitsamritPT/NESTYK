@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@nestiq/config/*": ["packages/config/*"],
+      "@nestiq/types": ["packages/types/src"],
+      "@nestiq/types/*": ["packages/types/src/*"],
+      "@nestiq/ui": ["packages/ui/src"],
+      "@nestiq/ui/*": ["packages/ui/src/*"],
+      "@nestiq/i18n": ["packages/i18n/src"],
+      "@nestiq/i18n/*": ["packages/i18n/src/*"],
+      "@nestiq/feature-search": ["packages/feature-search/src"],
+      "@nestiq/feature-search/*": ["packages/feature-search/src/*"],
+      "@nestiq/feature-listing": ["packages/feature-listing/src"],
+      "@nestiq/feature-listing/*": ["packages/feature-listing/src/*"],
+      "@nestiq/feature-services": ["packages/feature-services/src"],
+      "@nestiq/feature-services/*": ["packages/feature-services/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", ".next", "out"]
+}

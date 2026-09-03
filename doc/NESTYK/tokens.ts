@@ -1,0 +1,74 @@
+/**
+ * NESTIQ (NESTYK) Design Tokens Starter
+ * คัดลอกไฟล์นี้ไปไว้ที่ packages/ui/src/theme/tokens.ts หรือ lib/theme/tokens.ts เมื่อขึ้นโปรเจกต์ใหม่
+ */
+export const tokens = {
+  colors: {
+    // 🟡 Corporate Identity Core
+    primary: '#211e1e',
+    brand: {
+      50: '#fff9e8',
+      100: '#fff0c4',
+      500: '#f8b615',
+      600: '#f8b615',
+      700: '#d99a0d',
+    },
+    white: '#ffffff',
+    onBrand: '#211e1e',
+
+    // 🏢 Surfaces & Text
+    background: '#f8fafc',
+    border: '#e5e7eb',
+    divider: '#cbd5e1',
+    placeholder: '#94a3b8',
+    textHeading: '#334155',
+    textSecondary: '#64748b',
+    slate: {
+      50: '#f8fafc',
+      200: '#e5e7eb',
+      600: '#64748b',
+      700: '#334155',
+      900: '#211e1e',
+    },
+
+    // 🚦 Semantic & Status Colors
+    danger: '#dc2626',
+    error: '#dc2626',
+    warning: '#f59e0b',
+    success: '#22c55e',
+    accent: '#2563eb',
+    info: '#2563eb',
+
+    // 🧭 Icon Colors (Allowed Palette)
+    icon: {
+      dark: '#211e1e',
+      secondary: '#64748b',
+      brand: '#f8b615',
+      muted: '#cbd5e1',
+      white: '#ffffff',
+    },
+
+    // 🎭 Multi-App Roles & Services
+    roles: {
+      guest: '#f8b615',     // 🟡 Warm Yellow (Marketplace)
+      tenant: '#00c68d',    // 🟢 Neo Mint (Tenant)
+      owner: '#0055da',     // 🔵 Electric Blue (Owner)
+      agent: '#ff0052',     // 🔴 Neon Rose (Agent)
+      admin: '#0f172a',     // ⚫ Deep Slate (Admin / Operations)
+      services: '#0284c7',  // 🔷 Sky Blue (Services Hub)
+    },
+  },
+
+  typography: {
+    fonts: {
+      headingTh: 'Mitr_500Medium',
+      headingEn: 'Baloo2_400Regular',
+      body: 'NotoSansThai_400Regular',
+      bodyBold: 'NotoSansThai_700Bold',
+    },
+    lineHeightRatio: 1.5, // บังคับสัดส่วน 1.45–1.5x สำหรับภาษาไทยป้องกันสระตกขอบ
+  },
+} as const;
+
+export type ButtonVariant = 'primary' | 'secondary' | 'ghost';
+export type TextVariant = 'h1' | 'h2' | 'body' | 'caption' | 'link';

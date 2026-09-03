@@ -1,0 +1,46 @@
+{
+  "primary": "#211e1e",
+  "brand": {
+    "50": "#fff9e8",
+    "100": "#fff0c4",
+    "500": "#f8b615",
+    "600": "#f8b615",
+    "700": "#d99a0d"
+  },
+  "slate": {
+    "50": "#f8fafc",
+    "200": "#e5e7eb",
+    "600": "#64748b",
+    "700": "#334155",
+    "900": "#211e1e"
+  },
+  "background": "#f8fafc",
+  "border": "#e5e7eb",
+  "divider": "#cbd5e1",
+  "placeholder": "#94a3b8",
+  "textHeading": "#334155",
+  "textSecondary": "#64748b",
+  "danger": "#dc2626",
+  "error": "#dc2626",
+  "warning": "#f59e0b",
+  "success": "#22c55e",
+  "accent": "#2563eb",
+  "info": "#2563eb",
+  "white": "#ffffff",
+  "onBrand": "#211e1e",
+  "icon": {
+    "dark": "#211e1e",
+    "secondary": "#64748b",
+    "brand": "#f8b615",
+    "muted": "#cbd5e1",
+    "white": "#ffffff"
+  },
+  "roles": {
+    "guest": "#f8b615",
+    "tenant": "#00c68d",
+    "owner": "#0055da",
+    "agent": "#ff0052",
+    "admin": "#0f172a",
+    "services": "#0284c7"
+  }
+}

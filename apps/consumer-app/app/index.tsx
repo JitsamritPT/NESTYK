@@ -1,0 +1,488 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Alert } from 'react-native';
+import * as Linking from 'expo-linking';
+import { useLocale } from '@nestyk/i18n';
+import {
+  MobileModePage,
+  MobileButton,
+  MobileBadge,
+  MobileInput,
+  MobileBottomTabBar,
+  MobileHeaderActions,
+  MobileProfileDrawer,
+  MobileNotificationsPanel,
+  MobileNotificationsBody,
+  MobileAppTab,
+  MobileIcon,
+  useMobileTheme,
+  getDefaultTabForRole,
+  tokens,
+} from '@nestyk/ui/native';
+import { UserRole } from '@nestyk/types';
+import { MobileCreateListingWizardBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
+import { MobileServiceCatalogBody } from '@nestyk/feature-services';
+import {
+  MOCK_USER,
+  MOCK_LISTINGS,
+  MOCK_ACTIVITY_NOTIFICATIONS,
+  MOCK_MESSAGE_NOTIFICATIONS,
+  MOCK_SERVICE_TICKETS,
+} from '../lib/mock-data';
+
+function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t']): string {
+  switch (tab) {
+    case 'home':
+      return t.mobile.screens.home;
+    case 'search':
+      return t.mobile.screens.discover;
+    case 'living':
+      return t.mobile.screens.living;
+    case 'bills':
+      return t.mobile.screens.bills;
+    case 'dashboard':
+      return t.mobile.screens.dashboard;
+    case 'listings':
+      return t.mobile.screens.listings;
+    case 'income':
+      return t.mobile.screens.income;
+    case 'deals':
+      return t.mobile.screens.deals;
+    case 'tickets':
+      return t.mobile.screens.tickets;
+    case 'services':
+      return t.mobile.screens.services;
+    default:
+      return t.mobile.screens.home;
+  }
+}
+
+export default function AppHomeScreen() {
+  const { t } = useLocale();
+  const { theme } = useMobileTheme();
+  const [activeRole, setActiveRole] = useState<UserRole>('guest');
+  const [activeTab, setActiveTab] = useState<MobileAppTab>(() => getDefaultTabForRole('guest'));
+  const [searchQuery, setSearchQuery] = useState('');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
+  const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
+
+  const unreadCount = [...notifications, ...messages].filter((n) => n.unread).length;
+
+  const handleDeepLinkUrl = (url: string | null) => {
+    if (!url) return;
+    const parsed = Linking.parse(url);
+    const hostOrPath = (parsed.hostname || parsed.path || '').toLowerCase();
+
+    if (hostOrPath.includes('tenant')) {
+      setActiveRole('tenant');
+      setActiveTab('dashboard');
+    } else if (hostOrPath.includes('owner')) {
+      setActiveRole('owner');
+      setActiveTab('dashboard');
+    } else if (hostOrPath.includes('agent')) {
+      setActiveRole('agent');
+      setActiveTab('dashboard');
+    } else if (hostOrPath.includes('admin')) {
+      setActiveRole('admin');
+      setActiveTab('dashboard');
+    } else if (hostOrPath.includes('services')) {
+      setActiveTab('services');
+    } else if (hostOrPath.includes('guest') || hostOrPath.includes('search')) {
+      setActiveRole('guest');
+      setActiveTab('home');
+    } else if (hostOrPath.includes('viewing')) {
+      Alert.alert('Schedule Viewing', `Open viewing request from link: ${url}`);
+    }
+  };
+
+  useEffect(() => {
+    Linking.getInitialURL().then(handleDeepLinkUrl);
+    const subscription = Linking.addEventListener('url', (event) => handleDeepLinkUrl(event.url));
+    return () => subscription.remove();
+  }, []);
+
+  const handleTabPress = (tab: MobileAppTab) => {
+    if (tab === 'menu') {
+      setDrawerOpen(true);
+      return;
+    }
+    setActiveTab(tab);
+  };
+
+  const handleRoleChange = (role: UserRole) => {
+    setActiveRole(role);
+    setActiveTab(getDefaultTabForRole(role));
+  };
+
+  const accentColor =
+    activeTab === 'services'
+      ? tokens.colors.roles.services
+      : tokens.colors.roles[activeRole as keyof typeof tokens.colors.roles] || tokens.colors.accent;
+
+  const cardStyle = {
+    backgroundColor: theme.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    padding: 16,
+  };
+
+  const headingText = { color: theme.textHeading };
+  const secondaryText = { color: theme.textSecondary };
+
+  const screenTitle = getScreenTitle(activeTab, t);
+
+  const renderListingCards = () => (
+    <>
+      <Text style={[styles.listingSectionTitle, headingText]}>Featured Listings ({MOCK_LISTINGS.length})</Text>
+      {MOCK_LISTINGS.map((item) => (
+        <View key={item.id} style={[styles.listingCard, cardStyle]}>
+          <View style={styles.listingTopRow}>
+            <MobileBadge role={item.badgeRole} label={item.tag} />
+            <Text style={styles.listingPrice}>{item.price} ฿/mo</Text>
+          </View>
+          <Text style={[styles.listingTitle, headingText]}>{item.title}</Text>
+          <Text style={[styles.listingSub, secondaryText]}>{item.roomType} • {item.floor}</Text>
+          <View style={styles.listingActionRow}>
+            <View style={{ flex: 1 }}>
+              <MobileButton variant="outline" onPress={() => Alert.alert('Schedule Viewing', item.title)}>
+                <View style={styles.buttonRow}>
+                  <MobileIcon name="calendar-plus" size={16} color={tokens.colors.primary} />
+                  <Text style={styles.buttonLabel}>{t.common.schedule}</Text>
+                </View>
+              </MobileButton>
+            </View>
+            <View style={{ flex: 1 }}>
+              <MobileButton onPress={() => Alert.alert('Details', item.title)}>{t.common.viewDetails}</MobileButton>
+            </View>
+          </View>
+        </View>
+      ))}
+    </>
+  );
+
+  const renderBillsBody = () => (
+    <View style={styles.bodyContainer}>
+      <View style={[styles.card, cardStyle]}>
+        <Text style={[styles.sectionHeader, headingText]}>Current Bill</Text>
+        <View style={styles.billRow}>
+          <Text style={[styles.billLabel, secondaryText]}>Rent (Sep 2026)</Text>
+          <Text style={[styles.billValue, headingText]}>14,500 THB</Text>
+        </View>
+        <View style={styles.billRow}>
+          <Text style={[styles.billLabel, secondaryText]}>Utilities</Text>
+          <Text style={[styles.billValue, headingText]}>850 THB</Text>
+        </View>
+        <View style={[styles.billRow, styles.billTotal, { borderTopColor: theme.border }]}>
+          <Text style={[styles.billLabel, secondaryText, { fontWeight: '600' }]}>Total Due</Text>
+          <Text style={[styles.billValue, { color: tokens.colors.danger, fontWeight: '700' }]}>15,350 THB</Text>
+        </View>
+        <View style={{ marginTop: 14 }}>
+          <MobileButton onPress={() => Alert.alert('Payment', 'Open PromptPay QR')}>
+            <View style={styles.buttonRow}>
+              <MobileIcon name="qr-code" size={16} color={tokens.colors.primary} />
+              <Text style={styles.buttonLabel}>{t.common.payWithQr}</Text>
+            </View>
+          </MobileButton>
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderDashboardBody = () => {
+    const summaries: Record<UserRole, { title: string; desc: string; badge: string }> = {
+      guest: { title: 'Welcome to NESTYK', desc: 'Browse rooms and schedule viewings nearby.', badge: 'Guest' },
+      tenant: { title: 'Tenant Dashboard', desc: 'Lease active · Next bill due in 3 days', badge: 'Active Lease' },
+      owner: { title: 'Owner Dashboard', desc: '3 active listings · 2 tenants occupied', badge: '3 Listings' },
+      agent: { title: 'Agent Dashboard', desc: '24 co-broke listings · 45,000 THB commission', badge: 'Partner' },
+      admin: { title: 'Operations Dashboard', desc: 'Pending tickets: 3 · Inspections today: 2', badge: 'Ops' },
+      assistant: { title: 'Assistant Dashboard', desc: 'Pending tickets: 3 · Inspections today: 2', badge: 'Ops' },
+    };
+    const summary = summaries[activeRole];
+    return (
+      <View style={styles.bodyContainer}>
+        <View style={[styles.card, cardStyle]}>
+          <View style={styles.listingTopRow}>
+            <Text style={[styles.sectionHeader, headingText]}>{summary.title}</Text>
+            <MobileBadge role={activeRole} label={summary.badge} />
+          </View>
+          <Text style={[styles.sectionDesc, secondaryText]}>{summary.desc}</Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderTabBody = () => {
+    if (activeTab === 'home') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>Discover rooms near you</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>Featured condos and apartments in Bangkok</Text>
+          </View>
+          {renderListingCards()}
+        </View>
+      );
+    }
+
+    if (activeTab === 'search') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>Search rooms & condos nearby</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>Live GPS · Schedule real viewings instantly</Text>
+            <View style={{ marginTop: 12 }}>
+              <MobileInput
+                placeholder="Project name, BTS/MRT station, or area..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+          </View>
+          {renderListingCards()}
+        </View>
+      );
+    }
+
+    if (activeTab === 'dashboard') {
+      return renderDashboardBody();
+    }
+
+    if (activeTab === 'living') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <View style={styles.listingTopRow}>
+              <Text style={[styles.sectionHeader, headingText]}>My Rental</Text>
+              <MobileBadge role="tenant" label="Active Lease" />
+            </View>
+            <Text style={[styles.listingTitle, headingText]}>The Base Sukhumvit 77 (Room 1804)</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>Lease: Sep 1, 2026 – Aug 31, 2027 (12 months left)</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (activeTab === 'bills') {
+      return renderBillsBody();
+    }
+
+    if (activeTab === 'income') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>Rental Income</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>Sep 2026 · 3 units · 43,500 THB collected</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (activeTab === 'deals') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>My Deals</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>2 active negotiations · 1 closing this month</Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (activeTab === 'tickets') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>Service Tickets</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>
+              {MOCK_SERVICE_TICKETS.length} open tickets · 1 assigned today
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (activeTab === 'services') {
+      return (
+        <View style={styles.bodyContainer}>
+          <MobileServiceCatalogBody
+            currentRole={activeRole}
+            activeTickets={MOCK_SERVICE_TICKETS}
+            onRequestService={(cat) => Alert.alert('Service Request', `Requested: ${cat}`)}
+            onHubAction={(id) => {
+              if (id === 'tickets') Alert.alert('My Tickets', `${MOCK_SERVICE_TICKETS.length} open tickets`);
+              if (id === 'emergency') Alert.alert('Emergency', 'Call NESTYK 24h support');
+              if (id === 'move') Alert.alert('Move-in / Move-out', 'Schedule inspection and cleaning');
+            }}
+          />
+        </View>
+      );
+    }
+
+    if (activeTab === 'listings') {
+      if (activeRole === 'owner') {
+        return (
+          <View style={styles.bodyContainer}>
+            <MobileCreateListingWizardBody
+              config={defaultOwnerListingConfig}
+              onSubmitListing={(data) => Alert.alert('Listing Published', JSON.stringify(data))}
+            />
+          </View>
+        );
+      }
+      if (activeRole === 'agent') {
+        return (
+          <View style={styles.bodyContainer}>
+            <View style={[styles.card, cardStyle]}>
+              <View style={styles.listingTopRow}>
+                <Text style={[styles.sectionHeader, headingText]}>Agent Co-Broke Dashboard</Text>
+                <MobileBadge role="agent" label="Active Partner" />
+              </View>
+              <Text style={[styles.sectionDesc, secondaryText]}>Stock: 24 listings · Commission: 45,000 THB</Text>
+            </View>
+            <MobileCreateListingWizardBody
+              config={defaultAgentListingConfig}
+              onSubmitListing={(data) => Alert.alert('Co-Broke Submitted', JSON.stringify(data))}
+            />
+          </View>
+        );
+      }
+    }
+
+    return null;
+  };
+
+  return (
+    <>
+      <MobileModePage
+        role={activeRole}
+        screenTitle={screenTitle}
+        header={
+          <MobileHeaderActions
+            initials={MOCK_USER.initials}
+            notificationCount={unreadCount}
+            onAvatarPress={() => setDrawerOpen(true)}
+            onNotificationsPress={() => setNotificationsOpen(true)}
+          />
+        }
+        bottomBar={
+          <MobileBottomTabBar
+            activeRole={activeRole}
+            activeTab={activeTab}
+            onTabPress={handleTabPress}
+            accentColor={accentColor}
+          />
+        }
+      >
+        {renderTabBody()}
+      </MobileModePage>
+
+      <MobileProfileDrawer
+        visible={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        userName={MOCK_USER.name}
+        userEmail={MOCK_USER.email}
+        userPhone={MOCK_USER.phone}
+        initials={MOCK_USER.initials}
+        activeRole={activeRole}
+        onRoleChange={(role) => {
+          handleRoleChange(role);
+          setDrawerOpen(false);
+        }}
+        onSignOut={() => Alert.alert('Sign Out', 'Signed out (mock)')}
+      />
+
+      <MobileNotificationsPanel
+        visible={notificationsOpen}
+        onClose={() => setNotificationsOpen(false)}
+      >
+        <MobileNotificationsBody
+          activityItems={notifications}
+          messageItems={messages}
+          onBack={() => setNotificationsOpen(false)}
+          onClearAll={() => {
+            setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+            setMessages((prev) => prev.map((n) => ({ ...n, unread: false })));
+          }}
+        />
+      </MobileNotificationsPanel>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  bodyContainer: { gap: 16 },
+  card: {},
+  sectionHeader: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '500',
+  },
+  sectionDesc: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 2,
+  },
+  listingSectionTitle: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '500',
+    marginTop: 8,
+  },
+  listingCard: {
+    gap: 6,
+  },
+  listingTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  listingPrice: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '500',
+    color: tokens.colors.primary,
+  },
+  listingTitle: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '500',
+  },
+  listingSub: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  listingActionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  billRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
+  billTotal: { borderTopWidth: 1, paddingTop: 8 },
+  billLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  billValue: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  buttonLabel: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '500',
+    color: tokens.colors.primary,
+  },
+});

@@ -1,0 +1,27 @@
+{
+  "name": "@nestyk/admin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3003",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@nestyk/config": "*",
+    "@nestyk/feature-services": "*",
+    "@nestyk/i18n": "*",
+    "@nestyk/types": "*",
+    "@nestyk/ui": "*",
+    "next": "^15.3.3",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "~5.9.2"
+  }
+}
