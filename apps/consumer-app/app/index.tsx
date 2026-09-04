@@ -203,7 +203,6 @@ export default function AppHomeScreen() {
       owner: { title: 'Owner Dashboard', desc: '3 active listings · 2 tenants occupied', badge: '3 Listings' },
       agent: { title: 'Agent Dashboard', desc: '24 co-broke listings · 45,000 THB commission', badge: 'Partner' },
       admin: { title: 'Operations Dashboard', desc: 'Pending tickets: 3 · Inspections today: 2', badge: 'Ops' },
-      assistant: { title: 'Assistant Dashboard', desc: 'Pending tickets: 3 · Inspections today: 2', badge: 'Ops' },
     };
     const summary = summaries[activeRole];
     return (
@@ -368,16 +367,14 @@ export default function AppHomeScreen() {
     if (activeTab === 'listingRoom') {
       return (
         <View style={styles.bodyContainer}>
-          <View style={[styles.card, cardStyle]}>
-            <View style={styles.listingTopRow}>
-              <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.listingRoom}</Text>
-              <MobileBadge role="agent" label="Active Partner" />
-            </View>
-            <Text style={[styles.sectionDesc, secondaryText]}>Stock: 24 rooms · Commission: 45,000 THB</Text>
-          </View>
           <MobileCreateListingWizardBody
             config={defaultAgentListingConfig}
-            onSubmitListing={(data) => Alert.alert('Co-Broke Submitted', JSON.stringify(data))}
+            onSubmitListing={(data) =>
+              Alert.alert(
+                t.agent.createRoom.successTitle,
+                `${data.listingTitle} · ${data.visibility}`,
+              )
+            }
           />
         </View>
       );

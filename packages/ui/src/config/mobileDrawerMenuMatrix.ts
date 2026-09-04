@@ -214,21 +214,6 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
       ],
     },
   ],
-  assistant: [
-    {
-      titleKey: 'sectionTitle',
-      items: [
-        { id: 'tickets', labelKey: 'tickets', icon: 'ticket', action: { type: 'tab', tab: 'tickets' } },
-        {
-          id: 'help',
-          labelKey: 'help',
-          icon: 'chat',
-          presentation: 'expand',
-          children: HELP_CHILDREN,
-        },
-      ],
-    },
-  ],
 };
 
 export function getDrawerMenuForRole(role: UserRole): DrawerMenuSection[] {

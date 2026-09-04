@@ -65,6 +65,7 @@ apps/api/dist/
 .env.test.local
 .env.production.local
 !.env.example
+!.env.api.example
 
 # --- Logs & Runtime Reports ---
 logs/

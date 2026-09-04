@@ -9,6 +9,7 @@
     "lint": "echo 'No lint specified'"
   },
   "dependencies": {
+    "@nestyk/i18n": "*",
     "@nestyk/types": "*",
     "@nestyk/ui": "*"
   },

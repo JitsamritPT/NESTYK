@@ -1,14 +1,20 @@
-import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
-import { UserRole } from '@nestyk/types';
-import { BaseEntity } from './base.entity';
+import { Entity, ManyToOne, JoinColumn, PrimaryColumn } from 'typeorm';
 import { UserEntity } from './user.entity';
+import { MasterRoleEntity } from './master-role.entity';
 
-@Entity({ schema: 'NESTYK_PROPTECH', name: 'user_roles' })
-export class UserRoleEntity extends BaseEntity {
-  @Column({ type: 'varchar', length: 30 })
-  role: UserRole; // 'guest' | 'tenant' | 'owner' | 'agent' | 'admin' | 'assistant'
+@Entity({ name: 'user_roles' })
+export class UserRoleEntity {
+  @PrimaryColumn({ type: 'int' })
+  user_id: number;
 
-  @ManyToOne(() => UserEntity, (user) => user.roles, { onDelete: 'CASCADE' })
+  @PrimaryColumn({ type: 'int' })
+  role_id: number;
+
+  @ManyToOne(() => UserEntity, (user) => user.user_roles, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: UserEntity;
+
+  @ManyToOne(() => MasterRoleEntity, (role) => role.user_roles, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'role_id' })
+  role: MasterRoleEntity;
 }
