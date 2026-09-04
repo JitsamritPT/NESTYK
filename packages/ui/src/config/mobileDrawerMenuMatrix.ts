@@ -21,6 +21,7 @@ export type DrawerMenuLabelKey =
   | 'occupancy'
   | 'listing'
   | 'listingRoom'
+  | 'createListing'
   | 'listingLead'
   | 'crm'
   | 'contact'
@@ -151,6 +152,12 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
           icon: 'key',
           presentation: 'expand',
           children: [
+            {
+              id: 'createListing',
+              labelKey: 'createListing',
+              icon: 'sparkle',
+              action: { type: 'tab', tab: 'createListing' },
+            },
             {
               id: 'listingRoom',
               labelKey: 'listingRoom',

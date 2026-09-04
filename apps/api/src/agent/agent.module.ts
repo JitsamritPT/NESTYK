@@ -14,6 +14,10 @@ import { RoomFacilityEntity } from '../entities/room-facility.entity';
 import { RentRoomDocumentEntity } from '../entities/rent-room-document.entity';
 import { AgentRoomsController } from './rooms/agent-rooms.controller';
 import { AgentRoomsService } from './rooms/agent-rooms.service';
+import { AgentListingsController } from './listings/agent-listings.controller';
+import { AgentListingsService } from './listings/agent-listings.service';
+import { AgentPlacesController } from './places/agent-places.controller';
+import { AgentPlacesService } from './places/agent-places.service';
 
 @Module({
   imports: [
@@ -32,8 +36,8 @@ import { AgentRoomsService } from './rooms/agent-rooms.service';
       RentRoomDocumentEntity,
     ]),
   ],
-  controllers: [AgentRoomsController],
-  providers: [AgentRoomsService],
-  exports: [AgentRoomsService],
+  controllers: [AgentRoomsController, AgentListingsController, AgentPlacesController],
+  providers: [AgentRoomsService, AgentListingsService, AgentPlacesService],
+  exports: [AgentRoomsService, AgentListingsService, AgentPlacesService],
 })
 export class AgentModule {}

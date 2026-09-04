@@ -1,15 +1,17 @@
+import Constants from 'expo-constants';
+
+const extra = Constants.expoConfig?.extra as
+  | { apiUrl?: string; baseUrl?: string }
+  | undefined;
+
 /**
  * NESTYK Consumer App Environment & API Configuration
- * Unified Path Routing Strategy
  */
 export const APP_CONFIG = {
-  // Base Web Domain (Unified Path Routing)
-  baseUrl: process.env.EXPO_PUBLIC_BASE_URL || 'http://localhost:3000',
-
-  // Unified Backend API Endpoint
-  apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api',
-
-  // Webview / Portal Deep Links
+  baseUrl:
+    extra?.baseUrl || process.env.EXPO_PUBLIC_BASE_URL || 'http://localhost:3000',
+  apiUrl:
+    extra?.apiUrl || process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000/api/v1',
   portals: {
     marketplace: 'http://localhost:3000',
     owner: 'http://localhost:3000/owner',

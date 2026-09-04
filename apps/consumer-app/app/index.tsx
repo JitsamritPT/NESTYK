@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useLocale } from '@nestyk/i18n';
@@ -19,8 +19,11 @@ import {
   tokens,
 } from '@nestyk/ui/native';
 import { UserRole } from '@nestyk/types';
-import { MobileCreateListingWizardBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
+import { MobileCreateListingWizardBody, MobileAgentListingsBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
+import type { AgentListingCard } from '@nestyk/feature-listing';
 import { MobileServiceCatalogBody } from '@nestyk/feature-services';
+import { createAgentScoutRoom, fetchMyAgentListings, fetchAgentPropertyOwners } from '../lib/agent-listings-api';
+import { searchPlaces, getPlaceDetails } from '../lib/places-api';
 import {
   MOCK_USER,
   MOCK_LISTINGS,
@@ -45,6 +48,8 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
       return t.mobile.screens.listings;
     case 'listingRoom':
       return t.mobile.screens.listingRoom;
+    case 'createListing':
+      return t.mobile.screens.createListing;
     case 'listingLead':
       return t.mobile.screens.listingLead;
     case 'contact':
@@ -65,7 +70,7 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
 }
 
 export default function AppHomeScreen() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const { theme } = useMobileTheme();
   const [activeRole, setActiveRole] = useState<UserRole>('guest');
   const [activeTab, setActiveTab] = useState<MobileAppTab>(() => getDefaultTabForRole('guest'));
@@ -74,8 +79,22 @@ export default function AppHomeScreen() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
   const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
+  const [agentListings, setAgentListings] = useState<AgentListingCard[]>([]);
+  const [listingsLoading, setListingsLoading] = useState(false);
+  const [listingsError, setListingsError] = useState<string | null>(null);
+  const [listingsRefresh, setListingsRefresh] = useState(0);
 
   const unreadCount = [...notifications, ...messages].filter((n) => n.unread).length;
+
+  const handleSearchPlaces = useCallback(
+    (query: string) => searchPlaces(query, locale),
+    [locale],
+  );
+  const handleGetPlaceDetails = useCallback(
+    (placeId: string) => getPlaceDetails(placeId, locale),
+    [locale],
+  );
+  const handleListPropertyOwners = useCallback(() => fetchAgentPropertyOwners(), []);
 
   const handleDeepLinkUrl = (url: string | null) => {
     if (!url) return;
@@ -109,6 +128,28 @@ export default function AppHomeScreen() {
     const subscription = Linking.addEventListener('url', (event) => handleDeepLinkUrl(event.url));
     return () => subscription.remove();
   }, []);
+
+  useEffect(() => {
+    if (activeRole !== 'agent' || activeTab !== 'listingRoom') return;
+    let cancelled = false;
+    setListingsLoading(true);
+    setListingsError(null);
+    fetchMyAgentListings()
+      .then((res) => {
+        if (!cancelled) setAgentListings(res.items);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setListingsError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setListingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRole, activeTab, listingsRefresh]);
 
   const handleTabPress = (tab: MobileAppTab) => {
     if (tab === 'menu') {
@@ -367,14 +408,34 @@ export default function AppHomeScreen() {
     if (activeTab === 'listingRoom') {
       return (
         <View style={styles.bodyContainer}>
+          <MobileAgentListingsBody
+            items={agentListings}
+            loading={listingsLoading}
+            error={listingsError}
+            onRetry={() => setListingsRefresh((n) => n + 1)}
+            onCreatePress={() => setActiveTab('createListing')}
+          />
+        </View>
+      );
+    }
+
+    if (activeTab === 'createListing') {
+      return (
+        <View style={[styles.bodyContainer, styles.wizardBody]}>
           <MobileCreateListingWizardBody
             config={defaultAgentListingConfig}
-            onSubmitListing={(data) =>
+            searchPlaces={handleSearchPlaces}
+            getPlaceDetails={handleGetPlaceDetails}
+            listPropertyOwners={handleListPropertyOwners}
+            onSubmitListing={async (data) => {
+              await createAgentScoutRoom(data);
               Alert.alert(
                 t.agent.createRoom.successTitle,
-                `${data.listingTitle} · ${data.visibility}`,
-              )
-            }
+                t.agent.createRoom.successBody,
+              );
+              setListingsRefresh((n) => n + 1);
+              setActiveTab('listingRoom');
+            }}
           />
         </View>
       );
@@ -383,9 +444,11 @@ export default function AppHomeScreen() {
     if (activeTab === 'listings') {
       if (activeRole === 'owner') {
         return (
-          <View style={styles.bodyContainer}>
+          <View style={[styles.bodyContainer, styles.wizardBody]}>
             <MobileCreateListingWizardBody
               config={defaultOwnerListingConfig}
+              searchPlaces={handleSearchPlaces}
+              getPlaceDetails={handleGetPlaceDetails}
               onSubmitListing={(data) => Alert.alert('Listing Published', JSON.stringify(data))}
             />
           </View>
@@ -396,11 +459,15 @@ export default function AppHomeScreen() {
     return null;
   };
 
+  const isWizardTab =
+    activeTab === 'createListing' || (activeTab === 'listings' && activeRole === 'owner');
+
   return (
     <>
       <MobileModePage
         role={activeRole}
         screenTitle={screenTitle}
+        scrollable={!isWizardTab}
         header={
           <MobileHeaderActions
             initials={MOCK_USER.initials}
@@ -467,6 +534,7 @@ export default function AppHomeScreen() {
 
 const styles = StyleSheet.create({
   bodyContainer: { gap: 16 },
+  wizardBody: { flex: 1, minHeight: 0, gap: 0 },
   card: {},
   sectionHeader: {
     fontFamily: tokens.typography.native.headingTh,

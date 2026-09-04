@@ -38,6 +38,7 @@ export interface TranslationSchema {
       dashboard: string;
       listings: string;
       listingRoom: string;
+      createListing: string;
       listingLead: string;
       contact: string;
       calendar: string;
@@ -55,6 +56,7 @@ export interface TranslationSchema {
       dashboard: string;
       listings: string;
       listingRoom: string;
+      createListing: string;
       listingLead: string;
       contact: string;
       calendar: string;
@@ -97,6 +99,7 @@ export interface TranslationSchema {
       occupancy: string;
       listing: string;
       listingRoom: string;
+      createListing: string;
       listingLead: string;
       crm: string;
       contact: string;
@@ -178,6 +181,8 @@ export interface TranslationSchema {
       successTitle: string;
       successBody: string;
       required: string;
+      requiredFillField: string;
+      requiredOk: string;
       steps: {
         property: string;
         layout: string;
@@ -191,14 +196,24 @@ export interface TranslationSchema {
       };
       propertyName: string;
       propertyNamePlaceholder: string;
+      placesHint: string;
+      placesSearching: string;
+      placesEmpty: string;
+      placesError: string;
+      mapLabel: string;
       address: string;
       addressPlaceholder: string;
+      subdistrict: string;
       district: string;
       province: string;
       listingTitle: string;
       listingTitlePlaceholder: string;
       roomId: string;
       roomIdPlaceholder: string;
+      floor: string;
+      floorPlaceholder: string;
+      building: string;
+      buildingPlaceholder: string;
       bedroom: string;
       bathroom: string;
       sizeSqm: string;
@@ -222,11 +237,35 @@ export interface TranslationSchema {
       ownerName: string;
       ownerPhone: string;
       ownerEmail: string;
+      ownerOther: string;
+      ownerOtherPlaceholder: string;
+      ownerOtherCount: string;
+      ownerSearch: string;
+      ownerSearchPlaceholder: string;
+      ownerAddNew: string;
+      ownerPickExisting: string;
+      ownerChange: string;
+      ownerRoomsCount: string;
+      ownerEmpty: string;
+      ownerLoadError: string;
+      ownerPickRequired: string;
+      ownerFoundExisting: string;
+      ownerUseThis: string;
       visibility: string;
       visibilityPrivate: string;
       visibilityPrivateHint: string;
       visibilityPublished: string;
       visibilityPublishedHint: string;
+      saveError: string;
+    };
+    listings: {
+      emptyTitle: string;
+      emptyBody: string;
+      emptyCta: string;
+      loadError: string;
+      retry: string;
+      createCta: string;
+      rentPerMonth: string;
     };
   };
   services: {

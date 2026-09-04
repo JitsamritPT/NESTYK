@@ -46,11 +46,15 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
 
       <View style={[styles.body, { backgroundColor: theme.background }]}>
         {scrollable ? (
-          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {children}
           </ScrollView>
         ) : (
-          <View style={styles.scrollContent}>{children}</View>
+          <View style={styles.bodyFill}>{children}</View>
         )}
       </View>
 
@@ -83,6 +87,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     flexGrow: 1,
+  },
+  bodyFill: {
+    flex: 1,
+    minHeight: 0,
+    padding: 16,
   },
   bottomBar: {},
 });

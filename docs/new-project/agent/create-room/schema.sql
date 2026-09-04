@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS master_layouts (
 );
 
 INSERT INTO master_layouts (code)
-VALUES ('bedroom'), ('bathroom'), ('room_size')
+VALUES ('bedroom'), ('bathroom'), ('room_size'), ('floor'), ('building')
 ON CONFLICT (code) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS master_facilities_groups (

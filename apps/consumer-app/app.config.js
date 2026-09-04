@@ -25,6 +25,9 @@ module.exports = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.nestyk.consumer',
+    config: {
+      googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+    },
   },
   android: {
     adaptiveIcon: {
@@ -32,6 +35,11 @@ module.exports = {
       backgroundColor: '#F8B615',
     },
     package: 'com.nestyk.consumer',
+    config: {
+      googleMaps: {
+        apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+      },
+    },
   },
   web: {
     favicon: './assets/favicon.png',

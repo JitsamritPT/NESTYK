@@ -51,10 +51,38 @@ export class AgentRoomsService {
   }
 
   async listPropertyOwners(agentId: number) {
-    return this.propertyOwnersRepo.find({
-      where: { created_by_user_id: agentId },
-      order: { name: 'ASC' },
-    });
+    const rows: Array<{
+      id: number;
+      name: string;
+      phone: string;
+      email: string | null;
+      note: string | null;
+      roomCount: number | string;
+    }> = await this.dataSource.query(
+      `
+      SELECT
+        po.id,
+        po.name,
+        po.phone,
+        po.email,
+        po.note,
+        COUNT(r.id)::int AS "roomCount"
+      FROM property_owners po
+      LEFT JOIN rent_rooms r ON r.property_owner_id = po.id
+      WHERE po.created_by_user_id = $1
+      GROUP BY po.id
+      ORDER BY po.name ASC
+      `,
+      [agentId],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      email: row.email,
+      note: row.note,
+      roomCount: Number(row.roomCount) || 0,
+    }));
   }
 
   async createScoutRoom(agent: AuthRequestUser, body: CreateRoomBody) {
@@ -82,8 +110,14 @@ export class AgentRoomsService {
         longitude: body.longitude != null ? String(body.longitude) : null,
         nearby_other: body.nearbyOther ?? null,
         nearby_places: body.nearbyPlaces ?? [],
-        water_rate_per_unit: String(body.waterRatePerUnit),
-        electric_rate_per_unit: String(body.electricRatePerUnit),
+        water_rate_per_unit:
+          body.waterRatePerUnit != null && Number(body.waterRatePerUnit) > 0
+            ? String(body.waterRatePerUnit)
+            : null,
+        electric_rate_per_unit:
+          body.electricRatePerUnit != null && Number(body.electricRatePerUnit) > 0
+            ? String(body.electricRatePerUnit)
+            : null,
         is_scout_room: true,
         visibility: body.visibility!,
         created_by_user_id: agent.id,
@@ -96,12 +130,18 @@ export class AgentRoomsService {
       const saved = await manager.save(room);
 
       if (body.layout?.length) {
+        const allowedLayout = new Set(['bedroom', 'bathroom', 'room_size', 'floor', 'building']);
         for (const item of body.layout) {
-          const layout = await manager.findOne(MasterLayoutEntity, {
+          if (!allowedLayout.has(item.code)) {
+            throw new BadRequestException(`Unknown layout code: ${item.code}`);
+          }
+          let layout = await manager.findOne(MasterLayoutEntity, {
             where: { code: item.code },
           });
           if (!layout) {
-            throw new BadRequestException(`Unknown layout code: ${item.code}`);
+            layout = await manager.save(
+              manager.create(MasterLayoutEntity, { code: item.code }),
+            );
           }
           await manager.save(
             manager.create(RoomLayoutValueEntity, {
@@ -224,8 +264,11 @@ export class AgentRoomsService {
         throw new BadRequestException('each price needs contractTypeCode and price > 0');
       }
     }
-    if (!(Number(body.waterRatePerUnit) > 0) || !(Number(body.electricRatePerUnit) > 0)) {
-      throw new BadRequestException('waterRatePerUnit and electricRatePerUnit must be > 0');
+    if (body.waterRatePerUnit != null && !(Number(body.waterRatePerUnit) > 0)) {
+      throw new BadRequestException('waterRatePerUnit must be > 0 when provided');
+    }
+    if (body.electricRatePerUnit != null && !(Number(body.electricRatePerUnit) > 0)) {
+      throw new BadRequestException('electricRatePerUnit must be > 0 when provided');
     }
     const roomMedias = (body.medias ?? []).filter((m) => (m.category ?? 'room') === 'room');
     if (roomMedias.length < 5) {
