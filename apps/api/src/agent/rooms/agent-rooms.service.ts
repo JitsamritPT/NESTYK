@@ -7,6 +7,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuthRequestUser } from '../../auth/decorators/current-user.decorator';
 import { PropertyEntity } from '../../entities/property.entity';
+import { MasterPropertyTypeEntity } from '../../entities/master-property-type.entity';
 import { PropertyOwnerEntity } from '../../entities/property-owner.entity';
 import { MasterRoomStatusEntity } from '../../entities/master-room-status.entity';
 import { MasterLayoutEntity } from '../../entities/master-layout.entity';
@@ -28,6 +29,8 @@ export class AgentRoomsService {
     private readonly propertiesRepo: Repository<PropertyEntity>,
     @InjectRepository(PropertyOwnerEntity)
     private readonly propertyOwnersRepo: Repository<PropertyOwnerEntity>,
+    @InjectRepository(MasterPropertyTypeEntity)
+    private readonly propertyTypesRepo: Repository<MasterPropertyTypeEntity>,
     @InjectRepository(MasterFacilityEntity)
     private readonly facilitiesRepo: Repository<MasterFacilityEntity>,
   ) {}
@@ -48,6 +51,11 @@ export class AgentRoomsService {
     );
     if (used.length) return used;
     return this.propertiesRepo.find({ order: { name: 'ASC' }, take: 100 });
+  }
+
+  async listPropertyTypes() {
+    const rows = await this.propertyTypesRepo.find({ order: { id: 'ASC' } });
+    return rows.map((row) => ({ id: row.id, code: row.code }));
   }
 
   async listPropertyOwners(agentId: number) {
@@ -252,6 +260,9 @@ export class AgentRoomsService {
       if (!body.property?.district?.trim() || !body.property?.province?.trim()) {
         throw new BadRequestException('property.district and property.province required');
       }
+      if (!body.property?.propertyTypeId) {
+        throw new BadRequestException('property.propertyTypeId required');
+      }
     }
     if (!body.listingTitle?.trim()) {
       throw new BadRequestException('listingTitle is required');
@@ -335,10 +346,17 @@ export class AgentRoomsService {
     }
 
     const p = body.property!;
+    const propertyType = await manager.findOne(MasterPropertyTypeEntity, {
+      where: { id: p.propertyTypeId },
+    });
+    if (!propertyType) {
+      throw new BadRequestException('property.propertyTypeId not found');
+    }
+
     const created = await manager.save(
       manager.create(PropertyEntity, {
         name: p.name?.trim() || p.address.trim().slice(0, 80),
-        category_code: p.categoryCode ?? null,
+        property_type_id: propertyType.id,
         address: p.address.trim(),
         subdistrict: p.subdistrict?.trim() || '-',
         district: p.district.trim(),

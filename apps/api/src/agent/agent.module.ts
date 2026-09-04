@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { PropertyEntity } from '../entities/property.entity';
+import { MasterPropertyTypeEntity } from '../entities/master-property-type.entity';
 import { PropertyOwnerEntity } from '../entities/property-owner.entity';
 import { MasterRoomStatusEntity } from '../entities/master-room-status.entity';
 import { MasterLayoutEntity } from '../entities/master-layout.entity';
@@ -24,6 +25,7 @@ import { AgentPlacesService } from './places/agent-places.service';
     AuthModule,
     TypeOrmModule.forFeature([
       PropertyEntity,
+      MasterPropertyTypeEntity,
       PropertyOwnerEntity,
       MasterRoomStatusEntity,
       MasterLayoutEntity,

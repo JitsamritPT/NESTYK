@@ -1,13 +1,14 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { SerialTimestampEntity } from './base.entity';
+import { MasterPropertyTypeEntity } from './master-property-type.entity';
 
 @Entity({ name: 'properties' })
 export class PropertyEntity extends SerialTimestampEntity {
   @Column({ type: 'varchar', length: 255 })
   name: string;
 
-  @Column({ type: 'varchar', length: 64, nullable: true })
-  category_code: string | null;
+  @Column({ type: 'int', nullable: true })
+  property_type_id: number | null;
 
   @Column({ type: 'text' })
   address: string;
@@ -29,4 +30,8 @@ export class PropertyEntity extends SerialTimestampEntity {
 
   @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
   longitude: string | null;
+
+  @ManyToOne(() => MasterPropertyTypeEntity, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'property_type_id' })
+  property_type: MasterPropertyTypeEntity | null;
 }

@@ -19,6 +19,7 @@ erDiagram
     users ||--o{ rent_rooms : owner_id
 
     properties ||--o{ rent_rooms : properties_id
+    master_property_types ||--o{ properties : property_type_id
     property_owners ||--o{ rent_rooms : property_owner_id
     master_room_statuses ||--o{ rent_rooms : room_status_id
 

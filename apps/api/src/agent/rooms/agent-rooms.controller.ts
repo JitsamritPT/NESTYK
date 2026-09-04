@@ -25,6 +25,11 @@ export class AgentRoomsController {
     return this.roomsService.listProperties(user.id);
   }
 
+  @Get('property-types')
+  listPropertyTypes() {
+    return this.roomsService.listPropertyTypes();
+  }
+
   @Get('property-owners')
   listPropertyOwners(@CurrentUser() user: AuthRequestUser) {
     return this.roomsService.listPropertyOwners(user.id);

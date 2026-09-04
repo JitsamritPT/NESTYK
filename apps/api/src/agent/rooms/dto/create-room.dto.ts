@@ -24,7 +24,7 @@ export type CreateRoomDocumentInput = {
 
 export type CreateRoomPropertyInput = {
   name?: string;
-  categoryCode?: string;
+  propertyTypeId: number;
   address: string;
   subdistrict?: string;
   district: string;

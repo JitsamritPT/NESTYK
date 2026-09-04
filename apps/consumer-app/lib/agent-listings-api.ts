@@ -43,6 +43,13 @@ export async function fetchMyAgentListings(): Promise<AgentListingsResponse> {
   return apiGet<AgentListingsResponse>('/agent/listings');
 }
 
+export async function fetchAgentPropertyTypes(): Promise<
+  Array<{ id: number; code: string }>
+> {
+  await ensureAgentSession();
+  return apiGet('/agent/rooms/property-types');
+}
+
 export async function fetchAgentPropertyOwners(): Promise<
   Array<{
     id: number;

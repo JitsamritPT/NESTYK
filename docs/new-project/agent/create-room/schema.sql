@@ -12,19 +12,28 @@
 
 BEGIN;
 
+CREATE TABLE IF NOT EXISTS master_property_types (
+  id   SERIAL PRIMARY KEY,
+  code VARCHAR(64) NOT NULL UNIQUE
+);
+
+INSERT INTO master_property_types (code)
+VALUES ('condo'), ('apartment'), ('house')
+ON CONFLICT (code) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS properties (
-  id            SERIAL PRIMARY KEY,
-  name          VARCHAR(255) NOT NULL,
-  category_code VARCHAR(64)  NULL,
-  address       TEXT         NOT NULL,
-  subdistrict   VARCHAR(255) NOT NULL DEFAULT '-',
-  district      VARCHAR(255) NOT NULL,
-  province      VARCHAR(255) NOT NULL,
-  postal_code   VARCHAR(10)  NOT NULL DEFAULT '-',
-  latitude      DECIMAL(10, 7) NULL,
-  longitude     DECIMAL(10, 7) NULL,
-  created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-  updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+  id                SERIAL PRIMARY KEY,
+  name              VARCHAR(255) NOT NULL,
+  property_type_id  INT          NULL REFERENCES master_property_types(id) ON DELETE RESTRICT,
+  address           TEXT         NOT NULL,
+  subdistrict       VARCHAR(255) NOT NULL DEFAULT '-',
+  district          VARCHAR(255) NOT NULL,
+  province          VARCHAR(255) NOT NULL,
+  postal_code       VARCHAR(10)  NOT NULL DEFAULT '-',
+  latitude          DECIMAL(10, 7) NULL,
+  longitude         DECIMAL(10, 7) NULL,
+  created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_properties_name ON properties (name);
@@ -185,5 +194,11 @@ CREATE TABLE IF NOT EXISTS rent_room_documents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rent_room_documents_rent_id ON rent_room_documents (rent_id);
+
+-- Upgrade existing properties table (CREATE TABLE IF NOT EXISTS does not alter columns)
+ALTER TABLE properties
+  ADD COLUMN IF NOT EXISTS property_type_id INT NULL REFERENCES master_property_types(id) ON DELETE RESTRICT;
+ALTER TABLE properties DROP COLUMN IF EXISTS category_code;
+CREATE INDEX IF NOT EXISTS idx_properties_property_type_id ON properties (property_type_id);
 
 COMMIT;

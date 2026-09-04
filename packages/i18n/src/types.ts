@@ -206,6 +206,9 @@ export interface TranslationSchema {
       subdistrict: string;
       district: string;
       province: string;
+      propertyType: string;
+      propertyTypeRequired: string;
+      propertyTypeLoadError: string;
       listingTitle: string;
       listingTitlePlaceholder: string;
       roomId: string;
@@ -221,6 +224,10 @@ export interface TranslationSchema {
       nearbyOther: string;
       nearbyPlaceholder: string;
       monthlyRent: string;
+      contractTerm: string;
+      contractTermHint: string;
+      contractMonths: string;
+      contractTermRequired: string;
       waterRate: string;
       electricRate: string;
       availableFrom: string;
@@ -266,6 +273,13 @@ export interface TranslationSchema {
       retry: string;
       createCta: string;
       rentPerMonth: string;
+    };
+  };
+  masters: {
+    propertyTypes: {
+      condo: string;
+      apartment: string;
+      house: string;
     };
   };
   services: {

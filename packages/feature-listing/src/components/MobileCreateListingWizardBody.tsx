@@ -23,9 +23,14 @@ import { ListingEngineConfig } from '../config';
 import { PlaceDetails, PlaceSuggestion } from '../places';
 import { PropertyPlaceMap } from './PropertyPlaceMap';
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 const OWNER_NOTE_MAX = 200;
 const DEFAULT_MAP = { latitude: 13.7563, longitude: 100.5018 };
+const CONTRACT_OPTIONS = [
+  { months: 3, code: 'monthly_3' },
+  { months: 6, code: 'monthly_6' },
+  { months: 12, code: 'monthly_12' },
+] as const;
 
 export type PropertyOwnerOption = {
   id: number;
@@ -35,6 +40,11 @@ export type PropertyOwnerOption = {
   roomCount?: number;
 };
 
+export type PropertyTypeOption = {
+  id: number;
+  code: string;
+};
+
 export type CreateRoomWizardSubmitData = {
   visibility: 'private' | 'published';
   property: {
@@ -42,6 +52,7 @@ export type CreateRoomWizardSubmitData = {
     address: string;
     district: string;
     province: string;
+    propertyTypeId: number;
     subdistrict?: string;
     postalCode?: string;
     latitude?: number;
@@ -79,6 +90,7 @@ export interface MobileCreateListingWizardBodyProps {
   searchPlaces?: (query: string) => Promise<PlaceSuggestion[]>;
   getPlaceDetails?: (placeId: string) => Promise<PlaceDetails>;
   listPropertyOwners?: () => Promise<PropertyOwnerOption[]>;
+  listPropertyTypes?: () => Promise<PropertyTypeOption[]>;
 }
 
 function nativeElevation(level: 1 | 2 | 3) {
@@ -99,7 +111,7 @@ function digitsOnly(value: string) {
 
 export const MobileCreateListingWizardBody: React.FC<
   MobileCreateListingWizardBodyProps
-> = ({ config, onSubmitListing, searchPlaces, getPlaceDetails, listPropertyOwners }) => {
+> = ({ config, onSubmitListing, searchPlaces, getPlaceDetails, listPropertyOwners, listPropertyTypes }) => {
   const { t } = useLocale();
   const cr = t.agent.createRoom;
   const themeColor = tokens.colors.roles[config.actorRole];
@@ -113,6 +125,10 @@ export const MobileCreateListingWizardBody: React.FC<
   const [province, setProvince] = useState('Bangkok');
   const [subdistrict, setSubdistrict] = useState('');
   const [postalCode, setPostalCode] = useState('');
+  const [propertyTypeId, setPropertyTypeId] = useState<number | null>(null);
+  const [propertyTypes, setPropertyTypes] = useState<PropertyTypeOption[]>([]);
+  const [propertyTypesLoading, setPropertyTypesLoading] = useState(false);
+  const [propertyTypesError, setPropertyTypesError] = useState('');
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
@@ -124,10 +140,12 @@ export const MobileCreateListingWizardBody: React.FC<
   const searchPlacesRef = useRef(searchPlaces);
   const getPlaceDetailsRef = useRef(getPlaceDetails);
   const listPropertyOwnersRef = useRef(listPropertyOwners);
+  const listPropertyTypesRef = useRef(listPropertyTypes);
   const formScrollRef = useRef<ScrollView>(null);
   searchPlacesRef.current = searchPlaces;
   getPlaceDetailsRef.current = getPlaceDetails;
   listPropertyOwnersRef.current = listPropertyOwners;
+  listPropertyTypesRef.current = listPropertyTypes;
   const [listingTitle, setListingTitle] = useState('');
   const [roomId, setRoomId] = useState('');
   const [floor, setFloor] = useState('');
@@ -138,6 +156,7 @@ export const MobileCreateListingWizardBody: React.FC<
   const [sizeSqm, setSizeSqm] = useState('');
 
   const [monthlyRent, setMonthlyRent] = useState('');
+  const [contractCodes, setContractCodes] = useState<string[]>(['monthly_12']);
   const [waterRate, setWaterRate] = useState('');
   const [electricRate, setElectricRate] = useState('');
 
@@ -161,6 +180,7 @@ export const MobileCreateListingWizardBody: React.FC<
     const keys = [
       cr.steps.property,
       cr.steps.layout,
+      cr.steps.pricing,
       cr.steps.photos,
       cr.steps.ownerVisibility,
     ] as const;
@@ -173,10 +193,10 @@ export const MobileCreateListingWizardBody: React.FC<
       address: cr.address,
       district: cr.district,
       province: cr.province,
+      propertyType: cr.propertyType,
       listingTitle: cr.listingTitle,
       monthlyRent: cr.monthlyRent,
-      waterRate: cr.waterRate,
-      electricRate: cr.electricRate,
+      contractTerm: cr.contractTerm,
       sizeSqm: cr.sizeSqm,
       ownerName: cr.ownerName,
       ownerPhone: cr.ownerPhone,
@@ -189,6 +209,8 @@ export const MobileCreateListingWizardBody: React.FC<
   const requiredMessage = (key: string) => {
     if (key === 'photos') return cr.photosMinError;
     if (key === 'ownerPick') return cr.ownerPickRequired;
+    if (key === 'contractTerm') return cr.contractTermRequired;
+    if (key === 'propertyType') return cr.propertyTypeRequired;
     return interpolate(cr.requiredFillField, { field: fieldLabel(key) });
   };
 
@@ -216,6 +238,16 @@ export const MobileCreateListingWizardBody: React.FC<
       delete next[key];
       return next;
     });
+  };
+
+  const toggleContract = (code: string) => {
+    setContractCodes((prev) => {
+      const next = prev.includes(code)
+        ? prev.filter((c) => c !== code)
+        : [...prev, code];
+      return CONTRACT_OPTIONS.map((opt) => opt.code).filter((c) => next.includes(c));
+    });
+    clearFieldError('contractTerm');
   };
 
   useEffect(() => {
@@ -265,7 +297,7 @@ export const MobileCreateListingWizardBody: React.FC<
   }, [propertyName, cr.placesError]);
 
   useEffect(() => {
-    if (step !== 4) return;
+    if (step !== 5) return;
     const loadOwners = listPropertyOwnersRef.current;
     if (!loadOwners) return;
     let cancelled = false;
@@ -288,6 +320,32 @@ export const MobileCreateListingWizardBody: React.FC<
       cancelled = true;
     };
   }, [step, cr.ownerLoadError]);
+
+  useEffect(() => {
+    const loadTypes = listPropertyTypesRef.current;
+    if (!loadTypes) return;
+    let cancelled = false;
+    setPropertyTypesLoading(true);
+    loadTypes()
+      .then((rows) => {
+        if (cancelled) return;
+        setPropertyTypes(rows);
+        setPropertyTypesError('');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setPropertyTypes([]);
+        setPropertyTypesError(
+          err instanceof Error && err.message ? err.message : cr.propertyTypeLoadError,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setPropertyTypesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cr.propertyTypeLoadError]);
 
   const selectedOwner = useMemo(
     () => owners.find((item) => item.id === selectedOwnerId) ?? null,
@@ -362,6 +420,9 @@ export const MobileCreateListingWizardBody: React.FC<
     const nextErrors: Record<string, string> = {};
 
     if (current === 1) {
+      if (listPropertyTypesRef.current && !propertyTypeId) {
+        nextErrors.propertyType = cr.propertyTypeRequired;
+      }
       if (!propertyName.trim()) nextErrors.propertyName = cr.required;
       if (!address.trim()) nextErrors.address = cr.required;
       if (!district.trim()) nextErrors.district = cr.required;
@@ -370,15 +431,19 @@ export const MobileCreateListingWizardBody: React.FC<
 
     if (current === 2) {
       if (!listingTitle.trim()) nextErrors.listingTitle = cr.required;
-      if (!monthlyRent.trim() || Number(monthlyRent) <= 0) nextErrors.monthlyRent = cr.required;
       if (!sizeSqm.trim() || Number(sizeSqm) <= 0) nextErrors.sizeSqm = cr.required;
     }
 
-    if (current === 3 && photoCount < 5) {
+    if (current === 3) {
+      if (!monthlyRent.trim() || Number(monthlyRent) <= 0) nextErrors.monthlyRent = cr.required;
+      if (contractCodes.length === 0) nextErrors.contractTerm = cr.contractTermRequired;
+    }
+
+    if (current === 4 && photoCount < 5) {
       nextErrors.photos = cr.photosMinError;
     }
 
-    if (current === 4) {
+    if (current === 5) {
       if (selectedOwnerId) {
         // existing owner is enough
       } else if (ownerMode === 'pick' && listPropertyOwnersRef.current) {
@@ -437,6 +502,7 @@ export const MobileCreateListingWizardBody: React.FC<
         address: address.trim(),
         district: district.trim(),
         province: province.trim(),
+        propertyTypeId: propertyTypeId as number,
         subdistrict: subdistrict.trim() || undefined,
         postalCode: postalCode.trim() || undefined,
         latitude: latitude ?? undefined,
@@ -448,7 +514,10 @@ export const MobileCreateListingWizardBody: React.FC<
       waterRatePerUnit: waterRate.trim() && Number(waterRate) > 0 ? Number(waterRate) : undefined,
       electricRatePerUnit:
         electricRate.trim() && Number(electricRate) > 0 ? Number(electricRate) : undefined,
-      prices: [{ contractTypeCode: 'monthly_12', price: Number(monthlyRent) }],
+      prices: contractCodes.map((code) => ({
+        contractTypeCode: code,
+        price: Number(monthlyRent),
+      })),
       layout,
       facilities: [],
       medias,
@@ -544,6 +613,58 @@ export const MobileCreateListingWizardBody: React.FC<
           <View style={styles.cardBody}>
           {step === 1 && (
             <>
+              <View>
+                <Text style={styles.fieldLabel}>
+                  {cr.propertyType}
+                  <Text style={styles.requiredMark}> *</Text>
+                </Text>
+              </View>
+              {propertyTypesLoading ? (
+                <View style={styles.suggestStatus}>
+                  <ActivityIndicator size="small" color={themeColor} />
+                  <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
+                </View>
+              ) : null}
+              {propertyTypesError ? (
+                <Text style={styles.errorText}>{propertyTypesError}</Text>
+              ) : null}
+              <View style={styles.typeRow}>
+                {propertyTypes.map((opt) => {
+                  const selected = propertyTypeId === opt.id;
+                  const labels = t.masters.propertyTypes as Record<string, string>;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      onPress={() => {
+                        setPropertyTypeId(opt.id);
+                        clearFieldError('propertyType');
+                      }}
+                      android_ripple={{ color: '#00000022' }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      style={({ pressed }) => [
+                        styles.typeChip,
+                        selected
+                          ? { backgroundColor: themeColor, borderColor: themeColor }
+                          : null,
+                        pressed ? { opacity: 0.88 } : null,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.typeChipText,
+                          selected ? styles.typeChipTextSelected : null,
+                        ]}
+                      >
+                        {labels[opt.code] ?? opt.code}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {errors.propertyType ? (
+                <Text style={styles.errorText}>{errors.propertyType}</Text>
+              ) : null}
               <MobileInput
                 label={cr.propertyName}
                 placeholder={cr.propertyNamePlaceholder}
@@ -653,6 +774,131 @@ export const MobileCreateListingWizardBody: React.FC<
                 }}
                 error={errors.listingTitle}
               />
+              <View style={styles.fieldGrid}>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.waterRate}
+                    keyboardType="numeric"
+                    value={waterRate}
+                    onChangeText={setWaterRate}
+                  />
+                </View>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.electricRate}
+                    keyboardType="numeric"
+                    value={electricRate}
+                    onChangeText={setElectricRate}
+                  />
+                </View>
+              </View>
+              <View style={styles.fieldGrid}>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.roomId}
+                    placeholder={cr.roomIdPlaceholder}
+                    value={roomId}
+                    onChangeText={setRoomId}
+                  />
+                </View>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.floor}
+                    placeholder={cr.floorPlaceholder}
+                    keyboardType="numeric"
+                    value={floor}
+                    onChangeText={setFloor}
+                  />
+                </View>
+              </View>
+              <View style={styles.fieldGrid}>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.building}
+                    placeholder={cr.buildingPlaceholder}
+                    autoCapitalize="characters"
+                    value={building}
+                    onChangeText={setBuilding}
+                  />
+                </View>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.bedroom}
+                    keyboardType="numeric"
+                    value={bedroom}
+                    onChangeText={setBedroom}
+                  />
+                </View>
+              </View>
+              <View style={styles.fieldGrid}>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.bathroom}
+                    keyboardType="numeric"
+                    value={bathroom}
+                    onChangeText={setBathroom}
+                  />
+                </View>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.sizeSqm}
+                    keyboardType="numeric"
+                    placeholder="28"
+                    value={sizeSqm}
+                    required
+                    onChangeText={(v) => {
+                      setSizeSqm(v);
+                      clearFieldError('sizeSqm');
+                    }}
+                    error={errors.sizeSqm}
+                  />
+                </View>
+              </View>
+            </>
+          )}
+
+          {step === 3 && (
+            <>
+              <View>
+                <Text style={styles.fieldLabel}>
+                  {cr.contractTerm}
+                  <Text style={styles.requiredMark}> *</Text>
+                </Text>
+                <Text style={styles.hint}>{cr.contractTermHint}</Text>
+              </View>
+              <View style={styles.termRow}>
+                {CONTRACT_OPTIONS.map((opt) => {
+                  const selected = contractCodes.includes(opt.code);
+                  return (
+                    <Pressable
+                      key={opt.code}
+                      onPress={() => toggleContract(opt.code)}
+                      android_ripple={{ color: '#00000022' }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      style={({ pressed }) => [
+                        styles.termChip,
+                        selected
+                          ? { backgroundColor: themeColor, borderColor: themeColor }
+                          : null,
+                        pressed ? { opacity: 0.88 } : null,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.termChipText,
+                          selected ? styles.termChipTextSelected : null,
+                        ]}
+                      >
+                        {interpolate(cr.contractMonths, { months: opt.months })}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {errors.contractTerm ? (
+                <Text style={styles.errorText}>{errors.contractTerm}</Text>
+              ) : null}
               <MobileInput
                 label={cr.monthlyRent}
                 placeholder="12000"
@@ -665,66 +911,10 @@ export const MobileCreateListingWizardBody: React.FC<
                 }}
                 error={errors.monthlyRent}
               />
-              <MobileInput
-                label={cr.waterRate}
-                keyboardType="numeric"
-                value={waterRate}
-                onChangeText={setWaterRate}
-              />
-              <MobileInput
-                label={cr.electricRate}
-                keyboardType="numeric"
-                value={electricRate}
-                onChangeText={setElectricRate}
-              />
-              <MobileInput
-                label={cr.roomId}
-                placeholder={cr.roomIdPlaceholder}
-                value={roomId}
-                onChangeText={setRoomId}
-              />
-              <MobileInput
-                label={cr.floor}
-                placeholder={cr.floorPlaceholder}
-                keyboardType="numeric"
-                value={floor}
-                onChangeText={setFloor}
-              />
-              <MobileInput
-                label={cr.building}
-                placeholder={cr.buildingPlaceholder}
-                autoCapitalize="characters"
-                value={building}
-                onChangeText={setBuilding}
-              />
-              <MobileInput
-                label={cr.bedroom}
-                keyboardType="numeric"
-                value={bedroom}
-                onChangeText={setBedroom}
-              />
-              <MobileInput
-                label={cr.bathroom}
-                keyboardType="numeric"
-                value={bathroom}
-                onChangeText={setBathroom}
-              />
-              <MobileInput
-                label={cr.sizeSqm}
-                keyboardType="numeric"
-                placeholder="28"
-                value={sizeSqm}
-                required
-                onChangeText={(v) => {
-                  setSizeSqm(v);
-                  clearFieldError('sizeSqm');
-                }}
-                error={errors.sizeSqm}
-              />
             </>
           )}
 
-          {step === 3 && (
+          {step === 4 && (
             <>
               <Text style={styles.fieldLabel}>
                 {cr.steps.photos}
@@ -759,7 +949,7 @@ export const MobileCreateListingWizardBody: React.FC<
             </>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <>
               {ownerMode === 'pick' && listPropertyOwners ? (
                 <>
@@ -1053,6 +1243,72 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     gap: 14,
+  },
+  fieldGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  fieldGridItem: {
+    flex: 1,
+    minWidth: 0,
+  },
+  typeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  typeChip: {
+    flexGrow: 1,
+    flexBasis: 96,
+    minWidth: 96,
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: tokens.colors.border,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  typeChipText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  typeChipTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  termRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  termChip: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: tokens.colors.border,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+  },
+  termChipText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  termChipTextSelected: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   hint: {
     fontFamily: tokens.typography.native.body,

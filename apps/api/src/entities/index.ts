@@ -3,6 +3,7 @@ export * from './user.entity';
 export * from './master-role.entity';
 export * from './user-role.entity';
 export * from './property.entity';
+export * from './master-property-type.entity';
 export * from './property-owner.entity';
 export * from './master-room-status.entity';
 export * from './master-layout.entity';
@@ -22,6 +23,7 @@ import { UserEntity } from './user.entity';
 import { MasterRoleEntity } from './master-role.entity';
 import { UserRoleEntity } from './user-role.entity';
 import { PropertyEntity } from './property.entity';
+import { MasterPropertyTypeEntity } from './master-property-type.entity';
 import { PropertyOwnerEntity } from './property-owner.entity';
 import { MasterRoomStatusEntity } from './master-room-status.entity';
 import { MasterLayoutEntity } from './master-layout.entity';
@@ -43,6 +45,7 @@ export const ALL_ENTITIES = [
   MasterRoleEntity,
   UserRoleEntity,
   PropertyEntity,
+  MasterPropertyTypeEntity,
   PropertyOwnerEntity,
   MasterRoomStatusEntity,
   MasterLayoutEntity,

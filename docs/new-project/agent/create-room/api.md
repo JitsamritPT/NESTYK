@@ -49,7 +49,7 @@ Base: `/agent/rooms` · role `agent`
 **Required validation (Agent)**
 
 - `propertyOwnerId` หรือ `propertyOwner{name,phone}`
-- `propertyId` หรือ `property{address,...}`
+- `propertyId` หรือ `property{address,district,province,propertyTypeId}`
 - `listingTitle`, `prices`, water/electric > 0
 - `medias` ≥ 5 รูป `room`
 - `visibility` ∈ `private|published`
@@ -70,5 +70,6 @@ Deprecated path — ใช้ **`PATCH /agent/listings/:id/visibility`** แท�
 | `GET` | `/agent/listings/:id` | รายละเอียด |
 | `PATCH` | `/agent/listings/:id/visibility` | สลับ private/published |
 | `GET` | `/agent/rooms/properties` | reuse โครงการ (wizard) |
+| `GET` | `/agent/rooms/property-types` | master ประเภทอสังหา `{ id, code }` |
 | `GET` | `/agent/rooms/property-owners` | picker เจ้าของห้อง |
 | `POST` | `/agent/rooms/media/upload` | อัปโหลดรูป |
