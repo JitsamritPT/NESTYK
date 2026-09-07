@@ -20,6 +20,10 @@ erDiagram
 
     properties ||--o{ rent_rooms : properties_id
     master_property_types ||--o{ properties : property_type_id
+    master_contract_types ||--o{ rent_room_prices : contract_type_id
+    contacts ||--o{ rent_room_contacts : contact_id
+    rent_rooms ||--o{ rent_room_contacts : rent_room_id
+    rent_rooms ||--o{ rent_room_prices : rent_room_id
     property_owners ||--o{ rent_rooms : property_owner_id
     master_room_statuses ||--o{ rent_rooms : room_status_id
 
@@ -50,7 +54,7 @@ erDiagram
 | Column | หมายเหตุ |
 |--------|----------|
 | `properties_id` | FK โครงการ (สร้างใหม่หรือ reuse) |
-| `property_owner_id` | FK เจ้าของห้อง contact |
+| `property_owner_id` | FK เจ้าของห้องจริง — กรอกตอนทำสัญญา ไม่ใช้ตอนสร้าง scout |
 | `created_by_user_id` | agent |
 | `is_scout_room` | `true` |
 | `visibility` | `private` (default) หรือ `published` |
@@ -103,7 +107,7 @@ erDiagram
 | **`is_scout_room`** | boolean | no | **`true`** | **`false`** |
 | **`visibility`** | varchar(20) | yes | **`private`/`published`** | **`NULL`** |
 | `created_by_user_id` | int → users | yes | **req** | null |
-| `property_owner_id` | int | yes | **req** | null |
+| `property_owner_id` | int | yes | later contract | null |
 | `owner_id` | int → users | yes | **null** | **req** |
 | `properties_id` | int | no | **req** | req |
 | `room_status_id` | int | no | available | pending_verification… |
@@ -130,7 +134,6 @@ erDiagram
 -- Scout
 NOT is_scout_room OR (
   created_by_user_id IS NOT NULL
-  AND property_owner_id IS NOT NULL
   AND owner_id IS NULL
   AND visibility IN ('private', 'published')
 )

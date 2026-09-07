@@ -26,13 +26,10 @@ import { PropertyPlaceMap } from './PropertyPlaceMap';
 const TOTAL_STEPS = 5;
 const OWNER_NOTE_MAX = 200;
 const DEFAULT_MAP = { latitude: 13.7563, longitude: 100.5018 };
-const CONTRACT_OPTIONS = [
-  { months: 3, code: 'monthly_3' },
-  { months: 6, code: 'monthly_6' },
-  { months: 12, code: 'monthly_12' },
-] as const;
+const ADVANCE_MONTH_OPTIONS = [0, 1, 2] as const;
+const DEPOSIT_MONTH_OPTIONS = [1, 2, 3] as const;
 
-export type PropertyOwnerOption = {
+export type ContactOption = {
   id: number;
   name: string;
   phone: string;
@@ -40,9 +37,18 @@ export type PropertyOwnerOption = {
   roomCount?: number;
 };
 
+/** @deprecated use ContactOption */
+export type PropertyOwnerOption = ContactOption;
+
 export type PropertyTypeOption = {
   id: number;
   code: string;
+};
+
+export type ContractTypeOption = {
+  id: number;
+  code: string;
+  termMonths: number;
 };
 
 export type CreateRoomWizardSubmitData = {
@@ -58,8 +64,8 @@ export type CreateRoomWizardSubmitData = {
     latitude?: number;
     longitude?: number;
   };
-  propertyOwnerId?: number;
-  propertyOwner?: {
+  contactId?: number;
+  contact?: {
     name: string;
     phone: string;
     note?: string;
@@ -68,7 +74,9 @@ export type CreateRoomWizardSubmitData = {
   roomId?: string;
   waterRatePerUnit?: number;
   electricRatePerUnit?: number;
-  prices: Array<{ contractTypeCode: string; price: number }>;
+  prices: Array<{ contractTypeId: number; price: number }>;
+  advanceRentMonths: number;
+  depositMonths: number;
   layout: Array<{ code: string; value: string }>;
   facilities: Array<{ code: string }>;
   nearbyOther?: string;
@@ -89,8 +97,9 @@ export interface MobileCreateListingWizardBodyProps {
   onSubmitListing?: (data: CreateRoomWizardSubmitData) => void | Promise<void>;
   searchPlaces?: (query: string) => Promise<PlaceSuggestion[]>;
   getPlaceDetails?: (placeId: string) => Promise<PlaceDetails>;
-  listPropertyOwners?: () => Promise<PropertyOwnerOption[]>;
+  listContacts?: () => Promise<ContactOption[]>;
   listPropertyTypes?: () => Promise<PropertyTypeOption[]>;
+  listContractTypes?: () => Promise<ContractTypeOption[]>;
 }
 
 function nativeElevation(level: 1 | 2 | 3) {
@@ -105,13 +114,30 @@ function interpolate(template: string, vars: Record<string, string | number>) {
   );
 }
 
+function formatBaht(value: number) {
+  return Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function monthChipLabel(months: number, noneLabel: string, monthsTemplate: string) {
+  if (months === 0) return noneLabel;
+  return interpolate(monthsTemplate, { months });
+}
+
 function digitsOnly(value: string) {
   return value.replace(/\D/g, '');
 }
 
 export const MobileCreateListingWizardBody: React.FC<
   MobileCreateListingWizardBodyProps
-> = ({ config, onSubmitListing, searchPlaces, getPlaceDetails, listPropertyOwners, listPropertyTypes }) => {
+> = ({
+  config,
+  onSubmitListing,
+  searchPlaces,
+  getPlaceDetails,
+  listContacts,
+  listPropertyTypes,
+  listContractTypes,
+}) => {
   const { t } = useLocale();
   const cr = t.agent.createRoom;
   const themeColor = tokens.colors.roles[config.actorRole];
@@ -139,13 +165,15 @@ export const MobileCreateListingWizardBody: React.FC<
   const placesSeq = useRef(0);
   const searchPlacesRef = useRef(searchPlaces);
   const getPlaceDetailsRef = useRef(getPlaceDetails);
-  const listPropertyOwnersRef = useRef(listPropertyOwners);
+  const listContactsRef = useRef(listContacts);
   const listPropertyTypesRef = useRef(listPropertyTypes);
+  const listContractTypesRef = useRef(listContractTypes);
   const formScrollRef = useRef<ScrollView>(null);
   searchPlacesRef.current = searchPlaces;
   getPlaceDetailsRef.current = getPlaceDetails;
-  listPropertyOwnersRef.current = listPropertyOwners;
+  listContactsRef.current = listContacts;
   listPropertyTypesRef.current = listPropertyTypes;
+  listContractTypesRef.current = listContractTypes;
   const [listingTitle, setListingTitle] = useState('');
   const [roomId, setRoomId] = useState('');
   const [floor, setFloor] = useState('');
@@ -155,8 +183,13 @@ export const MobileCreateListingWizardBody: React.FC<
   const [bathroom, setBathroom] = useState('1');
   const [sizeSqm, setSizeSqm] = useState('');
 
-  const [monthlyRent, setMonthlyRent] = useState('');
-  const [contractCodes, setContractCodes] = useState<string[]>(['monthly_12']);
+  const [rentsByTypeId, setRentsByTypeId] = useState<Record<string, string>>({});
+  const [selectedContractTypeIds, setSelectedContractTypeIds] = useState<number[]>([]);
+  const [contractTypes, setContractTypes] = useState<ContractTypeOption[]>([]);
+  const [contractTypesLoading, setContractTypesLoading] = useState(false);
+  const [contractTypesError, setContractTypesError] = useState('');
+  const [advanceRentMonths, setAdvanceRentMonths] = useState(1);
+  const [depositMonths, setDepositMonths] = useState(2);
   const [waterRate, setWaterRate] = useState('');
   const [electricRate, setElectricRate] = useState('');
 
@@ -167,7 +200,7 @@ export const MobileCreateListingWizardBody: React.FC<
   const [ownerPhone, setOwnerPhone] = useState('');
   const [ownerOther, setOwnerOther] = useState('');
   const [ownerMode, setOwnerMode] = useState<'pick' | 'create'>(
-    listPropertyOwners ? 'pick' : 'create',
+    listContacts ? 'pick' : 'create',
   );
   const [ownerQuery, setOwnerQuery] = useState('');
   const [owners, setOwners] = useState<PropertyOwnerOption[]>([]);
@@ -203,6 +236,11 @@ export const MobileCreateListingWizardBody: React.FC<
       photos: cr.steps.photos,
       ownerPick: cr.ownerPickRequired,
     };
+    if (key.startsWith('rent_')) {
+      const id = Number(key.slice(5));
+      const opt = contractTypes.find((item) => item.id === id);
+      if (opt) return interpolate(cr.monthlyRentForTerm, { months: opt.termMonths });
+    }
     return labels[key] ?? key;
   };
 
@@ -240,15 +278,46 @@ export const MobileCreateListingWizardBody: React.FC<
     });
   };
 
-  const toggleContract = (code: string) => {
-    setContractCodes((prev) => {
-      const next = prev.includes(code)
-        ? prev.filter((c) => c !== code)
-        : [...prev, code];
-      return CONTRACT_OPTIONS.map((opt) => opt.code).filter((c) => next.includes(c));
+  const toggleContract = (id: number) => {
+    setSelectedContractTypeIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+      return contractTypes.map((opt) => opt.id).filter((item) => next.includes(item));
     });
     clearFieldError('contractTerm');
+    clearFieldError(`rent_${id}`);
   };
+
+  const renderMonthChips = (
+    options: readonly number[],
+    value: number,
+    onChange: (months: number) => void,
+  ) => (
+    <View style={styles.termRow}>
+      {options.map((months) => {
+        const selected = value === months;
+        return (
+          <Pressable
+            key={months}
+            onPress={() => onChange(months)}
+            android_ripple={{ color: '#00000022' }}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            style={({ pressed }) => [
+              styles.termChip,
+              selected ? { backgroundColor: themeColor, borderColor: themeColor } : null,
+              pressed ? { opacity: 0.88 } : null,
+            ]}
+          >
+            <Text
+              style={[styles.termChipText, selected ? styles.termChipTextSelected : null]}
+            >
+              {monthChipLabel(months, cr.monthsNone, cr.contractMonths)}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
 
   useEffect(() => {
     if (!searchPlacesRef.current) return;
@@ -298,7 +367,7 @@ export const MobileCreateListingWizardBody: React.FC<
 
   useEffect(() => {
     if (step !== 5) return;
-    const loadOwners = listPropertyOwnersRef.current;
+    const loadOwners = listContactsRef.current;
     if (!loadOwners) return;
     let cancelled = false;
     setOwnersLoading(true);
@@ -346,6 +415,38 @@ export const MobileCreateListingWizardBody: React.FC<
       cancelled = true;
     };
   }, [cr.propertyTypeLoadError]);
+
+  useEffect(() => {
+    const loadTypes = listContractTypesRef.current;
+    if (!loadTypes) return;
+    let cancelled = false;
+    setContractTypesLoading(true);
+    loadTypes()
+      .then((rows) => {
+        if (cancelled) return;
+        setContractTypes(rows);
+        setContractTypesError('');
+        setSelectedContractTypeIds((prev) => {
+          const valid = prev.filter((id) => rows.some((item) => item.id === id));
+          if (valid.length) return valid;
+          const twelve = rows.find((item) => item.termMonths === 12) ?? rows[0];
+          return twelve ? [twelve.id] : [];
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setContractTypes([]);
+        setContractTypesError(
+          err instanceof Error && err.message ? err.message : cr.contractTermRequired,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setContractTypesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cr.contractTermRequired]);
 
   const selectedOwner = useMemo(
     () => owners.find((item) => item.id === selectedOwnerId) ?? null,
@@ -435,8 +536,14 @@ export const MobileCreateListingWizardBody: React.FC<
     }
 
     if (current === 3) {
-      if (!monthlyRent.trim() || Number(monthlyRent) <= 0) nextErrors.monthlyRent = cr.required;
-      if (contractCodes.length === 0) nextErrors.contractTerm = cr.contractTermRequired;
+      if (selectedContractTypeIds.length === 0) nextErrors.contractTerm = cr.contractTermRequired;
+      for (const opt of contractTypes) {
+        if (!selectedContractTypeIds.includes(opt.id)) continue;
+        const value = rentsByTypeId[String(opt.id)] ?? '';
+        if (!value.trim() || Number(value) <= 0) {
+          nextErrors[`rent_${opt.id}`] = cr.required;
+        }
+      }
     }
 
     if (current === 4 && photoCount < 5) {
@@ -446,7 +553,7 @@ export const MobileCreateListingWizardBody: React.FC<
     if (current === 5) {
       if (selectedOwnerId) {
         // existing owner is enough
-      } else if (ownerMode === 'pick' && listPropertyOwnersRef.current) {
+      } else if (ownerMode === 'pick' && listContactsRef.current) {
         nextErrors.ownerPick = cr.ownerPickRequired;
       } else {
         if (!ownerName.trim()) nextErrors.ownerName = cr.required;
@@ -485,10 +592,10 @@ export const MobileCreateListingWizardBody: React.FC<
     if (floor.trim()) layout.push({ code: 'floor', value: floor.trim() });
     if (building.trim()) layout.push({ code: 'building', value: building.trim() });
 
-    const ownerPayload = selectedOwnerId
-      ? { propertyOwnerId: selectedOwnerId }
+    const contactPayload = selectedOwnerId
+      ? { contactId: selectedOwnerId }
       : {
-          propertyOwner: {
+          contact: {
             name: ownerName.trim(),
             phone: ownerPhone.trim(),
             note: ownerOther.trim() || undefined,
@@ -508,16 +615,18 @@ export const MobileCreateListingWizardBody: React.FC<
         latitude: latitude ?? undefined,
         longitude: longitude ?? undefined,
       },
-      ...ownerPayload,
+      ...contactPayload,
       listingTitle: listingTitle.trim(),
       roomId: roomId.trim() || undefined,
       waterRatePerUnit: waterRate.trim() && Number(waterRate) > 0 ? Number(waterRate) : undefined,
       electricRatePerUnit:
         electricRate.trim() && Number(electricRate) > 0 ? Number(electricRate) : undefined,
-      prices: contractCodes.map((code) => ({
-        contractTypeCode: code,
-        price: Number(monthlyRent),
+      prices: selectedContractTypeIds.map((id) => ({
+        contractTypeId: id,
+        price: Number(rentsByTypeId[String(id)]),
       })),
+      advanceRentMonths,
+      depositMonths,
       layout,
       facilities: [],
       medias,
@@ -646,7 +755,9 @@ export const MobileCreateListingWizardBody: React.FC<
                         styles.typeChip,
                         selected
                           ? { backgroundColor: themeColor, borderColor: themeColor }
-                          : null,
+                          : errors.propertyType
+                            ? { borderColor: tokens.colors.error }
+                            : null,
                         pressed ? { opacity: 0.88 } : null,
                       ]}
                     >
@@ -866,13 +977,22 @@ export const MobileCreateListingWizardBody: React.FC<
                 </Text>
                 <Text style={styles.hint}>{cr.contractTermHint}</Text>
               </View>
+              {contractTypesLoading ? (
+                <View style={styles.suggestStatus}>
+                  <ActivityIndicator size="small" color={themeColor} />
+                  <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
+                </View>
+              ) : null}
+              {contractTypesError ? (
+                <Text style={styles.errorText}>{contractTypesError}</Text>
+              ) : null}
               <View style={styles.termRow}>
-                {CONTRACT_OPTIONS.map((opt) => {
-                  const selected = contractCodes.includes(opt.code);
+                {contractTypes.map((opt) => {
+                  const selected = selectedContractTypeIds.includes(opt.id);
                   return (
                     <Pressable
-                      key={opt.code}
-                      onPress={() => toggleContract(opt.code)}
+                      key={opt.id}
+                      onPress={() => toggleContract(opt.id)}
                       android_ripple={{ color: '#00000022' }}
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
@@ -890,7 +1010,7 @@ export const MobileCreateListingWizardBody: React.FC<
                           selected ? styles.termChipTextSelected : null,
                         ]}
                       >
-                        {interpolate(cr.contractMonths, { months: opt.months })}
+                        {interpolate(cr.contractMonths, { months: opt.termMonths })}
                       </Text>
                     </Pressable>
                   );
@@ -899,18 +1019,68 @@ export const MobileCreateListingWizardBody: React.FC<
               {errors.contractTerm ? (
                 <Text style={styles.errorText}>{errors.contractTerm}</Text>
               ) : null}
-              <MobileInput
-                label={cr.monthlyRent}
-                placeholder="12000"
-                keyboardType="numeric"
-                value={monthlyRent}
-                required
-                onChangeText={(v) => {
-                  setMonthlyRent(v);
-                  clearFieldError('monthlyRent');
-                }}
-                error={errors.monthlyRent}
-              />
+              {contractTypes
+                .filter((opt) => selectedContractTypeIds.includes(opt.id))
+                .map((opt) => (
+                  <MobileInput
+                    key={opt.id}
+                    label={interpolate(cr.monthlyRentForTerm, { months: opt.termMonths })}
+                    placeholder="12000"
+                    keyboardType="numeric"
+                    value={rentsByTypeId[String(opt.id)] ?? ''}
+                    required
+                    onChangeText={(v) => {
+                      setRentsByTypeId((prev) => ({ ...prev, [String(opt.id)]: v }));
+                      clearFieldError(`rent_${opt.id}`);
+                    }}
+                    error={errors[`rent_${opt.id}`]}
+                  />
+                ))}
+              <View>
+                <Text style={styles.fieldLabel}>
+                  {cr.advanceRent}
+                  <Text style={styles.requiredMark}> *</Text>
+                </Text>
+                <Text style={styles.hint}>{cr.advanceRentHint}</Text>
+              </View>
+              {renderMonthChips(ADVANCE_MONTH_OPTIONS, advanceRentMonths, setAdvanceRentMonths)}
+              <View>
+                <Text style={styles.fieldLabel}>
+                  {cr.deposit}
+                  <Text style={styles.requiredMark}> *</Text>
+                </Text>
+                <Text style={styles.hint}>{cr.depositHint}</Text>
+              </View>
+              {renderMonthChips(DEPOSIT_MONTH_OPTIONS, depositMonths, setDepositMonths)}
+              {contractTypes.some(
+                (opt) =>
+                  selectedContractTypeIds.includes(opt.id) &&
+                  Number(rentsByTypeId[String(opt.id)]) > 0,
+              ) ? (
+                <View style={styles.moveInBox}>
+                  <Text style={styles.moveInLabel}>{cr.moveInSummaryLabel}</Text>
+                  {contractTypes
+                    .filter(
+                      (opt) =>
+                        selectedContractTypeIds.includes(opt.id) &&
+                        Number(rentsByTypeId[String(opt.id)]) > 0,
+                    )
+                    .map((opt) => (
+                      <Text
+                        key={opt.id}
+                        style={[styles.moveInValue, { color: themeColor }]}
+                      >
+                        {interpolate(cr.moveInTermLine, {
+                          term: opt.termMonths,
+                          amount: formatBaht(
+                            Number(rentsByTypeId[String(opt.id)]) *
+                              (advanceRentMonths + depositMonths),
+                          ),
+                        })}
+                      </Text>
+                    ))}
+                </View>
+              ) : null}
             </>
           )}
 
@@ -951,7 +1121,7 @@ export const MobileCreateListingWizardBody: React.FC<
 
           {step === 5 && (
             <>
-              {ownerMode === 'pick' && listPropertyOwners ? (
+              {ownerMode === 'pick' && listContacts ? (
                 <>
                   {selectedOwner ? (
                     <View style={[styles.ownerCard, nativeElevation(1)]}>
@@ -1058,7 +1228,7 @@ export const MobileCreateListingWizardBody: React.FC<
                 </>
               ) : (
                 <>
-                  {listPropertyOwners ? (
+                  {listContacts ? (
                     <MobileButton
                       variant="outline"
                       onPress={() => {
@@ -1261,14 +1431,14 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexBasis: 96,
     minWidth: 96,
-    minHeight: 48,
+    minHeight: 40,
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: tokens.colors.border,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 8,
     paddingHorizontal: 10,
   },
   typeChipText: {
@@ -1289,14 +1459,14 @@ const styles = StyleSheet.create({
   termChip: {
     flex: 1,
     minWidth: 0,
-    minHeight: 48,
+    minHeight: 40,
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: tokens.colors.border,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 8,
     paddingHorizontal: 6,
   },
   termChipText: {
@@ -1308,6 +1478,27 @@ const styles = StyleSheet.create({
   },
   termChipTextSelected: {
     color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  moveInBox: {
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 12,
+    backgroundColor: tokens.colors.background,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  moveInLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+  },
+  moveInValue: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 22,
     fontWeight: '700',
   },
   hint: {

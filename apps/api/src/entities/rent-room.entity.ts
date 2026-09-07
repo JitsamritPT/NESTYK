@@ -14,6 +14,8 @@ import { RoomMediaEntity } from './room-media.entity';
 import { RentRoomDocumentEntity } from './rent-room-document.entity';
 import { RoomLayoutValueEntity } from './room-layout-value.entity';
 import { RoomFacilityEntity } from './room-facility.entity';
+import { RentRoomContactEntity } from './rent-room-contact.entity';
+import { RentRoomPriceEntity } from './rent-room-price.entity';
 
 export type RentRoomVisibility = 'private' | 'published';
 
@@ -54,6 +56,12 @@ export class RentRoomEntity extends SerialTimestampEntity {
 
   @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
   electric_rate_per_unit: string | null;
+
+  @Column({ type: 'smallint', default: 1 })
+  advance_rent_months: number;
+
+  @Column({ type: 'smallint', default: 2 })
+  deposit_months: number;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   owner_identity_number: string | null;
@@ -122,4 +130,10 @@ export class RentRoomEntity extends SerialTimestampEntity {
 
   @OneToMany(() => RoomFacilityEntity, (f) => f.rent_room)
   facilities: RoomFacilityEntity[];
+
+  @OneToMany(() => RentRoomContactEntity, (c) => c.rent_room)
+  room_contacts: RentRoomContactEntity[];
+
+  @OneToMany(() => RentRoomPriceEntity, (p) => p.rent_room)
+  price_rows: RentRoomPriceEntity[];
 }

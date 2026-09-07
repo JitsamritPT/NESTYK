@@ -10,14 +10,24 @@ export type ListingsQuery = {
   visibility?: string;
 };
 
-function firstPrice(prices: unknown): { contractTypeCode: string; price: number } | null {
+function firstPrice(
+  prices: unknown,
+): { contractTypeId?: number; contractTypeCode: string; price: number } | null {
   if (!Array.isArray(prices) || !prices[0] || typeof prices[0] !== 'object') {
     return null;
   }
-  const row = prices[0] as { contractTypeCode?: string; price?: unknown };
+  const row = prices[0] as {
+    contractTypeId?: number;
+    contractTypeCode?: string;
+    price?: unknown;
+  };
   const price = Number(row.price);
   if (!row.contractTypeCode || !Number.isFinite(price)) return null;
-  return { contractTypeCode: row.contractTypeCode, price };
+  return {
+    contractTypeId: row.contractTypeId,
+    contractTypeCode: row.contractTypeCode,
+    price,
+  };
 }
 
 @Injectable()
@@ -34,7 +44,8 @@ export class AgentListingsService {
     const countQb = this.roomsRepo
       .createQueryBuilder('room')
       .leftJoin('room.property', 'property')
-      .leftJoin('room.property_owner', 'propertyOwner')
+      .leftJoin('room.room_contacts', 'roomContact')
+      .leftJoin('roomContact.contact', 'contact')
       .where('room.is_scout_room = TRUE')
       .andWhere('room.created_by_user_id = :agentId', { agentId });
 
@@ -45,7 +56,7 @@ export class AgentListingsService {
     const search = query.q?.trim();
     if (search) {
       countQb.andWhere(
-        '(property.name ILIKE :q OR room.listing_title ILIKE :q OR propertyOwner.name ILIKE :q OR propertyOwner.phone ILIKE :q)',
+        '(property.name ILIKE :q OR room.listing_title ILIKE :q OR contact.name ILIKE :q OR contact.phone ILIKE :q)',
         { q: `%${search}%` },
       );
     }
@@ -70,6 +81,7 @@ export class AgentListingsService {
       relations: {
         property: true,
         property_owner: true,
+        room_contacts: { contact: true },
         medias: true,
         room_status: true,
       },
@@ -81,6 +93,10 @@ export class AgentListingsService {
       items: rows.map((room) => {
         const medias = [...(room.medias ?? [])].sort((a, b) => a.sort_order - b.sort_order);
         const cover = medias.find((m) => m.is_cover) ?? medias[0];
+        const primaryContact =
+          (room.room_contacts ?? []).find((link) => link.is_primary)?.contact ??
+          room.room_contacts?.[0]?.contact ??
+          null;
         const priceRow = firstPrice(room.prices);
         return {
           id: room.id,
@@ -94,6 +110,13 @@ export class AgentListingsService {
                 name: room.property.name,
                 district: room.property.district,
                 province: room.property.province,
+              }
+            : null,
+          contact: primaryContact
+            ? {
+                id: primaryContact.id,
+                name: primaryContact.name,
+                phone: primaryContact.phone,
               }
             : null,
           propertyOwner: room.property_owner

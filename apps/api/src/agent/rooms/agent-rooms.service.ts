@@ -4,16 +4,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { AuthRequestUser } from '../../auth/decorators/current-user.decorator';
 import { PropertyEntity } from '../../entities/property.entity';
 import { MasterPropertyTypeEntity } from '../../entities/master-property-type.entity';
 import { PropertyOwnerEntity } from '../../entities/property-owner.entity';
+import { ContactEntity } from '../../entities/contact.entity';
+import { MasterContractTypeEntity } from '../../entities/master-contract-type.entity';
 import { MasterRoomStatusEntity } from '../../entities/master-room-status.entity';
 import { MasterLayoutEntity } from '../../entities/master-layout.entity';
 import { MasterFacilityEntity } from '../../entities/master-facility.entity';
 import { MasterFacilitiesGroupEntity } from '../../entities/master-facilities-group.entity';
 import { RentRoomEntity } from '../../entities/rent-room.entity';
+import { RentRoomContactEntity } from '../../entities/rent-room-contact.entity';
+import { RentRoomPriceEntity } from '../../entities/rent-room-price.entity';
 import { RoomMediaEntity } from '../../entities/room-media.entity';
 import { RoomLayoutValueEntity } from '../../entities/room-layout-value.entity';
 import { RoomFacilityEntity } from '../../entities/room-facility.entity';
@@ -29,8 +33,12 @@ export class AgentRoomsService {
     private readonly propertiesRepo: Repository<PropertyEntity>,
     @InjectRepository(PropertyOwnerEntity)
     private readonly propertyOwnersRepo: Repository<PropertyOwnerEntity>,
+    @InjectRepository(ContactEntity)
+    private readonly contactsRepo: Repository<ContactEntity>,
     @InjectRepository(MasterPropertyTypeEntity)
     private readonly propertyTypesRepo: Repository<MasterPropertyTypeEntity>,
+    @InjectRepository(MasterContractTypeEntity)
+    private readonly contractTypesRepo: Repository<MasterContractTypeEntity>,
     @InjectRepository(MasterFacilityEntity)
     private readonly facilitiesRepo: Repository<MasterFacilityEntity>,
   ) {}
@@ -56,6 +64,53 @@ export class AgentRoomsService {
   async listPropertyTypes() {
     const rows = await this.propertyTypesRepo.find({ order: { id: 'ASC' } });
     return rows.map((row) => ({ id: row.id, code: row.code }));
+  }
+
+  async listContractTypes() {
+    const rows = await this.contractTypesRepo.find({
+      where: { is_active: true },
+      order: { sort_order: 'ASC', id: 'ASC' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      termMonths: row.term_months,
+    }));
+  }
+
+  async listContacts(agentId: number) {
+    const rows: Array<{
+      id: number;
+      name: string;
+      phone: string;
+      email: string | null;
+      note: string | null;
+      roomCount: number | string;
+    }> = await this.dataSource.query(
+      `
+      SELECT
+        c.id,
+        c.name,
+        c.phone,
+        c.email,
+        c.note,
+        COUNT(rrc.id)::int AS "roomCount"
+      FROM contacts c
+      LEFT JOIN rent_room_contacts rrc ON rrc.contact_id = c.id
+      WHERE c.created_by_user_id = $1
+      GROUP BY c.id
+      ORDER BY c.name ASC
+      `,
+      [agentId],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      email: row.email,
+      note: row.note,
+      roomCount: Number(row.roomCount) || 0,
+    }));
   }
 
   async listPropertyOwners(agentId: number) {
@@ -97,8 +152,9 @@ export class AgentRoomsService {
     this.validateCreateBody(body);
 
     return this.dataSource.transaction(async (manager) => {
-      const propertyOwnerId = await this.resolvePropertyOwnerId(manager, agent.id, body);
+      const contactId = await this.resolveContactId(manager, agent.id, body);
       const propertyId = await this.resolvePropertyId(manager, body);
+      const priceRows = await this.resolvePrices(manager, body.prices ?? []);
 
       const status = await manager.findOne(MasterRoomStatusEntity, {
         where: { code: 'available' },
@@ -112,7 +168,11 @@ export class AgentRoomsService {
         listing_title: body.listingTitle!.trim(),
         listing_description: body.listingDescription ?? null,
         available_from_date: body.availableFromDate ?? new Date().toISOString().slice(0, 10),
-        prices: body.prices as unknown as Record<string, unknown>[],
+        prices: priceRows.map((row) => ({
+          contractTypeId: row.contractType.id,
+          contractTypeCode: row.contractType.code,
+          price: row.price,
+        })),
         custom_facilities: body.customFacilities ?? [],
         latitude: body.latitude != null ? String(body.latitude) : null,
         longitude: body.longitude != null ? String(body.longitude) : null,
@@ -126,16 +186,37 @@ export class AgentRoomsService {
           body.electricRatePerUnit != null && Number(body.electricRatePerUnit) > 0
             ? String(body.electricRatePerUnit)
             : null,
+        advance_rent_months: body.advanceRentMonths ?? 1,
+        deposit_months: body.depositMonths ?? 2,
         is_scout_room: true,
         visibility: body.visibility!,
         created_by_user_id: agent.id,
-        property_owner_id: propertyOwnerId,
+        property_owner_id: null,
         owner_id: null,
         properties_id: propertyId,
         room_status_id: status.id,
         view_count: 0,
       });
       const saved = await manager.save(room);
+
+      for (const row of priceRows) {
+        await manager.save(
+          manager.create(RentRoomPriceEntity, {
+            rent_room_id: saved.id,
+            contract_type_id: row.contractType.id,
+            price: String(row.price),
+          }),
+        );
+      }
+
+      await manager.save(
+        manager.create(RentRoomContactEntity, {
+          rent_room_id: saved.id,
+          contact_id: contactId,
+          is_primary: true,
+          role_code: 'contact',
+        }),
+      );
 
       if (body.layout?.length) {
         const allowedLayout = new Set(['bedroom', 'bathroom', 'room_size', 'floor', 'building']);
@@ -236,7 +317,7 @@ export class AgentRoomsService {
       return {
         id: saved.id,
         propertyId,
-        propertyOwnerId,
+        contactId,
         isScoutRoom: true,
         visibility: saved.visibility,
       };
@@ -247,11 +328,11 @@ export class AgentRoomsService {
     if (!body.visibility || !['private', 'published'].includes(body.visibility)) {
       throw new BadRequestException('visibility must be private or published');
     }
-    if (!body.propertyOwnerId && !body.propertyOwner?.name?.trim()) {
-      throw new BadRequestException('propertyOwnerId or propertyOwner{name,phone} required');
+    if (!body.contactId && !body.contact?.name?.trim()) {
+      throw new BadRequestException('contactId or contact{name,phone} required');
     }
-    if (!body.propertyOwnerId && !body.propertyOwner?.phone?.trim()) {
-      throw new BadRequestException('propertyOwner.phone required');
+    if (!body.contactId && !body.contact?.phone?.trim()) {
+      throw new BadRequestException('contact.phone required');
     }
     if (!body.propertyId && !body.property?.address?.trim()) {
       throw new BadRequestException('propertyId or property{address,district,province} required');
@@ -271,8 +352,8 @@ export class AgentRoomsService {
       throw new BadRequestException('prices must have at least 1 row');
     }
     for (const p of body.prices) {
-      if (!p.contractTypeCode || !(p.price > 0)) {
-        throw new BadRequestException('each price needs contractTypeCode and price > 0');
+      if (!p.contractTypeId || !(p.price > 0)) {
+        throw new BadRequestException('each price needs contractTypeId and price > 0');
       }
     }
     if (body.waterRatePerUnit != null && !(Number(body.waterRatePerUnit) > 0)) {
@@ -280,6 +361,21 @@ export class AgentRoomsService {
     }
     if (body.electricRatePerUnit != null && !(Number(body.electricRatePerUnit) > 0)) {
       throw new BadRequestException('electricRatePerUnit must be > 0 when provided');
+    }
+    if (body.advanceRentMonths != null && !Number.isInteger(body.advanceRentMonths)) {
+      throw new BadRequestException('advanceRentMonths must be an integer');
+    }
+    if (
+      body.advanceRentMonths != null &&
+      (body.advanceRentMonths < 0 || body.advanceRentMonths > 12)
+    ) {
+      throw new BadRequestException('advanceRentMonths must be between 0 and 12');
+    }
+    if (body.depositMonths != null && !Number.isInteger(body.depositMonths)) {
+      throw new BadRequestException('depositMonths must be an integer');
+    }
+    if (body.depositMonths != null && (body.depositMonths < 0 || body.depositMonths > 12)) {
+      throw new BadRequestException('depositMonths must be between 0 and 12');
     }
     const roomMedias = (body.medias ?? []).filter((m) => (m.category ?? 'room') === 'room');
     if (roomMedias.length < 5) {
@@ -292,43 +388,61 @@ export class AgentRoomsService {
     }
   }
 
-  private async resolvePropertyOwnerId(
+  private async resolveContactId(
     manager: DataSource['manager'],
     agentId: number,
     body: CreateRoomBody,
   ): Promise<number> {
-    if (body.propertyOwnerId) {
-      const existing = await manager.findOne(PropertyOwnerEntity, {
-        where: { id: body.propertyOwnerId, created_by_user_id: agentId },
+    if (body.contactId) {
+      const existing = await manager.findOne(ContactEntity, {
+        where: { id: body.contactId, created_by_user_id: agentId },
       });
       if (!existing) {
-        throw new NotFoundException('propertyOwnerId not found for this agent');
+        throw new NotFoundException('contactId not found for this agent');
       }
       return existing.id;
     }
 
-    const phone = body.propertyOwner!.phone.trim();
-    const reused = await manager.findOne(PropertyOwnerEntity, {
+    const phone = body.contact!.phone.trim();
+    const reused = await manager.findOne(ContactEntity, {
       where: { created_by_user_id: agentId, phone },
     });
     if (reused) {
-      reused.name = body.propertyOwner!.name.trim();
-      reused.email = body.propertyOwner!.email ?? reused.email;
-      reused.note = body.propertyOwner!.note ?? reused.note;
+      reused.name = body.contact!.name.trim();
+      reused.email = body.contact!.email ?? reused.email;
+      reused.note = body.contact!.note ?? reused.note;
       await manager.save(reused);
       return reused.id;
     }
 
     const created = await manager.save(
-      manager.create(PropertyOwnerEntity, {
-        name: body.propertyOwner!.name.trim(),
+      manager.create(ContactEntity, {
+        name: body.contact!.name.trim(),
         phone,
-        email: body.propertyOwner!.email ?? null,
-        note: body.propertyOwner!.note ?? null,
+        email: body.contact!.email ?? null,
+        note: body.contact!.note ?? null,
         created_by_user_id: agentId,
       }),
     );
     return created.id;
+  }
+
+  private async resolvePrices(
+    manager: DataSource['manager'],
+    prices: Array<{ contractTypeId: number; price: number }>,
+  ) {
+    const ids = [...new Set(prices.map((row) => row.contractTypeId))];
+    const types = await manager.find(MasterContractTypeEntity, {
+      where: { id: In(ids), is_active: true },
+    });
+    const byId = new Map(types.map((row) => [row.id, row]));
+    return prices.map((row) => {
+      const contractType = byId.get(row.contractTypeId);
+      if (!contractType) {
+        throw new BadRequestException(`Unknown contractTypeId: ${row.contractTypeId}`);
+      }
+      return { contractType, price: row.price };
+    });
   }
 
   private async resolvePropertyId(

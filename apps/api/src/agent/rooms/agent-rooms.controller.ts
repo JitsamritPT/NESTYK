@@ -30,6 +30,16 @@ export class AgentRoomsController {
     return this.roomsService.listPropertyTypes();
   }
 
+  @Get('contract-types')
+  listContractTypes() {
+    return this.roomsService.listContractTypes();
+  }
+
+  @Get('contacts')
+  listContacts(@CurrentUser() user: AuthRequestUser) {
+    return this.roomsService.listContacts(user.id);
+  }
+
   @Get('property-owners')
   listPropertyOwners(@CurrentUser() user: AuthRequestUser) {
     return this.roomsService.listPropertyOwners(user.id);

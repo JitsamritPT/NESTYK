@@ -14,12 +14,17 @@ export type AgentListingCard = {
     district: string;
     province: string;
   } | null;
+  contact?: {
+    id: number;
+    name: string;
+    phone: string;
+  } | null;
   propertyOwner: {
     id: number;
     name: string;
     phone: string;
   } | null;
-  prices: Array<{ contractTypeCode: string; price: number }>;
+  prices: Array<{ contractTypeId?: number; contractTypeCode: string; price: number }>;
   coverMediaUrl: string | null;
 };
 
@@ -33,7 +38,7 @@ export type AgentListingsResponse = {
 export type CreateRoomResponse = {
   id: number;
   propertyId: number;
-  propertyOwnerId: number;
+  contactId: number;
   isScoutRoom: true;
   visibility: 'private' | 'published';
 };
@@ -50,7 +55,7 @@ export async function fetchAgentPropertyTypes(): Promise<
   return apiGet('/agent/rooms/property-types');
 }
 
-export async function fetchAgentPropertyOwners(): Promise<
+export async function fetchAgentContacts(): Promise<
   Array<{
     id: number;
     name: string;
@@ -60,7 +65,14 @@ export async function fetchAgentPropertyOwners(): Promise<
   }>
 > {
   await ensureAgentSession();
-  return apiGet('/agent/rooms/property-owners');
+  return apiGet('/agent/rooms/contacts');
+}
+
+export async function fetchAgentContractTypes(): Promise<
+  Array<{ id: number; code: string; termMonths: number }>
+> {
+  await ensureAgentSession();
+  return apiGet('/agent/rooms/contract-types');
 }
 
 export async function createAgentScoutRoom(

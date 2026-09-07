@@ -21,6 +21,23 @@ INSERT INTO master_property_types (code)
 VALUES ('condo'), ('apartment'), ('house')
 ON CONFLICT (code) DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS master_contract_types (
+  id          SERIAL PRIMARY KEY,
+  code        VARCHAR(64) NOT NULL UNIQUE,
+  term_months SMALLINT    NOT NULL,
+  sort_order  INT         NOT NULL DEFAULT 0,
+  is_active   BOOLEAN     NOT NULL DEFAULT TRUE
+);
+
+INSERT INTO master_contract_types (code, term_months, sort_order)
+VALUES
+  ('monthly_12', 12, 1),
+  ('monthly_6', 6, 2),
+  ('monthly_3', 3, 3)
+ON CONFLICT (code) DO UPDATE SET
+  term_months = EXCLUDED.term_months,
+  sort_order = EXCLUDED.sort_order;
+
 CREATE TABLE IF NOT EXISTS properties (
   id                SERIAL PRIMARY KEY,
   name              VARCHAR(255) NOT NULL,
@@ -52,6 +69,20 @@ CREATE TABLE IF NOT EXISTS property_owners (
 
 CREATE INDEX IF NOT EXISTS idx_property_owners_created_by_user_id
   ON property_owners (created_by_user_id);
+
+CREATE TABLE IF NOT EXISTS contacts (
+  id                 SERIAL PRIMARY KEY,
+  name               VARCHAR(255) NOT NULL,
+  phone              VARCHAR(50)  NOT NULL,
+  email              VARCHAR(255) NULL,
+  note               VARCHAR(500) NULL,
+  created_by_user_id INT          NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_contacts_agent_phone UNIQUE (created_by_user_id, phone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_created_by_user_id
+  ON contacts (created_by_user_id);
 
 CREATE TABLE IF NOT EXISTS master_room_statuses (
   id   SERIAL PRIMARY KEY,
@@ -105,6 +136,8 @@ CREATE TABLE IF NOT EXISTS rent_rooms (
   nearby_places          JSONB        NOT NULL DEFAULT '[]'::jsonb,
   water_rate_per_unit    DECIMAL(12, 2) NULL,
   electric_rate_per_unit DECIMAL(12, 2) NULL,
+  advance_rent_months    SMALLINT     NOT NULL DEFAULT 1,
+  deposit_months         SMALLINT     NOT NULL DEFAULT 2,
   owner_identity_number  VARCHAR(100) NULL,
   owner_bank_name        VARCHAR(120) NULL,
   owner_bank_account     VARCHAR(30)  NULL,
@@ -124,7 +157,6 @@ CREATE TABLE IF NOT EXISTS rent_rooms (
   CONSTRAINT chk_rent_rooms_scout_invariant CHECK (
     NOT is_scout_room OR (
       created_by_user_id IS NOT NULL
-      AND property_owner_id IS NOT NULL
       AND owner_id IS NULL
       AND visibility IN ('private', 'published')
     )
@@ -135,7 +167,11 @@ CREATE TABLE IF NOT EXISTS rent_rooms (
       AND property_owner_id IS NULL
       AND visibility IS NULL
     )
-  )
+  ),
+  CONSTRAINT chk_rent_rooms_advance_rent_months
+    CHECK (advance_rent_months BETWEEN 0 AND 12),
+  CONSTRAINT chk_rent_rooms_deposit_months
+    CHECK (deposit_months BETWEEN 0 AND 12)
 );
 
 CREATE INDEX IF NOT EXISTS idx_rent_rooms_is_scout_room ON rent_rooms (is_scout_room);
@@ -195,10 +231,98 @@ CREATE TABLE IF NOT EXISTS rent_room_documents (
 
 CREATE INDEX IF NOT EXISTS idx_rent_room_documents_rent_id ON rent_room_documents (rent_id);
 
+CREATE TABLE IF NOT EXISTS rent_room_prices (
+  id               SERIAL PRIMARY KEY,
+  rent_room_id     INT           NOT NULL REFERENCES rent_rooms(id) ON DELETE CASCADE,
+  contract_type_id INT           NOT NULL REFERENCES master_contract_types(id) ON DELETE RESTRICT,
+  price            DECIMAL(12, 2) NOT NULL,
+  UNIQUE (rent_room_id, contract_type_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rent_room_prices_rent_room_id
+  ON rent_room_prices (rent_room_id);
+
+CREATE TABLE IF NOT EXISTS rent_room_contacts (
+  id           SERIAL PRIMARY KEY,
+  rent_room_id INT          NOT NULL REFERENCES rent_rooms(id) ON DELETE CASCADE,
+  contact_id   INT          NOT NULL REFERENCES contacts(id) ON DELETE RESTRICT,
+  is_primary   BOOLEAN      NOT NULL DEFAULT TRUE,
+  role_code    VARCHAR(64)  NOT NULL DEFAULT 'contact',
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  UNIQUE (rent_room_id, contact_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rent_room_contacts_contact_id
+  ON rent_room_contacts (contact_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_rent_room_contacts_one_primary
+  ON rent_room_contacts (rent_room_id)
+  WHERE is_primary = TRUE;
+
 -- Upgrade existing properties table (CREATE TABLE IF NOT EXISTS does not alter columns)
 ALTER TABLE properties
   ADD COLUMN IF NOT EXISTS property_type_id INT NULL REFERENCES master_property_types(id) ON DELETE RESTRICT;
 ALTER TABLE properties DROP COLUMN IF EXISTS category_code;
 CREATE INDEX IF NOT EXISTS idx_properties_property_type_id ON properties (property_type_id);
+
+ALTER TABLE rent_rooms
+  ADD COLUMN IF NOT EXISTS advance_rent_months SMALLINT NOT NULL DEFAULT 1;
+ALTER TABLE rent_rooms
+  ADD COLUMN IF NOT EXISTS deposit_months SMALLINT NOT NULL DEFAULT 2;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_rent_rooms_advance_rent_months'
+  ) THEN
+    ALTER TABLE rent_rooms
+      ADD CONSTRAINT chk_rent_rooms_advance_rent_months
+      CHECK (advance_rent_months BETWEEN 0 AND 12);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_rent_rooms_deposit_months'
+  ) THEN
+    ALTER TABLE rent_rooms
+      ADD CONSTRAINT chk_rent_rooms_deposit_months
+      CHECK (deposit_months BETWEEN 0 AND 12);
+  END IF;
+END $$;
+
+ALTER TABLE rent_rooms DROP CONSTRAINT IF EXISTS chk_rent_rooms_scout_invariant;
+ALTER TABLE rent_rooms ADD CONSTRAINT chk_rent_rooms_scout_invariant CHECK (
+  NOT is_scout_room OR (
+    created_by_user_id IS NOT NULL
+    AND owner_id IS NULL
+    AND visibility IN ('private', 'published')
+  )
+);
+
+INSERT INTO contacts (name, phone, email, note, created_by_user_id, created_at)
+SELECT po.name, po.phone, po.email, po.note, po.created_by_user_id, po.created_at
+FROM property_owners po
+ON CONFLICT (created_by_user_id, phone) DO NOTHING;
+
+INSERT INTO rent_room_contacts (rent_room_id, contact_id, is_primary, role_code)
+SELECT r.id, c.id, TRUE, 'contact'
+FROM rent_rooms r
+INNER JOIN property_owners po ON po.id = r.property_owner_id
+INNER JOIN contacts c
+  ON c.created_by_user_id = po.created_by_user_id
+ AND c.phone = po.phone
+WHERE r.is_scout_room = TRUE
+  AND r.property_owner_id IS NOT NULL
+ON CONFLICT (rent_room_id, contact_id) DO NOTHING;
+
+UPDATE rent_rooms
+SET property_owner_id = NULL
+WHERE is_scout_room = TRUE
+  AND property_owner_id IS NOT NULL;
+
+INSERT INTO rent_room_prices (rent_room_id, contract_type_id, price)
+SELECT r.id, mct.id, (elem->>'price')::numeric
+FROM rent_rooms r
+CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.prices, '[]'::jsonb)) elem
+INNER JOIN master_contract_types mct ON mct.code = elem->>'contractTypeCode'
+WHERE (elem->>'price') IS NOT NULL
+ON CONFLICT (rent_room_id, contract_type_id) DO NOTHING;
 
 COMMIT;

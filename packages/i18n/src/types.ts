@@ -228,6 +228,15 @@ export interface TranslationSchema {
       contractTermHint: string;
       contractMonths: string;
       contractTermRequired: string;
+      monthlyRentForTerm: string;
+      monthsNone: string;
+      advanceRent: string;
+      advanceRentHint: string;
+      deposit: string;
+      depositHint: string;
+      moveInSummaryLabel: string;
+      moveInSummary: string;
+      moveInTermLine: string;
       waterRate: string;
       electricRate: string;
       availableFrom: string;

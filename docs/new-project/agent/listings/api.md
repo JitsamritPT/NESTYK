@@ -131,9 +131,9 @@ AND created_by_user_id = :currentAgentId
 ```json
 {
   "listingTitle": "ห้องใหม่ ราคาพิเศษ",
-  "prices": [{ "contractTypeCode": "monthly_12", "price": 11500 }],
+  "prices": [{ "contractTypeId": 1, "price": 11500 }],
   "visibility": "private",
-  "propertyOwnerId": 12
+  "contactId": 12
 }
 ```
 
@@ -149,7 +149,9 @@ AND created_by_user_id = :currentAgentId
 |--------|------|----------|
 | `POST` | `/agent/rooms` | สร้างห้องใหม่ |
 | `POST` | `/agent/rooms/media/upload` | อัปโหลดรูปใน wizard |
-| `GET` | `/agent/rooms/property-owners` | picker เจ้าของห้อง |
+| `GET` | `/agent/rooms/contacts` | picker ผู้ติดต่อ |
+| `GET` | `/agent/rooms/contract-types` | master ประเภทสัญญา |
+| `GET` | `/agent/rooms/property-owners` | เจ้าของห้องจริง — ใช้ตอนทำสัญญา |
 | `GET` | `/agent/rooms/properties` | reuse โครงการ |
 
 ---

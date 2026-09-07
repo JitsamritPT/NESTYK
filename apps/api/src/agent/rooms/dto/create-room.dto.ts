@@ -34,7 +34,7 @@ export type CreateRoomPropertyInput = {
   longitude?: number;
 };
 
-export type CreateRoomPropertyOwnerInput = {
+export type CreateRoomContactInput = {
   name: string;
   phone: string;
   email?: string;
@@ -42,14 +42,14 @@ export type CreateRoomPropertyOwnerInput = {
 };
 
 export type CreateRoomPriceInput = {
-  contractTypeCode: string;
+  contractTypeId: number;
   price: number;
 };
 
 export type CreateRoomBody = {
   visibility?: 'private' | 'published';
-  propertyOwnerId?: number;
-  propertyOwner?: CreateRoomPropertyOwnerInput;
+  contactId?: number;
+  contact?: CreateRoomContactInput;
   propertyId?: number;
   property?: CreateRoomPropertyInput;
   listingTitle?: string;
@@ -59,6 +59,8 @@ export type CreateRoomBody = {
   waterRatePerUnit?: number;
   electricRatePerUnit?: number;
   prices?: CreateRoomPriceInput[];
+  advanceRentMonths?: number;
+  depositMonths?: number;
   latitude?: number;
   longitude?: number;
   nearbyOther?: string;

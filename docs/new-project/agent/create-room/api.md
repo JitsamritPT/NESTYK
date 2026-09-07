@@ -11,13 +11,13 @@ Base: `/agent/rooms` · role `agent`
 ```json
 {
   "visibility": "private",
-  "propertyOwnerId": 12,
+  "contactId": 12,
   "propertyId": 5,
   "listingTitle": "ห้องสวย วิวดี",
   "availableFromDate": "2026-04-01",
   "waterRatePerUnit": 18,
   "electricRatePerUnit": 7,
-  "prices": [{ "contractTypeCode": "monthly_12", "price": 12000 }],
+  "prices": [{ "contractTypeId": 1, "price": 12000 }],
   "layout": [{ "code": "bedroom", "value": "1" }],
   "facilities": [],
   "medias": [{ "mediaUrl": "https://...", "category": "room", "isCover": true }]
@@ -41,6 +41,7 @@ Base: `/agent/rooms` · role `agent`
 {
   "id": 42,
   "propertyId": 5,
+  "contactId": 12,
   "isScoutRoom": true,
   "visibility": "private"
 }
@@ -48,9 +49,9 @@ Base: `/agent/rooms` · role `agent`
 
 **Required validation (Agent)**
 
-- `propertyOwnerId` หรือ `propertyOwner{name,phone}`
+- `contactId` หรือ `contact{name,phone}` — ผู้ติดต่อของห้อง (ไม่ใช่เจ้าของห้องจริง)
 - `propertyId` หรือ `property{address,district,province,propertyTypeId}`
-- `listingTitle`, `prices`, water/electric > 0
+- `listingTitle`, `prices` (`contractTypeId` จาก `GET /agent/rooms/contract-types`), water/electric > 0
 - `medias` ≥ 5 รูป `room`
 - `visibility` ∈ `private|published`
 
@@ -71,5 +72,7 @@ Deprecated path — ใช้ **`PATCH /agent/listings/:id/visibility`** แท�
 | `PATCH` | `/agent/listings/:id/visibility` | สลับ private/published |
 | `GET` | `/agent/rooms/properties` | reuse โครงการ (wizard) |
 | `GET` | `/agent/rooms/property-types` | master ประเภทอสังหา `{ id, code }` |
-| `GET` | `/agent/rooms/property-owners` | picker เจ้าของห้อง |
+| `GET` | `/agent/rooms/contract-types` | master ประเภทสัญญา `{ id, code, termMonths }` |
+| `GET` | `/agent/rooms/contacts` | picker ผู้ติดต่อ |
+| `GET` | `/agent/rooms/property-owners` | เจ้าของห้องจริง — ใช้ตอนทำสัญญา |
 | `POST` | `/agent/rooms/media/upload` | อัปโหลดรูป |

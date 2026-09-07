@@ -32,7 +32,12 @@ export type AgentListingCard = {
     name: string;
     phone: string;
   } | null;
-  prices: Array<{ contractTypeCode: string; price: number }>;
+  contact?: {
+    id: number;
+    name: string;
+    phone: string;
+  } | null;
+  prices: Array<{ contractTypeId?: number; contractTypeCode: string; price: number }>;
   coverMediaUrl: string | null;
 };
 
