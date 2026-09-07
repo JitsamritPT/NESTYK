@@ -82,7 +82,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
   const { theme, themeMode, setThemeMode, isDark } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
-  const panelWidth = Math.min(windowWidth * 0.82, 320);
+  const panelWidth = Math.max(windowWidth - PANEL_MARGIN * 2, 0);
   const slideDistance = panelWidth + PANEL_MARGIN;
 
   const roleColor = tokens.colors.roles[activeRole] || tokens.colors.brand[500];
