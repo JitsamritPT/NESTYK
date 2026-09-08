@@ -44,7 +44,7 @@ module.exports = {
   web: {
     favicon: './assets/favicon.png',
   },
-  plugins: ['expo-router', 'expo-localization'],
+  plugins: ['expo-router', 'expo-localization', ['expo-image-picker', { photosPermission: 'Allow NESTYK to select room photos for your listing.', cameraPermission: false, microphonePermission: false }]],
   extra: {
     apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000/api/v1',
     baseUrl: process.env.EXPO_PUBLIC_BASE_URL || 'http://localhost:3000',

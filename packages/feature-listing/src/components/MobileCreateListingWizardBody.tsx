@@ -10,6 +10,7 @@ import {
   ScrollView,
   Modal,
   BackHandler,
+  Image,
 } from 'react-native';
 import { useLocale } from '@nestyk/i18n';
 import {
@@ -66,6 +67,8 @@ export type ListingSourceCode = 'co_agent' | 'owner';
 
 export type CreateRoomWizardSubmitData = {
   visibility: 'private' | 'published';
+  listingDescription?: string;
+  availableFromDate?: string;
   property: {
     name: string;
     address: string;
@@ -107,7 +110,15 @@ export type CreateRoomWizardSubmitData = {
   longitude?: number;
 };
 
+export type RoomPhoto = { uri: string; name: string; mimeType: string; file?: Blob; mediaUrl?: string };
+
 export interface MobileCreateListingWizardBodyProps {
+  initialData?: CreateRoomWizardSubmitData;
+  title?: string;
+  submitLabel?: string;
+  onSubmittingChange?: (busy: boolean) => void;
+  pickPhotos?: (limit: number) => Promise<RoomPhoto[]>;
+  uploadPhoto?: (photo: RoomPhoto) => Promise<string>;
   config: ListingEngineConfig;
   onSubmitListing?: (data: CreateRoomWizardSubmitData) => void | Promise<void>;
   searchPlaces?: (query: string) => Promise<PlaceSuggestion[]>;
@@ -151,6 +162,12 @@ export const MobileCreateListingWizardBody: React.FC<
   MobileCreateListingWizardBodyProps
 > = ({
   config,
+  initialData,
+  title,
+  submitLabel,
+  onSubmittingChange,
+  pickPhotos,
+  uploadPhoto,
   onSubmitListing,
   searchPlaces,
   getPlaceDetails,
@@ -221,7 +238,11 @@ export const MobileCreateListingWizardBody: React.FC<
   const [waterRate, setWaterRate] = useState('');
   const [electricRate, setElectricRate] = useState('');
 
-  const [photoCount, setPhotoCount] = useState(0);
+  const [photos, setPhotos] = useState<RoomPhoto[]>([]);
+  const photoCount = photos.length;
+  const [pickingPhotos, setPickingPhotos] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const submitLock = useRef(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [ownerName, setOwnerName] = useState('');
@@ -236,6 +257,30 @@ export const MobileCreateListingWizardBody: React.FC<
   const [ownersError, setOwnersError] = useState('');
   const [selectedOwnerId, setSelectedOwnerId] = useState<number | null>(null);
   const [requiredPrompt, setRequiredPrompt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialData) return;
+    const p = initialData.property;
+    setPropertyName(p.name); setAddress(p.address); setDistrict(p.district); setProvince(p.province);
+    setSubdistrict(p.subdistrict ?? ''); setPostalCode(p.postalCode ?? ''); setPropertyTypeId(p.propertyTypeId);
+    setLatitude(initialData.latitude ?? p.latitude ?? null); setLongitude(initialData.longitude ?? p.longitude ?? null);
+    setListingTitle(initialData.listingTitle); setListingSourceCode(initialData.listingSourceCode);
+    setRoomId(initialData.roomId ?? ''); setRoomTypeId(initialData.roomTypeId ?? null);
+    const values = Object.fromEntries(initialData.layout.map((item) => [item.code, item.value]));
+    setBedroom(values.bedroom ?? ''); setBathroom(values.bathroom ?? ''); setSizeSqm(values.room_size ?? '');
+    setFloor(values.floor ?? ''); setBuilding(values.building ?? '');
+    setRentsByTypeId(Object.fromEntries(initialData.prices.map((price) => [String(price.contractTypeId), String(price.price)])));
+    setSelectedContractTypeIds(initialData.prices.map((price) => price.contractTypeId));
+    setAdvanceRentMonths(initialData.advanceRentMonths); setDepositMonths(initialData.depositMonths);
+    setWaterRate(initialData.waterRatePerUnit == null ? '' : String(initialData.waterRatePerUnit));
+    setElectricRate(initialData.electricRatePerUnit == null ? '' : String(initialData.electricRatePerUnit));
+    setPhotos(initialData.medias.map((media) => ({ uri: media.mediaUrl, mediaUrl: media.mediaUrl, name: 'room.jpg', mimeType: 'image/jpeg' })));
+    setSelectedOwnerId(initialData.contactId ?? null);
+    setOwnerMode(initialData.contactId ? 'pick' : 'create');
+    setOwnerName(initialData.contact?.name ?? ''); setOwnerPhone(initialData.contact?.phone ?? '');
+    setOwnerOther(initialData.contact?.note ?? '');
+    skipPlacesSearch.current = true;
+  }, [initialData]);
 
   const stepTitle = useMemo(() => {
     const keys = [
@@ -645,9 +690,9 @@ export const MobileCreateListingWizardBody: React.FC<
     setStep((s) => Math.max(1, s - 1));
   };
 
-  const buildPayload = (): CreateRoomWizardSubmitData => {
-    const medias = Array.from({ length: photoCount }, (_, i) => ({
-      mediaUrl: `https://cdn.nestyk.local/mock/room-${i + 1}.jpg`,
+  const buildPayload = (uploadedPhotos: RoomPhoto[]): CreateRoomWizardSubmitData => {
+    const medias = uploadedPhotos.map((photo, i) => ({
+      mediaUrl: photo.mediaUrl!,
       category: 'room' as const,
       isCover: i === 0,
       sortOrder: i,
@@ -672,7 +717,8 @@ export const MobileCreateListingWizardBody: React.FC<
         };
 
     return {
-      visibility: 'private' as const,
+      ...initialData,
+      visibility: initialData?.visibility ?? 'private' as const,
       property: {
         name: propertyName.trim(),
         address: address.trim(),
@@ -711,31 +757,42 @@ export const MobileCreateListingWizardBody: React.FC<
   const handleSubmit = async () => {
     if (!listingSourceCode) return;
     const invalid = validateStep(TOTAL_STEPS);
-    if (invalid || submitting) {
+    if (invalid || submitLock.current) {
       if (invalid) setRequiredPrompt(requiredMessage(invalid));
       return;
     }
-    const payload = buildPayload();
-    if (onSubmitListing) {
+    if (onSubmitListing && uploadPhoto) {
+      submitLock.current = true;
       setSubmitting(true);
+      onSubmittingChange?.(true);
+      setUploadProgress(0);
       try {
-        await onSubmitListing(payload);
+        const uploadedPhotos: RoomPhoto[] = [];
+        for (const photo of photos) {
+          const mediaUrl = photo.mediaUrl ?? await uploadPhoto(photo);
+          uploadedPhotos.push({ ...photo, mediaUrl });
+          setPhotos((current) => current.map((item) => item.uri === photo.uri ? { ...item, mediaUrl } : item));
+          setUploadProgress(uploadedPhotos.length);
+        }
+        await onSubmitListing(buildPayload(uploadedPhotos));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         Alert.alert(cr.saveError, message);
       } finally {
+        submitLock.current = false;
         setSubmitting(false);
+        onSubmittingChange?.(false);
       }
       return;
     }
-    Alert.alert(cr.successTitle, cr.successBody);
+    Alert.alert(cr.saveError, cr.photoUnavailable);
   };
 
   const renderNav = (opts?: { isLast?: boolean }) => (
     <View style={styles.btnRow}>
-      {step > 1 || listingSourceCode ? (
+      {step > 1 || (listingSourceCode && !initialData) ? (
         <View style={{ flex: 1 }}>
-          <MobileButton variant="outline" onPress={goBack}>
+          <MobileButton variant="outline" onPress={goBack} disabled={submitting}>
             {cr.back}
           </MobileButton>
         </View>
@@ -745,10 +802,10 @@ export const MobileCreateListingWizardBody: React.FC<
       <View style={{ flex: 1 }}>
         {opts?.isLast ? (
           <MobileButton onPress={handleSubmit} isLoading={submitting} disabled={submitting}>
-            {cr.submit}
+            {submitLabel ?? cr.submit}
           </MobileButton>
         ) : (
-          <MobileButton onPress={goNext}>{cr.next}</MobileButton>
+          <MobileButton onPress={goNext} disabled={pickingPhotos}>{cr.next}</MobileButton>
         )}
       </View>
     </View>
@@ -770,7 +827,7 @@ export const MobileCreateListingWizardBody: React.FC<
       <View style={styles.chrome}>
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>{cr.title}</Text>
+            <Text style={styles.title}>{title ?? cr.title}</Text>
           </View>
           {pickingSource ? null : (
             <MobileBadge
@@ -859,7 +916,7 @@ export const MobileCreateListingWizardBody: React.FC<
               {propertyTypesError ? (
                 <Text style={styles.errorText}>{propertyTypesError}</Text>
               ) : null}
-              <View style={styles.typeRow}>
+              <View style={styles.propertyTypeRow}>
                 {propertyTypes.map((opt) => {
                   const selected = propertyTypeId === opt.id;
                   const labels = t.masters.propertyTypes as Record<string, string>;
@@ -874,7 +931,7 @@ export const MobileCreateListingWizardBody: React.FC<
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                       style={({ pressed }) => [
-                        styles.typeChip,
+                        styles.propertyTypeChip,
                         selected
                           ? { backgroundColor: themeColor, borderColor: themeColor }
                           : errors.propertyType
@@ -886,7 +943,7 @@ export const MobileCreateListingWizardBody: React.FC<
                       <Text
                         numberOfLines={1}
                         style={[
-                          styles.typeChipText,
+                          styles.propertyTypeChipText,
                           selected ? styles.typeChipTextSelected : null,
                         ]}
                       >
@@ -1025,7 +1082,7 @@ export const MobileCreateListingWizardBody: React.FC<
               {roomTypesError ? (
                 <Text style={styles.errorText}>{roomTypesError}</Text>
               ) : null}
-              <View style={styles.typeRow}>
+              <View style={styles.roomTypeRow}>
                 {roomTypes.map((opt) => {
                   const selected = roomTypeId === opt.id;
                   const labels = t.masters.roomTypes as Record<string, string>;
@@ -1044,7 +1101,7 @@ export const MobileCreateListingWizardBody: React.FC<
                       accessibilityRole="button"
                       accessibilityState={{ selected }}
                       style={({ pressed }) => [
-                        styles.typeChip,
+                        styles.roomTypeChip,
                         selected
                           ? { backgroundColor: themeColor, borderColor: themeColor }
                           : errors.roomType
@@ -1056,7 +1113,7 @@ export const MobileCreateListingWizardBody: React.FC<
                       <Text
                         numberOfLines={1}
                         style={[
-                          styles.typeChipText,
+                          styles.roomTypeChipText,
                           selected ? styles.typeChipTextSelected : null,
                         ]}
                       >
@@ -1294,26 +1351,40 @@ export const MobileCreateListingWizardBody: React.FC<
                 <Text style={styles.errorText}>{errors.photos}</Text>
               ) : null}
               <View style={styles.photoGrid}>
-                {Array.from({ length: photoCount }, (_, i) => (
-                  <View
-                    key={`photo-${i}`}
-                    style={[styles.photoSlot, { borderColor: themeColor }]}
-                  >
-                    <Text style={styles.photoSlotLabel}>{i + 1}</Text>
+                {photos.map((photo, i) => (
+                  <View key={photo.uri} style={{ width: 100, gap: 4 }}>
+                    <Pressable disabled={submitting} accessibilityLabel={cr.setCover} onPress={() => setPhotos((current) => [photo, ...current.filter((item) => item.uri !== photo.uri)])}>
+                      <Image source={{ uri: photo.uri, cache: 'reload' }} style={{ width: 100, height: 100, borderRadius: 8 }} />
+                      <Text style={styles.hint}>{i === 0 ? cr.coverPhoto : cr.setCover}</Text>
+                    </Pressable>
+                    <MobileButton variant="outline" disabled={submitting} onPress={() => setPhotos((current) => current.filter((item) => item.uri !== photo.uri))}>{cr.removePhoto}</MobileButton>
                   </View>
                 ))}
               </View>
               <MobileButton
                 variant="outline"
-                onPress={() => {
-                  setPhotoCount((c) => Math.min(12, c + 1));
-                  clearFieldError('photos');
+                disabled={submitting || pickingPhotos || photoCount >= 12 || !pickPhotos}
+                isLoading={pickingPhotos}
+                onPress={async () => {
+                  if (!pickPhotos || pickingPhotos) return;
+                  setPickingPhotos(true);
+                  try {
+                    const selected = await pickPhotos(12 - photoCount);
+                    setPhotos((current) => [...current, ...selected.filter((photo, index) => !current.some((item) => item.uri === photo.uri) && selected.findIndex((item) => item.uri === photo.uri) === index)].slice(0, 12));
+                    clearFieldError('photos');
+                  } catch (err) {
+                    Alert.alert(cr.saveError, err instanceof Error ? err.message : String(err));
+                  } finally {
+                    setPickingPhotos(false);
+                  }
                 }}
               >
                 {cr.addPhoto}
               </MobileButton>
             </>
           )}
+
+          {submitting && <Text accessibilityLiveRegion="polite" style={styles.hint}>{interpolate(cr.uploadProgress, { count: uploadProgress, total: photoCount })}</Text>}
 
           {step === 5 && (
             <>
@@ -1692,6 +1763,56 @@ const styles = StyleSheet.create({
   typeChipTextSelected: {
     color: '#FFFFFF',
     fontWeight: '700',
+  },
+  roomTypeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  roomTypeChip: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    flexShrink: 0,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: tokens.colors.border,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  roomTypeChipText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  propertyTypeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  propertyTypeChip: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 52,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: tokens.colors.border,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  propertyTypeChipText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
   },
   termRow: {
     flexDirection: 'row',

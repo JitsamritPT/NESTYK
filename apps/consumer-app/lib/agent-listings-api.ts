@@ -1,5 +1,5 @@
 import { CreateRoomWizardSubmitData } from '@nestyk/feature-listing';
-import { apiGet, apiPost } from './api';
+import { apiGet, apiPost, apiRequest } from './api';
 import { ensureAgentSession } from './agent-session';
 
 export type AgentListingCard = {
@@ -45,9 +45,12 @@ export type CreateRoomResponse = {
   visibility: 'private' | 'published';
 };
 
-export async function fetchMyAgentListings(): Promise<AgentListingsResponse> {
+export async function fetchMyAgentListings(query: { page?: number; q?: string; visibility?: string } = {}): Promise<AgentListingsResponse> {
   await ensureAgentSession();
-  return apiGet<AgentListingsResponse>('/agent/listings');
+  const params = new URLSearchParams({ page: String(query.page ?? 1), limit: '20' });
+  if (query.q) params.set('q', query.q);
+  if (query.visibility) params.set('visibility', query.visibility);
+  return apiGet<AgentListingsResponse>(`/agent/listings?${params}`);
 }
 
 export async function fetchAgentPropertyTypes(): Promise<
@@ -90,4 +93,15 @@ export async function createAgentScoutRoom(
   await ensureAgentSession();
   const { isScoutRoom: _scout, ...body } = data;
   return apiPost<CreateRoomResponse>('/agent/rooms', body);
+}
+
+export async function fetchAgentRoom(id: number): Promise<import('@nestyk/feature-listing').AgentRoomDetail> {
+  await ensureAgentSession();
+  return apiGet(`/agent/listings/${id}`);
+}
+
+export async function updateAgentRoom(id: number, data: CreateRoomWizardSubmitData): Promise<CreateRoomResponse> {
+  await ensureAgentSession();
+  const { isScoutRoom: _scout, ...body } = data;
+  return apiRequest(`/agent/rooms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }

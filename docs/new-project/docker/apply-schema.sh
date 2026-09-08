@@ -11,6 +11,9 @@ FILES=(
   "docs/new-project/roles/schema.sql"
   "docs/new-project/agent/create-room/schema.sql"
   "docs/new-project/agent/leads/schema.sql"
+  "docs/new-project/agent/leads/migrations/20260908-room-seeker-preferences.sql"
+  "docs/new-project/agent/leads/migrations/20260908-lead-profile.sql"
+  "docs/new-project/agent/leads/migrations/20260908-master-visa-types.sql"
   "docs/new-project/agent/contracts/schema.sql"
 )
 

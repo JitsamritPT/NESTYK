@@ -6,6 +6,7 @@ import {
   Image,
   ActivityIndicator,
   ScrollView,
+  Pressable,
 } from 'react-native';
 import { useLocale } from '@nestyk/i18n';
 import {
@@ -47,6 +48,8 @@ export interface MobileAgentListingsBodyProps {
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  onRoomPress?: (id: number) => void;
+  filtered?: boolean;
   onCreatePress?: () => void;
 }
 
@@ -63,13 +66,15 @@ function interpolate(template: string, vars: Record<string, string | number>) {
 }
 
 function formatPrice(items: AgentListingCard['prices'], template: string): string | null {
-  const price = items[0]?.price;
+  const price = items.length ? Math.min(...items.map((item) => item.price)) : null;
   if (price == null) return null;
   return interpolate(template, { price: price.toLocaleString() });
 }
 
 function Cover({ uri, fallback }: { uri: string | null; fallback: string }) {
   const [failed, setFailed] = React.useState(false);
+  const source = React.useMemo(() => uri ? { uri } : undefined, [uri]);
+  React.useEffect(() => setFailed(false), [uri]);
   if (!uri || failed) {
     return (
       <View style={[styles.cover, styles.coverFallback]}>
@@ -77,7 +82,7 @@ function Cover({ uri, fallback }: { uri: string | null; fallback: string }) {
       </View>
     );
   }
-  return <Image source={{ uri }} style={styles.cover} onError={() => setFailed(true)} />;
+  return <Image source={source} resizeMode="cover" style={styles.cover} onError={() => setFailed(true)} />;
 }
 
 export const MobileAgentListingsBody: React.FC<MobileAgentListingsBodyProps> = ({
@@ -85,6 +90,8 @@ export const MobileAgentListingsBody: React.FC<MobileAgentListingsBodyProps> = (
   loading = false,
   error = null,
   onRetry,
+  onRoomPress,
+  filtered,
   onCreatePress,
 }) => {
   const { t } = useLocale();
@@ -103,7 +110,7 @@ export const MobileAgentListingsBody: React.FC<MobileAgentListingsBodyProps> = (
   if (error) {
     return (
       <View style={styles.centered}>
-        <Text style={[styles.emptyTitle, { color: theme.text }]}>{copy.loadError}</Text>
+        <Text style={[styles.emptyTitle, { color: theme.textHeading }]}>{copy.loadError}</Text>
         <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>{error}</Text>
         {onRetry ? (
           <View style={styles.ctaWrap}>
@@ -117,8 +124,8 @@ export const MobileAgentListingsBody: React.FC<MobileAgentListingsBodyProps> = (
   if (!items.length) {
     return (
       <View style={styles.centered}>
-        <Text style={[styles.emptyTitle, { color: theme.text }]}>{copy.emptyTitle}</Text>
-        <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>{copy.emptyBody}</Text>
+        <Text style={[styles.emptyTitle, { color: theme.textHeading }]}>{filtered ? copy.noMatches : copy.emptyTitle}</Text>
+        <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>{filtered ? copy.search : copy.emptyBody}</Text>
         {onCreatePress ? (
           <View style={styles.ctaWrap}>
             <MobileButton onPress={onCreatePress}>{copy.emptyCta}</MobileButton>
@@ -143,25 +150,24 @@ export const MobileAgentListingsBody: React.FC<MobileAgentListingsBodyProps> = (
         const visibilityLabel =
           item.visibility === 'published' ? cr.visibilityPublished : cr.visibilityPrivate;
         return (
-          <View
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${copy.viewRoom}: ${item.listingTitle || item.property?.name || item.id}`}
+            onPress={() => onRoomPress?.(item.id)}
             key={item.id}
-            style={[
+            style={({ pressed }) => [
               styles.card,
               nativeElevation(1),
-              { backgroundColor: theme.surface, borderColor: theme.border },
+              { backgroundColor: theme.surface, borderColor: theme.border, opacity: pressed ? 0.86 : 1 },
             ]}
           >
-            <Cover
-              uri={item.coverMediaUrl}
-              fallback={item.property?.name?.slice(0, 1) ?? 'R'}
-            />
             <View style={styles.cardBody}>
-              <View style={styles.titleRow}>
-                <Text style={[styles.title, { color: theme.text }]} numberOfLines={2}>
-                  {item.listingTitle || item.property?.name || `#${item.id}`}
-                </Text>
+              <View style={styles.badgeRow}>
                 <MobileBadge role="agent" label={visibilityLabel} />
               </View>
+                <Text style={[styles.title, { color: theme.textHeading }]} numberOfLines={2}>
+                  {item.listingTitle || item.property?.name || `#${item.id}`}
+                </Text>
               {item.property?.name ? (
                 <Text style={[styles.sub, { color: theme.textSecondary }]} numberOfLines={1}>
                   {item.property.name}
@@ -172,11 +178,21 @@ export const MobileAgentListingsBody: React.FC<MobileAgentListingsBodyProps> = (
                   {location}
                 </Text>
               ) : null}
-              {priceLabel ? (
-                <Text style={styles.price}>{priceLabel}</Text>
-              ) : null}
+              <View style={styles.cardBottom}>
+                {priceLabel ? <Text style={styles.price} numberOfLines={2}>{priceLabel}</Text> : null}
+                <View style={styles.footerRow}>
+                  <View style={styles.statusRow}>
+                    <View style={[styles.statusDot, { backgroundColor: item.roomStatusCode === 'available' ? '#16A34A' : theme.textSecondary }]} />
+                    <Text numberOfLines={1} style={[styles.status, { color: theme.textSecondary }]}>{copy[item.roomStatusCode as keyof typeof copy] || item.roomStatusCode || copy.notSpecified}</Text>
+                  </View>
+                  <Text style={styles.viewLink}>{copy.viewRoom} ›</Text>
+                </View>
+              </View>
             </View>
-          </View>
+            <View style={styles.imagePanel}>
+              <Cover uri={item.coverMediaUrl} fallback={item.property?.name?.slice(0, 1) ?? 'R'} />
+            </View>
+          </Pressable>
         );
       })}
     </ScrollView>
@@ -211,13 +227,24 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   card: {
-    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 12,
+    minHeight: 192,
+    borderRadius: 18,
     borderWidth: 1,
     overflow: 'hidden',
   },
+  imagePanel: {
+    width: '36%',
+    maxWidth: 180,
+    minWidth: 100,
+    borderRadius: 12,
+    overflow: 'hidden',
+    alignSelf: 'stretch',
+  },
   cover: {
-    width: '100%',
-    height: 140,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#F1F5F9',
   },
   coverFallback: {
@@ -231,17 +258,18 @@ const styles = StyleSheet.create({
     color: tokens.colors.roles.agent,
   },
   cardBody: {
-    padding: 12,
+    flex: 1,
+    minWidth: 0,
     gap: 4,
   },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
+  badgeRow: { alignItems: 'flex-start', marginBottom: 2 },
+  cardBottom: { marginTop: 'auto', paddingTop: 8, gap: 7 },
+  footerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1, minWidth: 0 },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
+  status: { fontFamily: tokens.typography.native.body, fontSize: 11, lineHeight: 17, flexShrink: 1 },
+  viewLink: { fontFamily: tokens.typography.native.headingTh, fontSize: 12, lineHeight: 18, color: tokens.colors.roles.agent },
   title: {
-    flex: 1,
     fontFamily: tokens.typography.native.headingTh,
     fontSize: 15,
     lineHeight: 22,
@@ -258,6 +286,5 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: '500',
     color: tokens.colors.primary,
-    marginTop: 4,
   },
 });

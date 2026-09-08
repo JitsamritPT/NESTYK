@@ -7,7 +7,10 @@
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/main"
+    "start:prod": "node dist/main",
+    "test:room-photos": "node --test test/room-photos.test.cjs",
+    "test:agent-listings": "node --test test/agent-listings.test.cjs",
+    "test:agent-leads": "node --test test/agent-leads.test.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -20,6 +23,7 @@
     "pg": "^8.13.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.35.4",
     "typeorm": "^0.3.20"
   },
   "devDependencies": {

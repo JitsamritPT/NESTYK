@@ -1,3 +1,8 @@
+import { LeadEntity } from '../entities/lead.entity';
+import { AgentLeadsService } from './leads/agent-leads.service';
+import { AgentLeadsController } from './leads/agent-leads.controller';
+import { RoomPhotoStorageService } from './rooms/room-photo-storage.service';
+import { RoomImagesController } from './rooms/room-images.controller';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
@@ -7,6 +12,7 @@ import { PropertyOwnerEntity } from '../entities/property-owner.entity';
 import { ContactEntity } from '../entities/contact.entity';
 import { MasterContractTypeEntity } from '../entities/master-contract-type.entity';
 import { MasterRoomTypeEntity } from '../entities/master-room-type.entity';
+import { MasterVisaTypeEntity } from '../entities/master-visa-type.entity';
 import { MasterListingSourceEntity } from '../entities/master-listing-source.entity';
 import { MasterRoomStatusEntity } from '../entities/master-room-status.entity';
 import { MasterLayoutEntity } from '../entities/master-layout.entity';
@@ -30,12 +36,14 @@ import { AgentPlacesService } from './places/agent-places.service';
   imports: [
     AuthModule,
     TypeOrmModule.forFeature([
+      LeadEntity,
       PropertyEntity,
       MasterPropertyTypeEntity,
       PropertyOwnerEntity,
       ContactEntity,
       MasterContractTypeEntity,
       MasterRoomTypeEntity,
+      MasterVisaTypeEntity,
       MasterListingSourceEntity,
       MasterRoomStatusEntity,
       MasterLayoutEntity,
@@ -50,8 +58,8 @@ import { AgentPlacesService } from './places/agent-places.service';
       RentRoomDocumentEntity,
     ]),
   ],
-  controllers: [AgentRoomsController, AgentListingsController, AgentPlacesController],
-  providers: [AgentRoomsService, AgentListingsService, AgentPlacesService],
+  controllers: [AgentLeadsController, RoomImagesController, AgentRoomsController, AgentListingsController, AgentPlacesController],
+  providers: [AgentLeadsService, RoomPhotoStorageService, AgentRoomsService, AgentListingsService, AgentPlacesService],
   exports: [AgentRoomsService, AgentListingsService, AgentPlacesService],
 })
 export class AgentModule {}

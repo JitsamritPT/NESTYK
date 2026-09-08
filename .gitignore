@@ -109,3 +109,6 @@ coverage/
 ehthumbs.db
 Thumbs.db
 [Dd]esktop.ini
+
+# Local uploaded room images
+.data/

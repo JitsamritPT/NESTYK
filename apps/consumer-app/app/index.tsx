@@ -1,3 +1,5 @@
+import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
+import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
@@ -19,10 +21,10 @@ import {
   tokens,
 } from '@nestyk/ui/native';
 import { UserRole } from '@nestyk/types';
-import { MobileCreateListingWizardBody, MobileAgentListingsBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
-import type { AgentListingCard } from '@nestyk/feature-listing';
+import { MobileCreateListingWizardBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import { MobileServiceCatalogBody } from '@nestyk/feature-services';
-import { createAgentScoutRoom, fetchMyAgentListings, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
+import { createAgentScoutRoom, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
+import { pickRoomPhotos, uploadRoomPhoto } from '../lib/room-photos';
 import { searchPlaces, getPlaceDetails } from '../lib/places-api';
 import {
   MOCK_USER,
@@ -51,7 +53,7 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
     case 'createListing':
       return t.mobile.screens.createListing;
     case 'listingLead':
-      return t.mobile.screens.listingLead;
+      return t.agent.leads.title;
     case 'contact':
       return t.mobile.screens.contact;
     case 'calendar':
@@ -79,10 +81,6 @@ export default function AppHomeScreen() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
   const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
-  const [agentListings, setAgentListings] = useState<AgentListingCard[]>([]);
-  const [listingsLoading, setListingsLoading] = useState(false);
-  const [listingsError, setListingsError] = useState<string | null>(null);
-  const [listingsRefresh, setListingsRefresh] = useState(0);
 
   const unreadCount = [...notifications, ...messages].filter((n) => n.unread).length;
 
@@ -132,27 +130,6 @@ export default function AppHomeScreen() {
     return () => subscription.remove();
   }, []);
 
-  useEffect(() => {
-    if (activeRole !== 'agent' || activeTab !== 'listingRoom') return;
-    let cancelled = false;
-    setListingsLoading(true);
-    setListingsError(null);
-    fetchMyAgentListings()
-      .then((res) => {
-        if (!cancelled) setAgentListings(res.items);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setListingsError(err instanceof Error ? err.message : String(err));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setListingsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeRole, activeTab, listingsRefresh]);
 
   const handleTabPress = (tab: MobileAppTab) => {
     if (tab === 'menu') {
@@ -340,16 +317,7 @@ export default function AppHomeScreen() {
     }
 
     if (activeTab === 'listingLead') {
-      return (
-        <View style={styles.bodyContainer}>
-          <View style={[styles.card, cardStyle]}>
-            <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.listingLead}</Text>
-            <Text style={[styles.sectionDesc, secondaryText]}>
-              8 warm leads · 3 viewings this week · follow up today
-            </Text>
-          </View>
-        </View>
-      );
+      return <View style={styles.bodyContainer}><AgentLeadsScreen /></View>;
     }
 
     if (activeTab === 'contact') {
@@ -411,13 +379,7 @@ export default function AppHomeScreen() {
     if (activeTab === 'listingRoom') {
       return (
         <View style={styles.bodyContainer}>
-          <MobileAgentListingsBody
-            items={agentListings}
-            loading={listingsLoading}
-            error={listingsError}
-            onRetry={() => setListingsRefresh((n) => n + 1)}
-            onCreatePress={() => setActiveTab('createListing')}
-          />
+          <AgentRoomsScreen onCreate={() => setActiveTab('createListing')} />
         </View>
       );
     }
@@ -427,6 +389,8 @@ export default function AppHomeScreen() {
         <View style={[styles.bodyContainer, styles.wizardBody]}>
           <MobileCreateListingWizardBody
             config={defaultAgentListingConfig}
+            pickPhotos={pickRoomPhotos}
+            uploadPhoto={uploadRoomPhoto}
             searchPlaces={handleSearchPlaces}
             getPlaceDetails={handleGetPlaceDetails}
             listContacts={handleListContacts}
@@ -439,7 +403,6 @@ export default function AppHomeScreen() {
                 t.agent.createRoom.successTitle,
                 t.agent.createRoom.successBody,
               );
-              setListingsRefresh((n) => n + 1);
               setActiveTab('listingRoom');
             }}
           />

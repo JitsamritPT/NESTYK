@@ -1,3 +1,4 @@
+import { RoomPhotoStorageService } from './room-photo-storage.service';
 import {
   BadRequestException,
   Injectable,
@@ -29,6 +30,7 @@ import { CreateRoomBody } from './dto/create-room.dto';
 @Injectable()
 export class AgentRoomsService {
   constructor(
+    private readonly photos: RoomPhotoStorageService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     @InjectRepository(PropertyEntity)
@@ -164,12 +166,23 @@ export class AgentRoomsService {
     }));
   }
 
-  async createScoutRoom(agent: AuthRequestUser, body: CreateRoomBody) {
+  async createScoutRoom(agent: AuthRequestUser, body: CreateRoomBody, baseUrl: string, existingId?: number) {
     this.validateCreateBody(body);
 
     return this.dataSource.transaction(async (manager) => {
+      const existing = existingId == null ? null : await manager.findOne(RentRoomEntity, {
+        where: { id: existingId, created_by_user_id: agent.id, is_scout_room: true },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (existingId != null && !existing) throw new NotFoundException('Room not found');
+      const oldMedias = existing ? await manager.find(RoomMediaEntity, { where: { rent_id: existing.id } }) : [];
+      const oldUrls = new Set(oldMedias.map((m) => m.media_url));
+      if (new Set(body.medias!.map((m) => m.mediaUrl)).size !== body.medias!.length) {
+        throw new BadRequestException('Room photos must be different files');
+      }
+      await this.photos.validateRoomPhotos(agent.id, body.medias!.filter((m) => !oldUrls.has(m.mediaUrl)), baseUrl);
       const contactId = await this.resolveContactId(manager, agent.id, body);
-      const propertyId = await this.resolvePropertyId(manager, body);
+      const propertyId = await this.resolvePropertyForSave(manager, body, existing);
       const priceRows = await this.resolvePrices(manager, body.prices ?? []);
       const roomType = await this.resolveRoomType(manager, body.roomTypeId);
       const listingSource = await this.resolveListingSource(manager, body.listingSourceCode);
@@ -182,20 +195,21 @@ export class AgentRoomsService {
       }
 
       const room = manager.create(RentRoomEntity, {
+        ...(existing ? { id: existing.id } : {}),
         room_id: body.roomId ?? null,
         listing_title: body.listingTitle!.trim(),
-        listing_description: body.listingDescription ?? null,
-        available_from_date: body.availableFromDate ?? new Date().toISOString().slice(0, 10),
+        listing_description: body.listingDescription ?? existing?.listing_description ?? null,
+        available_from_date: body.availableFromDate ?? existing?.available_from_date ?? new Date().toISOString().slice(0, 10),
         prices: priceRows.map((row) => ({
           contractTypeId: row.contractType.id,
           contractTypeCode: row.contractType.code,
           price: row.price,
         })),
-        custom_facilities: body.customFacilities ?? [],
+        custom_facilities: body.customFacilities ?? existing?.custom_facilities ?? [],
         latitude: body.latitude != null ? String(body.latitude) : null,
         longitude: body.longitude != null ? String(body.longitude) : null,
-        nearby_other: body.nearbyOther ?? null,
-        nearby_places: body.nearbyPlaces ?? [],
+        nearby_other: body.nearbyOther ?? existing?.nearby_other ?? null,
+        nearby_places: body.nearbyPlaces ?? existing?.nearby_places ?? [],
         water_rate_per_unit:
           body.waterRatePerUnit != null && Number(body.waterRatePerUnit) > 0
             ? String(body.waterRatePerUnit)
@@ -214,10 +228,17 @@ export class AgentRoomsService {
         properties_id: propertyId,
         room_type_id: roomType.id,
         listing_source_id: listingSource.id,
-        room_status_id: status.id,
-        view_count: 0,
+        room_status_id: existing?.room_status_id ?? status.id,
+        view_count: existing?.view_count ?? 0,
       });
       const saved = await manager.save(room);
+      if (existing) {
+        await manager.delete(RentRoomPriceEntity, { rent_room_id: saved.id });
+        await manager.delete(RoomLayoutValueEntity, { rent_room_id: saved.id });
+        await manager.delete(RoomMediaEntity, { rent_id: saved.id });
+        await manager.update(RentRoomContactEntity, { rent_room_id: saved.id }, { is_primary: false });
+      }
+
 
       for (const row of priceRows) {
         await manager.save(
@@ -229,8 +250,12 @@ export class AgentRoomsService {
         );
       }
 
+      const contactLink = existing ? await manager.findOne(RentRoomContactEntity, {
+        where: { rent_room_id: saved.id, contact_id: contactId },
+      }) : null;
       await manager.save(
         manager.create(RentRoomContactEntity, {
+          ...(contactLink ? { id: contactLink.id } : {}),
           rent_room_id: saved.id,
           contact_id: contactId,
           is_primary: true,
@@ -262,7 +287,7 @@ export class AgentRoomsService {
         }
       }
 
-      if (body.facilities?.length) {
+      if (!existing && body.facilities?.length) {
         for (const item of body.facilities) {
           let facility = await manager.findOne(MasterFacilityEntity, {
             where: { code: item.code },
@@ -320,7 +345,7 @@ export class AgentRoomsService {
         );
       }
 
-      if (body.documents?.length) {
+      if (!existing && body.documents?.length) {
         for (let i = 0; i < body.documents.length; i++) {
           const d = body.documents[i];
           await manager.save(
@@ -412,6 +437,7 @@ export class AgentRoomsService {
     if (body.depositMonths != null && (body.depositMonths < 0 || body.depositMonths > 12)) {
       throw new BadRequestException('depositMonths must be between 0 and 12');
     }
+    if ((body.medias?.length ?? 0) > 12) throw new BadRequestException('At most 12 room photos allowed');
     const roomMedias = (body.medias ?? []).filter((m) => (m.category ?? 'room') === 'room');
     if (roomMedias.length < 5) {
       throw new BadRequestException('medias must include at least 5 items with category room');
@@ -510,6 +536,21 @@ export class AgentRoomsService {
       }
       return { contractType, price: row.price };
     });
+  }
+
+  private async resolvePropertyForSave(manager: DataSource['manager'], body: CreateRoomBody, existing: RentRoomEntity | null) {
+    if (existing && body.property && !body.propertyId) {
+      const current = await manager.findOne(PropertyEntity, { where: { id: existing.properties_id } });
+      const p = body.property;
+      if (current && current.name === (p.name?.trim() || p.address.trim().slice(0, 80)) &&
+        current.property_type_id === p.propertyTypeId && current.address === p.address.trim() &&
+        current.district === p.district.trim() && current.province === p.province.trim() &&
+        current.subdistrict === (p.subdistrict?.trim() || '-') && current.postal_code === (p.postalCode?.trim() || '-') &&
+        (current.latitude == null ? null : Number(current.latitude)) === (p.latitude ?? null) &&
+        (current.longitude == null ? null : Number(current.longitude)) === (p.longitude ?? null)) return current.id;
+      // Changed address gets its own property; never mutate a property shared by another room.
+    }
+    return this.resolvePropertyId(manager, body);
   }
 
   private async resolvePropertyId(

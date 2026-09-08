@@ -166,6 +166,51 @@ export interface TranslationSchema {
     requestMaintenance: string;
   };
   agent: {
+    leads: {
+      title: string;
+      create: string;
+      listing: string;
+      name: string;
+      phone: string;
+      nationality: string;
+      budgetMin: string;
+      budgetMax: string;
+      preferredLocation: string;
+      moveInPlan: string;
+      moveInHint: string;
+      hasPets: string;
+      occupation: string;
+      visaType: string;
+      leaseDurationMonths: string;
+      usesCar: string;
+      occupantCount: string;
+      isSmoker: string;
+      roomType: string;
+      unknown: string;
+      yes: string;
+      no: string;
+      save: string;
+      cancel: string;
+      saved: string;
+      saveError: string;
+      required: string;
+      invalidNumber: string;
+      budgetError: string;
+      search: string;
+      empty: string;
+      noMatches: string;
+      count: string;
+      profile: string;
+      requirements: string;
+      details: string;
+      back: string;
+      newLead: string;
+      loadError: string;
+      retry: string;
+      previous: string;
+      next: string;
+      optionalHint: string;
+    };
     coBrokeCatalog: string;
     viewingSchedule: string;
     myDeals: string;
@@ -253,6 +298,11 @@ export interface TranslationSchema {
       photosHint: string;
       photosCount: string;
       addPhoto: string;
+      removePhoto: string;
+      setCover: string;
+      coverPhoto: string;
+      uploadProgress: string;
+      photoUnavailable: string;
       photosMinError: string;
       promoAiTitle: string;
       promoAiDesc: string;
@@ -283,6 +333,29 @@ export interface TranslationSchema {
       saveError: string;
     };
     listings: {
+      editRoom: string;
+      saveChanges: string;
+      cancelEdit: string;
+      photoLoadError: string;
+
+      search: string;
+      all: string;
+      previous: string;
+      next: string;
+      results: string;
+      noMatches: string;
+      viewRoom: string;
+      backToRooms: string;
+      details: string;
+      contacts: string;
+      openMap: string;
+      noPhotos: string;
+      notSpecified: string;
+      months: string;
+      available: string;
+      rented: string;
+      pending_verification: string;
+      needs_edit: string;
       emptyTitle: string;
       emptyBody: string;
       emptyCta: string;
@@ -311,6 +384,16 @@ export interface TranslationSchema {
     listingSources: {
       co_agent: string;
       owner: string;
+    };
+    visaTypes: {
+      tourist: string;
+      non_immigrant_b: string;
+      non_immigrant_ed: string;
+      non_immigrant_o: string;
+      elite: string;
+      ltr: string;
+      dtv: string;
+      other: string;
     };
   };
   services: {

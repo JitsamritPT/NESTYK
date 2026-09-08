@@ -27,7 +27,7 @@ function messageFromBody(body: unknown, fallback: string): string {
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = {
     Accept: 'application/json',
-    ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
     ...(await authHeader()),
     ...(init?.headers as Record<string, string> | undefined),
   };

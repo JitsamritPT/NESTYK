@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Query, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -10,6 +10,11 @@ import { AgentListingsService } from './agent-listings.service';
 @Roles('agent')
 export class AgentListingsController {
   constructor(private readonly listingsService: AgentListingsService) {}
+
+  @Get(':id')
+  view(@CurrentUser() user: AuthRequestUser, @Param('id', ParseIntPipe) id: number) {
+    return this.listingsService.viewMine(user.id, id);
+  }
 
   @Get()
   list(
