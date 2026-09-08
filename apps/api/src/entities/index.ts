@@ -7,6 +7,8 @@ export * from './master-property-type.entity';
 export * from './property-owner.entity';
 export * from './contact.entity';
 export * from './master-contract-type.entity';
+export * from './master-room-type.entity';
+export * from './master-listing-source.entity';
 export * from './master-room-status.entity';
 export * from './master-layout.entity';
 export * from './master-facilities-group.entity';
@@ -31,6 +33,8 @@ import { MasterPropertyTypeEntity } from './master-property-type.entity';
 import { PropertyOwnerEntity } from './property-owner.entity';
 import { ContactEntity } from './contact.entity';
 import { MasterContractTypeEntity } from './master-contract-type.entity';
+import { MasterRoomTypeEntity } from './master-room-type.entity';
+import { MasterListingSourceEntity } from './master-listing-source.entity';
 import { MasterRoomStatusEntity } from './master-room-status.entity';
 import { MasterLayoutEntity } from './master-layout.entity';
 import { MasterFacilitiesGroupEntity } from './master-facilities-group.entity';
@@ -57,6 +61,8 @@ export const ALL_ENTITIES = [
   PropertyOwnerEntity,
   ContactEntity,
   MasterContractTypeEntity,
+  MasterRoomTypeEntity,
+  MasterListingSourceEntity,
   MasterRoomStatusEntity,
   MasterLayoutEntity,
   MasterFacilitiesGroupEntity,

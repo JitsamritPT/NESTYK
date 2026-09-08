@@ -20,6 +20,7 @@ export type AgentListingCard = {
   id: number;
   listingTitle: string | null;
   visibility: 'private' | 'published' | null;
+  listingSourceCode?: 'co_agent' | 'owner' | null;
   roomStatusCode: string | null;
   property: {
     id: number;

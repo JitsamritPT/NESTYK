@@ -81,6 +81,7 @@ export class AgentListingsService {
       relations: {
         property: true,
         property_owner: true,
+        listing_source: true,
         room_contacts: { contact: true },
         medias: true,
         room_status: true,
@@ -103,6 +104,7 @@ export class AgentListingsService {
           listingTitle: room.listing_title,
           visibility: room.visibility,
           isScoutRoom: room.is_scout_room,
+          listingSourceCode: room.listing_source?.code ?? null,
           roomStatusCode: room.room_status?.code ?? null,
           property: room.property
             ? {

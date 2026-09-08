@@ -150,6 +150,7 @@ AND created_by_user_id = :currentAgentId
 | `POST` | `/agent/rooms` | สร้างห้องใหม่ |
 | `POST` | `/agent/rooms/media/upload` | อัปโหลดรูปใน wizard |
 | `GET` | `/agent/rooms/contacts` | picker ผู้ติดต่อ |
+| `GET` | `/agent/rooms/room-types` | master ประเภทห้อง |
 | `GET` | `/agent/rooms/contract-types` | master ประเภทสัญญา |
 | `GET` | `/agent/rooms/property-owners` | เจ้าของห้องจริง — ใช้ตอนทำสัญญา |
 | `GET` | `/agent/rooms/properties` | reuse โครงการ |

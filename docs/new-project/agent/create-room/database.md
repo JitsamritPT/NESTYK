@@ -20,6 +20,8 @@ erDiagram
 
     properties ||--o{ rent_rooms : properties_id
     master_property_types ||--o{ properties : property_type_id
+    master_room_types ||--o{ rent_rooms : room_type_id
+    master_listing_sources ||--o{ rent_rooms : listing_source_id
     master_contract_types ||--o{ rent_room_prices : contract_type_id
     contacts ||--o{ rent_room_contacts : contact_id
     rent_rooms ||--o{ rent_room_contacts : rent_room_id
@@ -63,6 +65,9 @@ erDiagram
 | `water_rate_per_unit` | validation UI |
 | `electric_rate_per_unit` | validation UI |
 | `prices` | JSONB array ≥1 แถว |
+| `room_type_id` | FK → `master_room_types` (studio / 1 bed / 1 bed plus / 2–4 bed / duplex / penthouse) |
+| `listing_source_id` | FK → `master_listing_sources` (`co_agent` / `owner`) — ห้องเอามาจากใคร |
+| `room_layout_values` | `bedroom` + `bathroom` บังคับ |
 | `room_status_id` | scout default → `available` |
 | `room_medias` | ≥5 รูป category `room` (child table) |
 
@@ -77,7 +82,7 @@ erDiagram
 | `nearby_other`, `nearby_places` | |
 | `owner_identity_number` | **ไม่ใช้** scout — Owner verify |
 | `owner_bank_name`, `owner_bank_account` | **ไม่ใช้** scout |
-| `room_layout_values` | child + master_layouts |
+| `room_layout_values` | child + master_layouts — bedroom/bathroom req |
 | `room_facilities` | child + master_facilities |
 | `rent_room_documents` | optional step |
 | `view_count`, `last_viewed_at` | system |
@@ -110,6 +115,8 @@ erDiagram
 | `property_owner_id` | int | yes | later contract | null |
 | `owner_id` | int → users | yes | **null** | **req** |
 | `properties_id` | int | no | **req** | req |
+| `room_type_id` | int → master_room_types | yes | **req** | req |
+| `listing_source_id` | int → master_listing_sources | yes | **req** | opt |
 | `room_status_id` | int | no | available | pending_verification… |
 | `view_count` | int | no | 0 | 0 |
 | `last_viewed_at` | timestamptz | yes | | |
@@ -122,7 +129,7 @@ erDiagram
 | ตาราง | FK | บังคับ scout create |
 |--------|-----|---------------------|
 | `room_medias` | `rent_id` | ✅ ≥5 รูป |
-| `room_layout_values` | `rent_room_id` | opt (wizard step 2) |
+| `room_layout_values` | `rent_room_id` | ✅ bedroom + bathroom |
 | `room_facilities` | `rent_room_id` | opt |
 | `rent_room_documents` | `rent_id` | opt |
 

@@ -6,6 +6,8 @@ import { MasterPropertyTypeEntity } from '../entities/master-property-type.entit
 import { PropertyOwnerEntity } from '../entities/property-owner.entity';
 import { ContactEntity } from '../entities/contact.entity';
 import { MasterContractTypeEntity } from '../entities/master-contract-type.entity';
+import { MasterRoomTypeEntity } from '../entities/master-room-type.entity';
+import { MasterListingSourceEntity } from '../entities/master-listing-source.entity';
 import { MasterRoomStatusEntity } from '../entities/master-room-status.entity';
 import { MasterLayoutEntity } from '../entities/master-layout.entity';
 import { MasterFacilityEntity } from '../entities/master-facility.entity';
@@ -33,6 +35,8 @@ import { AgentPlacesService } from './places/agent-places.service';
       PropertyOwnerEntity,
       ContactEntity,
       MasterContractTypeEntity,
+      MasterRoomTypeEntity,
+      MasterListingSourceEntity,
       MasterRoomStatusEntity,
       MasterLayoutEntity,
       MasterFacilityEntity,

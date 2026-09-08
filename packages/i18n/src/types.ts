@@ -183,6 +183,11 @@ export interface TranslationSchema {
       required: string;
       requiredFillField: string;
       requiredOk: string;
+      sourcePrompt: string;
+      sourceCoAgent: string;
+      sourceOwner: string;
+      sourceCoAgentHint: string;
+      sourceOwnerHint: string;
       steps: {
         property: string;
         layout: string;
@@ -219,6 +224,9 @@ export interface TranslationSchema {
       buildingPlaceholder: string;
       bedroom: string;
       bathroom: string;
+      roomType: string;
+      roomTypeRequired: string;
+      roomTypeLoadError: string;
       sizeSqm: string;
       facilitiesHint: string;
       nearbyOther: string;
@@ -289,6 +297,20 @@ export interface TranslationSchema {
       condo: string;
       apartment: string;
       house: string;
+    };
+    roomTypes: {
+      studio: string;
+      one_bedroom: string;
+      one_bedroom_plus: string;
+      two_bedroom: string;
+      three_bedroom: string;
+      four_bedroom: string;
+      duplex: string;
+      penthouse: string;
+    };
+    listingSources: {
+      co_agent: string;
+      owner: string;
     };
   };
   services: {

@@ -22,7 +22,7 @@ import { UserRole } from '@nestyk/types';
 import { MobileCreateListingWizardBody, MobileAgentListingsBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import type { AgentListingCard } from '@nestyk/feature-listing';
 import { MobileServiceCatalogBody } from '@nestyk/feature-services';
-import { createAgentScoutRoom, fetchMyAgentListings, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes } from '../lib/agent-listings-api';
+import { createAgentScoutRoom, fetchMyAgentListings, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
 import { searchPlaces, getPlaceDetails } from '../lib/places-api';
 import {
   MOCK_USER,
@@ -97,6 +97,7 @@ export default function AppHomeScreen() {
   const handleListContacts = useCallback(() => fetchAgentContacts(), []);
   const handleListPropertyTypes = useCallback(() => fetchAgentPropertyTypes(), []);
   const handleListContractTypes = useCallback(() => fetchAgentContractTypes(), []);
+  const handleListRoomTypes = useCallback(() => fetchAgentRoomTypes(), []);
 
   const handleDeepLinkUrl = (url: string | null) => {
     if (!url) return;
@@ -431,6 +432,7 @@ export default function AppHomeScreen() {
             listContacts={handleListContacts}
             listPropertyTypes={handleListPropertyTypes}
             listContractTypes={handleListContractTypes}
+            listRoomTypes={handleListRoomTypes}
             onSubmitListing={async (data) => {
               await createAgentScoutRoom(data);
               Alert.alert(

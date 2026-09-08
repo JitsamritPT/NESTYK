@@ -11,6 +11,8 @@ import { MasterPropertyTypeEntity } from '../../entities/master-property-type.en
 import { PropertyOwnerEntity } from '../../entities/property-owner.entity';
 import { ContactEntity } from '../../entities/contact.entity';
 import { MasterContractTypeEntity } from '../../entities/master-contract-type.entity';
+import { MasterRoomTypeEntity } from '../../entities/master-room-type.entity';
+import { MasterListingSourceEntity } from '../../entities/master-listing-source.entity';
 import { MasterRoomStatusEntity } from '../../entities/master-room-status.entity';
 import { MasterLayoutEntity } from '../../entities/master-layout.entity';
 import { MasterFacilityEntity } from '../../entities/master-facility.entity';
@@ -39,6 +41,8 @@ export class AgentRoomsService {
     private readonly propertyTypesRepo: Repository<MasterPropertyTypeEntity>,
     @InjectRepository(MasterContractTypeEntity)
     private readonly contractTypesRepo: Repository<MasterContractTypeEntity>,
+    @InjectRepository(MasterRoomTypeEntity)
+    private readonly roomTypesRepo: Repository<MasterRoomTypeEntity>,
     @InjectRepository(MasterFacilityEntity)
     private readonly facilitiesRepo: Repository<MasterFacilityEntity>,
   ) {}
@@ -75,6 +79,18 @@ export class AgentRoomsService {
       id: row.id,
       code: row.code,
       termMonths: row.term_months,
+    }));
+  }
+
+  async listRoomTypes() {
+    const rows = await this.roomTypesRepo.find({
+      where: { is_active: true },
+      order: { sort_order: 'ASC', id: 'ASC' },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      code: row.code,
+      bedroomCount: row.bedroom_count,
     }));
   }
 
@@ -155,6 +171,8 @@ export class AgentRoomsService {
       const contactId = await this.resolveContactId(manager, agent.id, body);
       const propertyId = await this.resolvePropertyId(manager, body);
       const priceRows = await this.resolvePrices(manager, body.prices ?? []);
+      const roomType = await this.resolveRoomType(manager, body.roomTypeId);
+      const listingSource = await this.resolveListingSource(manager, body.listingSourceCode);
 
       const status = await manager.findOne(MasterRoomStatusEntity, {
         where: { code: 'available' },
@@ -194,6 +212,8 @@ export class AgentRoomsService {
         property_owner_id: null,
         owner_id: null,
         properties_id: propertyId,
+        room_type_id: roomType.id,
+        listing_source_id: listingSource.id,
         room_status_id: status.id,
         view_count: 0,
       });
@@ -318,6 +338,7 @@ export class AgentRoomsService {
         id: saved.id,
         propertyId,
         contactId,
+        listingSourceCode: listingSource.code,
         isScoutRoom: true,
         visibility: saved.visibility,
       };
@@ -347,6 +368,20 @@ export class AgentRoomsService {
     }
     if (!body.listingTitle?.trim()) {
       throw new BadRequestException('listingTitle is required');
+    }
+    if (!body.roomTypeId) {
+      throw new BadRequestException('roomTypeId is required');
+    }
+    if (!body.listingSourceCode || !['co_agent', 'owner'].includes(body.listingSourceCode)) {
+      throw new BadRequestException('listingSourceCode must be co_agent or owner');
+    }
+    const bedroom = layoutValue(body.layout, 'bedroom');
+    const bathroom = layoutValue(body.layout, 'bathroom');
+    if (!isFilledCount(bedroom)) {
+      throw new BadRequestException('layout bedroom is required');
+    }
+    if (!isFilledCount(bathroom)) {
+      throw new BadRequestException('layout bathroom is required');
     }
     if (!body.prices?.length) {
       throw new BadRequestException('prices must have at least 1 row');
@@ -427,6 +462,38 @@ export class AgentRoomsService {
     return created.id;
   }
 
+  private async resolveRoomType(
+    manager: DataSource['manager'],
+    roomTypeId: number | undefined,
+  ) {
+    if (!roomTypeId) {
+      throw new BadRequestException('roomTypeId is required');
+    }
+    const roomType = await manager.findOne(MasterRoomTypeEntity, {
+      where: { id: roomTypeId, is_active: true },
+    });
+    if (!roomType) {
+      throw new BadRequestException('roomTypeId not found');
+    }
+    return roomType;
+  }
+
+  private async resolveListingSource(
+    manager: DataSource['manager'],
+    listingSourceCode: string | undefined,
+  ) {
+    if (!listingSourceCode) {
+      throw new BadRequestException('listingSourceCode is required');
+    }
+    const source = await manager.findOne(MasterListingSourceEntity, {
+      where: { code: listingSourceCode, is_active: true },
+    });
+    if (!source) {
+      throw new BadRequestException('listingSourceCode not found');
+    }
+    return source;
+  }
+
   private async resolvePrices(
     manager: DataSource['manager'],
     prices: Array<{ contractTypeId: number; price: number }>,
@@ -482,4 +549,15 @@ export class AgentRoomsService {
     );
     return created.id;
   }
+}
+
+function layoutValue(
+  layout: Array<{ code: string; value: string }> | undefined,
+  code: string,
+) {
+  return layout?.find((row) => row.code === code)?.value?.trim() ?? '';
+}
+
+function isFilledCount(value: string) {
+  return /^\d+$/.test(value);
 }

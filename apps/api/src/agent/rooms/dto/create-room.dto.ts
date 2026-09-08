@@ -54,6 +54,8 @@ export type CreateRoomBody = {
   property?: CreateRoomPropertyInput;
   listingTitle?: string;
   listingDescription?: string;
+  roomTypeId?: number;
+  listingSourceCode?: 'co_agent' | 'owner';
   roomId?: string;
   availableFromDate?: string;
   waterRatePerUnit?: number;

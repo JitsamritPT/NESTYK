@@ -10,6 +10,8 @@ import { UserEntity } from './user.entity';
 import { PropertyEntity } from './property.entity';
 import { PropertyOwnerEntity } from './property-owner.entity';
 import { MasterRoomStatusEntity } from './master-room-status.entity';
+import { MasterRoomTypeEntity } from './master-room-type.entity';
+import { MasterListingSourceEntity } from './master-listing-source.entity';
 import { RoomMediaEntity } from './room-media.entity';
 import { RentRoomDocumentEntity } from './rent-room-document.entity';
 import { RoomLayoutValueEntity } from './room-layout-value.entity';
@@ -90,6 +92,12 @@ export class RentRoomEntity extends SerialTimestampEntity {
   @Column({ type: 'int' })
   properties_id: number;
 
+  @Column({ type: 'int', nullable: true })
+  room_type_id: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  listing_source_id: number | null;
+
   @Column({ type: 'int' })
   room_status_id: number;
 
@@ -114,6 +122,14 @@ export class RentRoomEntity extends SerialTimestampEntity {
   @ManyToOne(() => PropertyEntity, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'properties_id' })
   property: PropertyEntity;
+
+  @ManyToOne(() => MasterRoomTypeEntity, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'room_type_id' })
+  room_type: MasterRoomTypeEntity | null;
+
+  @ManyToOne(() => MasterListingSourceEntity, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'listing_source_id' })
+  listing_source: MasterListingSourceEntity | null;
 
   @ManyToOne(() => MasterRoomStatusEntity, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'room_status_id' })

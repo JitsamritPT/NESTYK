@@ -38,6 +38,42 @@ ON CONFLICT (code) DO UPDATE SET
   term_months = EXCLUDED.term_months,
   sort_order = EXCLUDED.sort_order;
 
+CREATE TABLE IF NOT EXISTS master_room_types (
+  id            SERIAL PRIMARY KEY,
+  code          VARCHAR(64) NOT NULL UNIQUE,
+  bedroom_count SMALLINT    NULL,
+  sort_order    INT         NOT NULL DEFAULT 0,
+  is_active     BOOLEAN     NOT NULL DEFAULT TRUE
+);
+
+INSERT INTO master_room_types (code, bedroom_count, sort_order)
+VALUES
+  ('studio', 0, 1),
+  ('one_bedroom', 1, 2),
+  ('one_bedroom_plus', 1, 3),
+  ('two_bedroom', 2, 4),
+  ('three_bedroom', 3, 5),
+  ('four_bedroom', 4, 6),
+  ('duplex', NULL, 7),
+  ('penthouse', NULL, 8)
+ON CONFLICT (code) DO UPDATE SET
+  bedroom_count = EXCLUDED.bedroom_count,
+  sort_order = EXCLUDED.sort_order;
+
+CREATE TABLE IF NOT EXISTS master_listing_sources (
+  id         SERIAL PRIMARY KEY,
+  code       VARCHAR(64) NOT NULL UNIQUE,
+  sort_order INT         NOT NULL DEFAULT 0,
+  is_active  BOOLEAN     NOT NULL DEFAULT TRUE
+);
+
+INSERT INTO master_listing_sources (code, sort_order)
+VALUES
+  ('co_agent', 1),
+  ('owner', 2)
+ON CONFLICT (code) DO UPDATE SET
+  sort_order = EXCLUDED.sort_order;
+
 CREATE TABLE IF NOT EXISTS properties (
   id                SERIAL PRIMARY KEY,
   name              VARCHAR(255) NOT NULL,
@@ -147,6 +183,8 @@ CREATE TABLE IF NOT EXISTS rent_rooms (
   property_owner_id      INT          NULL REFERENCES property_owners(id) ON DELETE RESTRICT,
   owner_id               INT          NULL REFERENCES users(id) ON DELETE SET NULL,
   properties_id          INT          NOT NULL REFERENCES properties(id) ON DELETE RESTRICT,
+  room_type_id           INT          NULL REFERENCES master_room_types(id) ON DELETE RESTRICT,
+  listing_source_id      INT          NULL REFERENCES master_listing_sources(id) ON DELETE RESTRICT,
   room_status_id         INT          NOT NULL REFERENCES master_room_statuses(id) ON DELETE RESTRICT,
   view_count             INT          NOT NULL DEFAULT 0,
   last_viewed_at         TIMESTAMPTZ  NULL,
@@ -179,6 +217,8 @@ CREATE INDEX IF NOT EXISTS idx_rent_rooms_created_by_user_id ON rent_rooms (crea
 CREATE INDEX IF NOT EXISTS idx_rent_rooms_owner_id ON rent_rooms (owner_id);
 CREATE INDEX IF NOT EXISTS idx_rent_rooms_properties_id ON rent_rooms (properties_id);
 CREATE INDEX IF NOT EXISTS idx_rent_rooms_property_owner_id ON rent_rooms (property_owner_id);
+CREATE INDEX IF NOT EXISTS idx_rent_rooms_room_type_id ON rent_rooms (room_type_id);
+CREATE INDEX IF NOT EXISTS idx_rent_rooms_listing_source_id ON rent_rooms (listing_source_id);
 CREATE INDEX IF NOT EXISTS idx_rent_rooms_public_scout_listing
   ON rent_rooms (visibility, room_status_id)
   WHERE is_scout_room = TRUE AND visibility = 'published';
@@ -269,6 +309,12 @@ ALTER TABLE rent_rooms
   ADD COLUMN IF NOT EXISTS advance_rent_months SMALLINT NOT NULL DEFAULT 1;
 ALTER TABLE rent_rooms
   ADD COLUMN IF NOT EXISTS deposit_months SMALLINT NOT NULL DEFAULT 2;
+ALTER TABLE rent_rooms
+  ADD COLUMN IF NOT EXISTS room_type_id INT NULL REFERENCES master_room_types(id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_rent_rooms_room_type_id ON rent_rooms (room_type_id);
+ALTER TABLE rent_rooms
+  ADD COLUMN IF NOT EXISTS listing_source_id INT NULL REFERENCES master_listing_sources(id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_rent_rooms_listing_source_id ON rent_rooms (listing_source_id);
 DO $$
 BEGIN
   IF NOT EXISTS (

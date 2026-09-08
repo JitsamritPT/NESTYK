@@ -7,6 +7,7 @@ export type AgentListingCard = {
   listingTitle: string | null;
   visibility: 'private' | 'published' | null;
   isScoutRoom: boolean;
+  listingSourceCode?: 'co_agent' | 'owner' | null;
   roomStatusCode: string | null;
   property: {
     id: number;
@@ -39,6 +40,7 @@ export type CreateRoomResponse = {
   id: number;
   propertyId: number;
   contactId: number;
+  listingSourceCode: 'co_agent' | 'owner';
   isScoutRoom: true;
   visibility: 'private' | 'published';
 };
@@ -73,6 +75,13 @@ export async function fetchAgentContractTypes(): Promise<
 > {
   await ensureAgentSession();
   return apiGet('/agent/rooms/contract-types');
+}
+
+export async function fetchAgentRoomTypes(): Promise<
+  Array<{ id: number; code: string; bedroomCount: number | null }>
+> {
+  await ensureAgentSession();
+  return apiGet('/agent/rooms/room-types');
 }
 
 export async function createAgentScoutRoom(

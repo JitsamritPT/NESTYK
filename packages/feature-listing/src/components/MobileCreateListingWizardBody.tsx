@@ -16,6 +16,7 @@ import {
   MobileButton,
   MobileBadge,
   MobileInput,
+  MobileIcon,
   tokens,
   getCardElevation,
 } from '@nestyk/ui/native';
@@ -28,6 +29,10 @@ const OWNER_NOTE_MAX = 200;
 const DEFAULT_MAP = { latitude: 13.7563, longitude: 100.5018 };
 const ADVANCE_MONTH_OPTIONS = [0, 1, 2] as const;
 const DEPOSIT_MONTH_OPTIONS = [1, 2, 3] as const;
+const LISTING_SOURCE_OPTIONS = [
+  { code: 'co_agent' as const, role: 'agent' as const, icon: 'handshake' as const },
+  { code: 'owner' as const, role: 'owner' as const, icon: 'user' as const },
+];
 
 export type ContactOption = {
   id: number;
@@ -51,6 +56,14 @@ export type ContractTypeOption = {
   termMonths: number;
 };
 
+export type RoomTypeOption = {
+  id: number;
+  code: string;
+  bedroomCount: number | null;
+};
+
+export type ListingSourceCode = 'co_agent' | 'owner';
+
 export type CreateRoomWizardSubmitData = {
   visibility: 'private' | 'published';
   property: {
@@ -71,6 +84,8 @@ export type CreateRoomWizardSubmitData = {
     note?: string;
   };
   listingTitle: string;
+  listingSourceCode: ListingSourceCode;
+  roomTypeId?: number;
   roomId?: string;
   waterRatePerUnit?: number;
   electricRatePerUnit?: number;
@@ -100,6 +115,7 @@ export interface MobileCreateListingWizardBodyProps {
   listContacts?: () => Promise<ContactOption[]>;
   listPropertyTypes?: () => Promise<PropertyTypeOption[]>;
   listContractTypes?: () => Promise<ContractTypeOption[]>;
+  listRoomTypes?: () => Promise<RoomTypeOption[]>;
 }
 
 function nativeElevation(level: 1 | 2 | 3) {
@@ -127,6 +143,10 @@ function digitsOnly(value: string) {
   return value.replace(/\D/g, '');
 }
 
+function isFilledCount(value: string) {
+  return /^\d+$/.test(value.trim());
+}
+
 export const MobileCreateListingWizardBody: React.FC<
   MobileCreateListingWizardBodyProps
 > = ({
@@ -137,6 +157,7 @@ export const MobileCreateListingWizardBody: React.FC<
   listContacts,
   listPropertyTypes,
   listContractTypes,
+  listRoomTypes,
 }) => {
   const { t } = useLocale();
   const cr = t.agent.createRoom;
@@ -168,18 +189,25 @@ export const MobileCreateListingWizardBody: React.FC<
   const listContactsRef = useRef(listContacts);
   const listPropertyTypesRef = useRef(listPropertyTypes);
   const listContractTypesRef = useRef(listContractTypes);
+  const listRoomTypesRef = useRef(listRoomTypes);
   const formScrollRef = useRef<ScrollView>(null);
   searchPlacesRef.current = searchPlaces;
   getPlaceDetailsRef.current = getPlaceDetails;
   listContactsRef.current = listContacts;
   listPropertyTypesRef.current = listPropertyTypes;
   listContractTypesRef.current = listContractTypes;
+  listRoomTypesRef.current = listRoomTypes;
   const [listingTitle, setListingTitle] = useState('');
+  const [listingSourceCode, setListingSourceCode] = useState<ListingSourceCode | null>(null);
   const [roomId, setRoomId] = useState('');
   const [floor, setFloor] = useState('');
   const [building, setBuilding] = useState('');
+  const [roomTypeId, setRoomTypeId] = useState<number | null>(null);
+  const [roomTypes, setRoomTypes] = useState<RoomTypeOption[]>([]);
+  const [roomTypesLoading, setRoomTypesLoading] = useState(false);
+  const [roomTypesError, setRoomTypesError] = useState('');
 
-  const [bedroom, setBedroom] = useState('1');
+  const [bedroom, setBedroom] = useState('');
   const [bathroom, setBathroom] = useState('1');
   const [sizeSqm, setSizeSqm] = useState('');
 
@@ -228,6 +256,9 @@ export const MobileCreateListingWizardBody: React.FC<
       province: cr.province,
       propertyType: cr.propertyType,
       listingTitle: cr.listingTitle,
+      roomType: cr.roomType,
+      bedroom: cr.bedroom,
+      bathroom: cr.bathroom,
       monthlyRent: cr.monthlyRent,
       contractTerm: cr.contractTerm,
       sizeSqm: cr.sizeSqm,
@@ -249,6 +280,7 @@ export const MobileCreateListingWizardBody: React.FC<
     if (key === 'ownerPick') return cr.ownerPickRequired;
     if (key === 'contractTerm') return cr.contractTermRequired;
     if (key === 'propertyType') return cr.propertyTypeRequired;
+    if (key === 'roomType') return cr.roomTypeRequired;
     return interpolate(cr.requiredFillField, { field: fieldLabel(key) });
   };
 
@@ -267,7 +299,7 @@ export const MobileCreateListingWizardBody: React.FC<
 
   useEffect(() => {
     scrollToTop();
-  }, [step]);
+  }, [step, listingSourceCode]);
 
   const clearFieldError = (key: string) => {
     setErrors((prev) => {
@@ -448,6 +480,32 @@ export const MobileCreateListingWizardBody: React.FC<
     };
   }, [cr.contractTermRequired]);
 
+  useEffect(() => {
+    const loadTypes = listRoomTypesRef.current;
+    if (!loadTypes) return;
+    let cancelled = false;
+    setRoomTypesLoading(true);
+    loadTypes()
+      .then((rows) => {
+        if (cancelled) return;
+        setRoomTypes(rows);
+        setRoomTypesError('');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setRoomTypes([]);
+        setRoomTypesError(
+          err instanceof Error && err.message ? err.message : cr.roomTypeLoadError,
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setRoomTypesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cr.roomTypeLoadError]);
+
   const selectedOwner = useMemo(
     () => owners.find((item) => item.id === selectedOwnerId) ?? null,
     [owners, selectedOwnerId],
@@ -532,6 +590,11 @@ export const MobileCreateListingWizardBody: React.FC<
 
     if (current === 2) {
       if (!listingTitle.trim()) nextErrors.listingTitle = cr.required;
+      if (listRoomTypesRef.current && !roomTypeId) {
+        nextErrors.roomType = cr.roomTypeRequired;
+      }
+      if (!isFilledCount(bedroom)) nextErrors.bedroom = cr.required;
+      if (!isFilledCount(bathroom)) nextErrors.bathroom = cr.required;
       if (!sizeSqm.trim() || Number(sizeSqm) <= 0) nextErrors.sizeSqm = cr.required;
     }
 
@@ -574,7 +637,13 @@ export const MobileCreateListingWizardBody: React.FC<
     setStep((s) => Math.min(TOTAL_STEPS, s + 1));
   };
 
-  const goBack = () => setStep((s) => Math.max(1, s - 1));
+  const goBack = () => {
+    if (step === 1) {
+      setListingSourceCode(null);
+      return;
+    }
+    setStep((s) => Math.max(1, s - 1));
+  };
 
   const buildPayload = (): CreateRoomWizardSubmitData => {
     const medias = Array.from({ length: photoCount }, (_, i) => ({
@@ -585,8 +654,8 @@ export const MobileCreateListingWizardBody: React.FC<
     }));
 
     const layout = [
-      { code: 'bedroom', value: bedroom || '0' },
-      { code: 'bathroom', value: bathroom || '0' },
+      { code: 'bedroom', value: bedroom.trim() },
+      { code: 'bathroom', value: bathroom.trim() },
       { code: 'room_size', value: sizeSqm.trim() },
     ];
     if (floor.trim()) layout.push({ code: 'floor', value: floor.trim() });
@@ -617,6 +686,8 @@ export const MobileCreateListingWizardBody: React.FC<
       },
       ...contactPayload,
       listingTitle: listingTitle.trim(),
+      listingSourceCode: listingSourceCode as ListingSourceCode,
+      roomTypeId: roomTypeId ?? undefined,
       roomId: roomId.trim() || undefined,
       waterRatePerUnit: waterRate.trim() && Number(waterRate) > 0 ? Number(waterRate) : undefined,
       electricRatePerUnit:
@@ -638,6 +709,7 @@ export const MobileCreateListingWizardBody: React.FC<
   };
 
   const handleSubmit = async () => {
+    if (!listingSourceCode) return;
     const invalid = validateStep(TOTAL_STEPS);
     if (invalid || submitting) {
       if (invalid) setRequiredPrompt(requiredMessage(invalid));
@@ -661,7 +733,7 @@ export const MobileCreateListingWizardBody: React.FC<
 
   const renderNav = (opts?: { isLast?: boolean }) => (
     <View style={styles.btnRow}>
-      {step > 1 ? (
+      {step > 1 || listingSourceCode ? (
         <View style={{ flex: 1 }}>
           <MobileButton variant="outline" onPress={goBack}>
             {cr.back}
@@ -683,6 +755,15 @@ export const MobileCreateListingWizardBody: React.FC<
   );
 
   const navOpts = step === TOTAL_STEPS ? { isLast: true as const } : undefined;
+  const pickingSource = !listingSourceCode;
+  const sourceLabels: Record<ListingSourceCode, string> = {
+    co_agent: cr.sourceCoAgent,
+    owner: cr.sourceOwner,
+  };
+  const sourceHints: Record<ListingSourceCode, string> = {
+    co_agent: cr.sourceCoAgentHint,
+    owner: cr.sourceOwnerHint,
+  };
 
   return (
     <View style={styles.container}>
@@ -691,26 +772,67 @@ export const MobileCreateListingWizardBody: React.FC<
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>{cr.title}</Text>
           </View>
-          <MobileBadge
-            role={config.actorRole}
-            label={interpolate(cr.stepOf, { step, total: TOTAL_STEPS })}
-          />
+          {pickingSource ? null : (
+            <MobileBadge
+              role={config.actorRole}
+              label={interpolate(cr.stepOf, { step, total: TOTAL_STEPS })}
+            />
+          )}
         </View>
 
-        <View style={[styles.progressTrack]}>
-          <View
-            style={[
-              styles.progressFill,
-              {
-                width: `${(step / TOTAL_STEPS) * 100}%`,
-                backgroundColor: themeColor,
-              },
-            ]}
-          />
-        </View>
-        <Text style={[styles.stepLabel, { color: themeColor }]}>{stepTitle}</Text>
+        {pickingSource ? (
+          <Text style={styles.subtitle}>{cr.sourcePrompt}</Text>
+        ) : (
+          <>
+            <View style={[styles.progressTrack]}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${(step / TOTAL_STEPS) * 100}%`,
+                    backgroundColor: themeColor,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={[styles.stepLabel, { color: themeColor }]}>{stepTitle}</Text>
+          </>
+        )}
       </View>
 
+      {pickingSource ? (
+        <View style={styles.sourceScreen}>
+          <View style={styles.sourceRow}>
+            {LISTING_SOURCE_OPTIONS.map((opt) => {
+              const color = tokens.colors.roles[opt.role];
+              return (
+                <Pressable
+                  key={opt.code}
+                  onPress={() => {
+                    setListingSourceCode(opt.code);
+                    setStep(1);
+                  }}
+                  android_ripple={{ color: '#00000022' }}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    styles.sourceCard,
+                    nativeElevation(1),
+                    { borderColor: color },
+                    pressed ? { opacity: 0.88 } : null,
+                  ]}
+                >
+                  <View style={[styles.sourceIconWrap, { backgroundColor: color }]}>
+                    <MobileIcon name={opt.icon} size={28} color="#FFFFFF" />
+                  </View>
+                  <Text style={styles.sourceTitle}>{sourceLabels[opt.code]}</Text>
+                  <Text style={styles.sourceHint}>{sourceHints[opt.code]}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : (
+        <>
       <ScrollView
         ref={formScrollRef}
         style={styles.formScroll}
@@ -762,6 +884,7 @@ export const MobileCreateListingWizardBody: React.FC<
                       ]}
                     >
                       <Text
+                        numberOfLines={1}
                         style={[
                           styles.typeChipText,
                           selected ? styles.typeChipTextSelected : null,
@@ -885,6 +1008,97 @@ export const MobileCreateListingWizardBody: React.FC<
                 }}
                 error={errors.listingTitle}
               />
+              {listRoomTypes ? (
+                <>
+              <View>
+                <Text style={styles.fieldLabel}>
+                  {cr.roomType}
+                  <Text style={styles.requiredMark}> *</Text>
+                </Text>
+              </View>
+              {roomTypesLoading ? (
+                <View style={styles.suggestStatus}>
+                  <ActivityIndicator size="small" color={themeColor} />
+                  <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
+                </View>
+              ) : null}
+              {roomTypesError ? (
+                <Text style={styles.errorText}>{roomTypesError}</Text>
+              ) : null}
+              <View style={styles.typeRow}>
+                {roomTypes.map((opt) => {
+                  const selected = roomTypeId === opt.id;
+                  const labels = t.masters.roomTypes as Record<string, string>;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      onPress={() => {
+                        setRoomTypeId(opt.id);
+                        clearFieldError('roomType');
+                        if (opt.bedroomCount != null) {
+                          setBedroom(String(opt.bedroomCount));
+                          clearFieldError('bedroom');
+                        }
+                      }}
+                      android_ripple={{ color: '#00000022' }}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      style={({ pressed }) => [
+                        styles.typeChip,
+                        selected
+                          ? { backgroundColor: themeColor, borderColor: themeColor }
+                          : errors.roomType
+                            ? { borderColor: tokens.colors.error }
+                            : null,
+                        pressed ? { opacity: 0.88 } : null,
+                      ]}
+                    >
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.typeChipText,
+                          selected ? styles.typeChipTextSelected : null,
+                        ]}
+                      >
+                        {labels[opt.code] ?? opt.code}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {errors.roomType ? (
+                <Text style={styles.errorText}>{errors.roomType}</Text>
+              ) : null}
+                </>
+              ) : null}
+              <View style={styles.fieldGrid}>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.bedroom}
+                    keyboardType="numeric"
+                    value={bedroom}
+                    required
+                    onChangeText={(v) => {
+                      setBedroom(digitsOnly(v));
+                      clearFieldError('bedroom');
+                    }}
+                    error={errors.bedroom}
+                  />
+                </View>
+                <View style={styles.fieldGridItem}>
+                  <MobileInput
+                    label={cr.bathroom}
+                    keyboardType="numeric"
+                    value={bathroom}
+                    required
+                    onChangeText={(v) => {
+                      setBathroom(digitsOnly(v));
+                      clearFieldError('bathroom');
+                    }}
+                    error={errors.bathroom}
+                  />
+                </View>
+              </View>
               <View style={styles.fieldGrid}>
                 <View style={styles.fieldGridItem}>
                   <MobileInput
@@ -930,24 +1144,6 @@ export const MobileCreateListingWizardBody: React.FC<
                     autoCapitalize="characters"
                     value={building}
                     onChangeText={setBuilding}
-                  />
-                </View>
-                <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.bedroom}
-                    keyboardType="numeric"
-                    value={bedroom}
-                    onChangeText={setBedroom}
-                  />
-                </View>
-              </View>
-              <View style={styles.fieldGrid}>
-                <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.bathroom}
-                    keyboardType="numeric"
-                    value={bathroom}
-                    onChangeText={setBathroom}
                   />
                 </View>
                 <View style={styles.fieldGridItem}>
@@ -1294,6 +1490,8 @@ export const MobileCreateListingWizardBody: React.FC<
         </View>
       </ScrollView>
       <View style={styles.footer}>{renderNav(navOpts)}</View>
+        </>
+      )}
 
       <Modal
         visible={!!requiredPrompt}
@@ -1414,6 +1612,50 @@ const styles = StyleSheet.create({
   cardBody: {
     gap: 14,
   },
+  sourceScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    paddingBottom: 24,
+  },
+  sourceRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  sourceCard: {
+    flex: 1,
+    minHeight: 180,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 22,
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+  sourceIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sourceTitle: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 18,
+    lineHeight: 27,
+    fontWeight: '500',
+    color: tokens.colors.textHeading,
+    textAlign: 'center',
+  },
+  sourceHint: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+  },
   fieldGrid: {
     flexDirection: 'row',
     gap: 10,
@@ -1425,26 +1667,25 @@ const styles = StyleSheet.create({
   typeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 6,
   },
   typeChip: {
-    flexGrow: 1,
-    flexBasis: 96,
-    minWidth: 96,
-    minHeight: 40,
-    borderRadius: 12,
+    flexGrow: 0,
+    flexShrink: 0,
+    minHeight: 36,
+    borderRadius: 10,
     borderWidth: 1.5,
     borderColor: tokens.colors.border,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
   },
   typeChipText: {
     fontFamily: tokens.typography.native.body,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 13,
+    lineHeight: 20,
     fontWeight: '600',
     color: tokens.colors.textHeading,
   },
