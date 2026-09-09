@@ -1,15 +1,24 @@
-import { PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Column } from 'typeorm';
+import {
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
-export abstract class BaseEntity {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
+/** SERIAL PK — matches docs/new-project schema.sql */
+export abstract class SerialEntity {
+  @PrimaryGeneratedColumn()
+  id: number;
+}
 
-  @CreateDateColumn({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
+export abstract class SerialCreatedEntity extends SerialEntity {
+  @CreateDateColumn({ type: 'timestamptz' })
+  created_at: Date;
+}
+
+export abstract class SerialTimestampEntity extends SerialEntity {
+  @CreateDateColumn({ type: 'timestamptz' })
   created_at: Date;
 
-  @UpdateDateColumn({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
+  @UpdateDateColumn({ type: 'timestamptz' })
   updated_at: Date;
-
-  @Column({ type: 'boolean', default: true })
-  is_active: boolean;
 }

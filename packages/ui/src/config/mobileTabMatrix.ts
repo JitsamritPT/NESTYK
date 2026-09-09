@@ -47,12 +47,6 @@ const TAB_MATRIX: Record<ExtendedTabRole, MobileTabConfig[]> = {
     { key: 'tickets', icon: 'ticket' },
     MENU_TAB,
   ],
-  assistant: [
-    { key: 'dashboard', icon: 'grid' },
-    SERVICES_TAB,
-    { key: 'tickets', icon: 'ticket' },
-    MENU_TAB,
-  ],
 };
 
 const DEFAULT_TAB: Record<ExtendedTabRole, MobileAppTab> = {
@@ -61,7 +55,6 @@ const DEFAULT_TAB: Record<ExtendedTabRole, MobileAppTab> = {
   owner: 'dashboard',
   agent: 'dashboard',
   admin: 'dashboard',
-  assistant: 'dashboard',
 };
 
 export function getTabsForRole(role: ExtendedTabRole): MobileTabConfig[] {

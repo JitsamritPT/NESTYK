@@ -92,7 +92,6 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
     owner: t.roles.ownerSubtitle,
     agent: t.roles.agentSubtitle,
     admin: t.roles.adminSubtitle,
-    assistant: t.roles.adminSubtitle,
   };
   const [mounted, setMounted] = useState(false);
   const [settingsView, setSettingsView] = useState<'main' | DrawerSubView>('main');

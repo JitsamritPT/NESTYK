@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
+import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import { useLocale } from '@nestyk/i18n';
@@ -21,6 +23,9 @@ import {
 import { UserRole } from '@nestyk/types';
 import { MobileCreateListingWizardBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import { MobileServiceCatalogBody } from '@nestyk/feature-services';
+import { createAgentScoutRoom, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
+import { pickRoomPhotos, uploadRoomPhoto } from '../lib/room-photos';
+import { searchPlaces, getPlaceDetails } from '../lib/places-api';
 import {
   MOCK_USER,
   MOCK_LISTINGS,
@@ -45,8 +50,10 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
       return t.mobile.screens.listings;
     case 'listingRoom':
       return t.mobile.screens.listingRoom;
+    case 'createListing':
+      return t.mobile.screens.createListing;
     case 'listingLead':
-      return t.mobile.screens.listingLead;
+      return t.agent.leads.title;
     case 'contact':
       return t.mobile.screens.contact;
     case 'calendar':
@@ -65,7 +72,7 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
 }
 
 export default function AppHomeScreen() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const { theme } = useMobileTheme();
   const [activeRole, setActiveRole] = useState<UserRole>('guest');
   const [activeTab, setActiveTab] = useState<MobileAppTab>(() => getDefaultTabForRole('guest'));
@@ -76,6 +83,19 @@ export default function AppHomeScreen() {
   const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
 
   const unreadCount = [...notifications, ...messages].filter((n) => n.unread).length;
+
+  const handleSearchPlaces = useCallback(
+    (query: string) => searchPlaces(query, locale),
+    [locale],
+  );
+  const handleGetPlaceDetails = useCallback(
+    (placeId: string) => getPlaceDetails(placeId, locale),
+    [locale],
+  );
+  const handleListContacts = useCallback(() => fetchAgentContacts(), []);
+  const handleListPropertyTypes = useCallback(() => fetchAgentPropertyTypes(), []);
+  const handleListContractTypes = useCallback(() => fetchAgentContractTypes(), []);
+  const handleListRoomTypes = useCallback(() => fetchAgentRoomTypes(), []);
 
   const handleDeepLinkUrl = (url: string | null) => {
     if (!url) return;
@@ -109,6 +129,7 @@ export default function AppHomeScreen() {
     const subscription = Linking.addEventListener('url', (event) => handleDeepLinkUrl(event.url));
     return () => subscription.remove();
   }, []);
+
 
   const handleTabPress = (tab: MobileAppTab) => {
     if (tab === 'menu') {
@@ -203,7 +224,6 @@ export default function AppHomeScreen() {
       owner: { title: 'Owner Dashboard', desc: '3 active listings · 2 tenants occupied', badge: '3 Listings' },
       agent: { title: 'Agent Dashboard', desc: '24 co-broke listings · 45,000 THB commission', badge: 'Partner' },
       admin: { title: 'Operations Dashboard', desc: 'Pending tickets: 3 · Inspections today: 2', badge: 'Ops' },
-      assistant: { title: 'Assistant Dashboard', desc: 'Pending tickets: 3 · Inspections today: 2', badge: 'Ops' },
     };
     const summary = summaries[activeRole];
     return (
@@ -297,16 +317,7 @@ export default function AppHomeScreen() {
     }
 
     if (activeTab === 'listingLead') {
-      return (
-        <View style={styles.bodyContainer}>
-          <View style={[styles.card, cardStyle]}>
-            <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.listingLead}</Text>
-            <Text style={[styles.sectionDesc, secondaryText]}>
-              8 warm leads · 3 viewings this week · follow up today
-            </Text>
-          </View>
-        </View>
-      );
+      return <View style={styles.bodyContainer}><AgentLeadsScreen /></View>;
     }
 
     if (activeTab === 'contact') {
@@ -368,16 +379,32 @@ export default function AppHomeScreen() {
     if (activeTab === 'listingRoom') {
       return (
         <View style={styles.bodyContainer}>
-          <View style={[styles.card, cardStyle]}>
-            <View style={styles.listingTopRow}>
-              <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.listingRoom}</Text>
-              <MobileBadge role="agent" label="Active Partner" />
-            </View>
-            <Text style={[styles.sectionDesc, secondaryText]}>Stock: 24 rooms · Commission: 45,000 THB</Text>
-          </View>
+          <AgentRoomsScreen onCreate={() => setActiveTab('createListing')} />
+        </View>
+      );
+    }
+
+    if (activeTab === 'createListing') {
+      return (
+        <View style={[styles.bodyContainer, styles.wizardBody]}>
           <MobileCreateListingWizardBody
             config={defaultAgentListingConfig}
-            onSubmitListing={(data) => Alert.alert('Co-Broke Submitted', JSON.stringify(data))}
+            pickPhotos={pickRoomPhotos}
+            uploadPhoto={uploadRoomPhoto}
+            searchPlaces={handleSearchPlaces}
+            getPlaceDetails={handleGetPlaceDetails}
+            listContacts={handleListContacts}
+            listPropertyTypes={handleListPropertyTypes}
+            listContractTypes={handleListContractTypes}
+            listRoomTypes={handleListRoomTypes}
+            onSubmitListing={async (data) => {
+              await createAgentScoutRoom(data);
+              Alert.alert(
+                t.agent.createRoom.successTitle,
+                t.agent.createRoom.successBody,
+              );
+              setActiveTab('listingRoom');
+            }}
           />
         </View>
       );
@@ -386,9 +413,11 @@ export default function AppHomeScreen() {
     if (activeTab === 'listings') {
       if (activeRole === 'owner') {
         return (
-          <View style={styles.bodyContainer}>
+          <View style={[styles.bodyContainer, styles.wizardBody]}>
             <MobileCreateListingWizardBody
               config={defaultOwnerListingConfig}
+              searchPlaces={handleSearchPlaces}
+              getPlaceDetails={handleGetPlaceDetails}
               onSubmitListing={(data) => Alert.alert('Listing Published', JSON.stringify(data))}
             />
           </View>
@@ -399,11 +428,15 @@ export default function AppHomeScreen() {
     return null;
   };
 
+  const isWizardTab =
+    activeTab === 'createListing' || (activeTab === 'listings' && activeRole === 'owner');
+
   return (
     <>
       <MobileModePage
         role={activeRole}
         screenTitle={screenTitle}
+        scrollable={!isWizardTab}
         header={
           <MobileHeaderActions
             initials={MOCK_USER.initials}
@@ -470,6 +503,7 @@ export default function AppHomeScreen() {
 
 const styles = StyleSheet.create({
   bodyContainer: { gap: 16 },
+  wizardBody: { flex: 1, minHeight: 0, gap: 0 },
   card: {},
   sectionHeader: {
     fontFamily: tokens.typography.native.headingTh,

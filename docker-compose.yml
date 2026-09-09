@@ -1,0 +1,21 @@
+# Local Postgres for docs/new-project agent blueprint schemas
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nestyk-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: nestyk_db
+    volumes:
+      - nestyk_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nestyk_db"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  nestyk_pg_data:

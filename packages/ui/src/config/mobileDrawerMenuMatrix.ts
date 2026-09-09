@@ -21,6 +21,7 @@ export type DrawerMenuLabelKey =
   | 'occupancy'
   | 'listing'
   | 'listingRoom'
+  | 'createListing'
   | 'listingLead'
   | 'crm'
   | 'contact'
@@ -152,6 +153,12 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
           presentation: 'expand',
           children: [
             {
+              id: 'createListing',
+              labelKey: 'createListing',
+              icon: 'sparkle',
+              action: { type: 'tab', tab: 'createListing' },
+            },
+            {
               id: 'listingRoom',
               labelKey: 'listingRoom',
               icon: 'key',
@@ -210,21 +217,6 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
               action: { type: 'route', path: '/admin/ops-settings' },
             },
           ],
-        },
-      ],
-    },
-  ],
-  assistant: [
-    {
-      titleKey: 'sectionTitle',
-      items: [
-        { id: 'tickets', labelKey: 'tickets', icon: 'ticket', action: { type: 'tab', tab: 'tickets' } },
-        {
-          id: 'help',
-          labelKey: 'help',
-          icon: 'chat',
-          presentation: 'expand',
-          children: HELP_CHILDREN,
         },
       ],
     },

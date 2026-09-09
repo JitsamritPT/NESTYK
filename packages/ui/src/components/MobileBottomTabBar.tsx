@@ -17,6 +17,7 @@ export type MobileAppTab =
   | 'dashboard'
   | 'listings'
   | 'listingRoom'
+  | 'createListing'
   | 'listingLead'
   | 'contact'
   | 'calendar'

@@ -26,6 +26,11 @@ config.resolver.extraNodeModules = {
   '@nestyk/feature-search': path.resolve(monorepoRoot, 'packages/feature-search'),
   '@nestyk/feature-services': path.resolve(monorepoRoot, 'packages/feature-services'),
   '@nestyk/feature-listing': path.resolve(monorepoRoot, 'packages/feature-listing'),
+  'react-native-maps': path.resolve(monorepoRoot, 'node_modules/react-native-maps'),
+  '@react-native-async-storage/async-storage': path.resolve(
+    monorepoRoot,
+    'node_modules/@react-native-async-storage/async-storage',
+  ),
 };
 
 module.exports = config;
