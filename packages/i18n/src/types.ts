@@ -41,6 +41,7 @@ export interface TranslationSchema {
       createListing: string;
       listingLead: string;
       contact: string;
+      contracts: string;
       calendar: string;
       income: string;
       deals: string;
@@ -59,6 +60,7 @@ export interface TranslationSchema {
       createListing: string;
       listingLead: string;
       contact: string;
+      contracts: string;
       calendar: string;
       income: string;
       deals: string;
@@ -79,6 +81,7 @@ export interface TranslationSchema {
       billsPayments: string;
       maintenanceServices: string;
       accountSettings: string;
+      edit: string;
     };
     drawerMenu: {
       sectionTitle: string;
@@ -121,6 +124,24 @@ export interface TranslationSchema {
         zh: string;
         ja: string;
       };
+    };
+    appSettings: {
+      title: string;
+      accountSection: string;
+      profileAndContact: string;
+      helpSection: string;
+      faq: string;
+      contactSupport: string;
+      aboutSection: string;
+      aboutNestyk: string;
+      aboutBody: string;
+      terms: string;
+      termsBody: string;
+      privacy: string;
+      privacyBody: string;
+      version: string;
+      faqBody: string;
+      supportBody: string;
     };
     account: {
       title: string;

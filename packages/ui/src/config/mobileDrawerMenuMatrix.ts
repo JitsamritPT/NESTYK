@@ -72,7 +72,7 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
     {
       titleKey: 'sectionTitle',
       items: [
-        { id: 'favorites', labelKey: 'favorites', icon: 'home', action: { type: 'route', path: '/favorites' } },
+        { id: 'favorites', labelKey: 'favorites', icon: 'heart', action: { type: 'route', path: '/favorites' } },
         { id: 'viewings', labelKey: 'viewings', icon: 'calendar', action: { type: 'route', path: '/viewings' } },
         {
           id: 'help',
@@ -186,7 +186,7 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
           id: 'agentContracts',
           labelKey: 'agentContracts',
           icon: 'clipboard',
-          action: { type: 'route', path: '/agent/contracts' },
+          action: { type: 'tab', tab: 'contracts' },
         },
         {
           id: 'commission',

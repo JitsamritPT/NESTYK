@@ -56,6 +56,8 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
       return t.agent.leads.title;
     case 'contact':
       return t.mobile.screens.contact;
+    case 'contracts':
+      return t.mobile.screens.contracts;
     case 'calendar':
       return t.mobile.screens.calendar;
     case 'income':
@@ -327,6 +329,19 @@ export default function AppHomeScreen() {
             <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.contact}</Text>
             <Text style={[styles.sectionDesc, secondaryText]}>
               Owners · buyers · co-broke partners (mock contact book)
+            </Text>
+          </View>
+        </View>
+      );
+    }
+
+    if (activeTab === 'contracts') {
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.contracts}</Text>
+            <Text style={[styles.sectionDesc, secondaryText]}>
+              Draft · pending signature · active co-broke contracts (mock)
             </Text>
           </View>
         </View>

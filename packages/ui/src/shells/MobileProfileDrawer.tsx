@@ -49,6 +49,8 @@ export interface MobileProfileDrawerProps {
   onRoleChange: (role: UserRole) => void;
   onSignOut?: () => void;
   onMenuAction?: (action: DrawerMenuAction) => void;
+  /** Roles shown in Switch Role. Defaults exclude admin/assistant. */
+  allowedRoles?: UserRole[];
 }
 
 const ROLE_OPTIONS: { key: UserRole; icon: AppIconName }[] = [
@@ -58,6 +60,8 @@ const ROLE_OPTIONS: { key: UserRole; icon: AppIconName }[] = [
   { key: 'agent', icon: 'handshake' },
   { key: 'admin', icon: 'shield' },
 ];
+
+const DEFAULT_ALLOWED_ROLES: UserRole[] = ['guest', 'tenant', 'owner', 'agent', 'admin'];
 
 const LOCALE_OPTIONS: SupportedLocale[] = ['th', 'en', 'zh', 'ja'];
 
@@ -77,6 +81,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
   onRoleChange,
   onSignOut,
   onMenuAction,
+  allowedRoles = DEFAULT_ALLOWED_ROLES,
 }) => {
   const { t, locale, setLocale } = useLocale();
   const { theme, themeMode, setThemeMode, isDark } = useMobileTheme();
@@ -95,7 +100,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
   };
   const [mounted, setMounted] = useState(false);
   const [settingsView, setSettingsView] = useState<'main' | DrawerSubView>('main');
-  const [accountNested, setAccountNested] = useState(false);
+  const [accountNestedTitle, setAccountNestedTitle] = useState<string | null>(null);
   const [submenuParent, setSubmenuParent] = useState<DrawerMenuItem | null>(null);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const accountRef = useRef<MobileAccountSettingsBodyHandle>(null);
@@ -105,6 +110,11 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
   const contentWidth = panelWidth - 28;
 
   const drawerSections = getDrawerMenuForRole(activeRole);
+  const visibleRoleOptions = ROLE_OPTIONS.filter(
+    (role) => allowedRoles.includes(role.key) || role.key === activeRole,
+  );
+  const isGuestHeader = activeRole === 'guest';
+  const headerBtnBg = isGuestHeader ? 'rgba(33,30,30,0.08)' : 'rgba(255,255,255,0.92)';
 
   const openSubView = (view: DrawerSubView) => {
     setSettingsView(view);
@@ -118,7 +128,11 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
         runOnJS(setSubmenuParent)(null);
       }
     });
-    setAccountNested(false);
+    setAccountNestedTitle(null);
+  };
+
+  const handleAccountNestedChange = (active: boolean, title?: string) => {
+    setAccountNestedTitle(active ? title ?? null : null);
   };
 
   const handleSubBack = () => {
@@ -169,7 +183,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
   useEffect(() => {
     if (!visible) {
       setSettingsView('main');
-      setAccountNested(false);
+      setAccountNestedTitle(null);
       setSubmenuParent(null);
       setExpandedIds({});
       contentSlideX.value = 0;
@@ -215,15 +229,16 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
       ? t.mobile.settings.language
       : settingsView === 'roleMenu' && submenuParent
         ? t.mobile.drawerMenu[submenuParent.labelKey]
-        : settingsView === 'account' && accountNested
-          ? t.mobile.account.changePassword
-          : t.mobile.account.title;
+        : settingsView === 'account'
+          ? accountNestedTitle ?? t.mobile.appSettings.title
+          : t.mobile.appSettings.title;
 
   const currentLanguageLabel = t.mobile.settings.languageNames[locale];
 
   const renderMenuRow = (item: DrawerMenuItem, opts?: { nested?: boolean; isLast?: boolean }) => {
     const hasChildren = Boolean(item.children?.length);
     const isExpanded = Boolean(expandedIds[item.id]);
+    const isLeaf = !hasChildren && Boolean(item.action);
 
     return (
       <View key={item.id}>
@@ -250,8 +265,10 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
             <MobileIcon
               name={isExpanded ? 'chevron-down' : 'chevron-right'}
               size={18}
-              tone="muted"
+              color={tokens.colors.icon.secondary}
             />
+          ) : isLeaf ? (
+            <MobileIcon name="chevron-right" size={18} color={tokens.colors.icon.secondary} />
           ) : null}
         </TouchableOpacity>
         {hasChildren && (item.presentation ?? 'expand') === 'expand' && isExpanded
@@ -303,25 +320,28 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                 scrollEnabled={settingsView === 'main'}
               >
             <View style={[styles.heroCard, { backgroundColor: roleColor }]}>
-              <View>
-                <MobileNestykLogo
-                  variant={activeRole === 'guest' ? 'wordmark' : 'wordmarkOnDark'}
-                  height={26}
-                />
-                <Text style={styles.heroSubtitle}>{t.mobile.profile.hubSubtitle}</Text>
-              </View>
+              <MobileNestykLogo
+                variant={isGuestHeader ? 'wordmark' : 'wordmarkOnDark'}
+                height={22}
+              />
               <TouchableOpacity
-                style={styles.closeBtn}
+                style={[styles.headerActionBtn, { backgroundColor: headerBtnBg }]}
                 onPress={onClose}
                 activeOpacity={0.75}
                 accessibilityRole="button"
                 accessibilityLabel="Close menu"
               >
-                <MobileIcon name="chevron-left" size={20} tone="active" />
+                <MobileIcon name="close" size={18} color={tokens.colors.primary} weight="bold" />
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.profileCard, nativeElevation(1), { backgroundColor: theme.card }]}>
+            <TouchableOpacity
+              style={[styles.profileCard, nativeElevation(1), { backgroundColor: theme.card }]}
+              onPress={() => openSubView('account')}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={t.mobile.profile.edit}
+            >
               <View style={styles.profileAvatar}>
                 <Text style={styles.profileAvatarText}>{initials}</Text>
               </View>
@@ -331,16 +351,20 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                   {roleSubtitleMap[activeRole]}
                 </Text>
               </View>
-              <MobileIcon name="dots-vertical" size={20} tone="muted" />
-            </View>
+              <Text style={[styles.editAction, { color: tokens.colors.icon.secondary }]}>
+                {t.mobile.profile.edit}
+              </Text>
+            </TouchableOpacity>
 
-            <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>
+            <Text style={[styles.sectionLabel, styles.sectionLabelFirst, { color: theme.textSecondary }]}>
               {t.mobile.profile.switchRole}
             </Text>
             <View style={styles.roleGrid}>
-              {ROLE_OPTIONS.map((role) => {
+              {visibleRoleOptions.map((role) => {
                 const isActive = activeRole === role.key;
                 const color = tokens.colors.roles[role.key] || tokens.colors.brand[500];
+                const activeLabelColor =
+                  role.key === 'guest' ? tokens.colors.primary : '#FFFFFF';
                 return (
                   <TouchableOpacity
                     key={role.key}
@@ -355,15 +379,13 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                     <MobileIcon
                       name={role.icon}
                       size={14}
-                      color={isActive ? (role.key === 'guest' ? tokens.colors.primary : '#FFFFFF') : tokens.colors.icon.secondary}
+                      color={isActive ? activeLabelColor : tokens.colors.icon.secondary}
                       weight={isActive ? 'bold' : 'regular'}
                     />
                     <Text
                       style={[
                         styles.roleChipLabel,
-                        isActive && {
-                          color: role.key === 'guest' ? tokens.colors.primary : '#FFFFFF',
-                        },
+                        isActive && { color: activeLabelColor },
                       ]}
                     >
                       {t.roles[role.key]}
@@ -397,14 +419,14 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel={t.mobile.profile.accountSettings}
               >
-                <MobileIcon name="gear" size={20} color={theme.textSecondary} />
+                <MobileIcon name="gear" size={20} color={tokens.colors.icon.secondary} />
                 <Text style={[styles.navLabel, { color: theme.textHeading }]}>
                   {t.mobile.profile.accountSettings}
                 </Text>
-                <MobileIcon name="chevron-right" size={18} tone="muted" />
+                <MobileIcon name="chevron-right" size={18} color={tokens.colors.icon.secondary} />
               </TouchableOpacity>
               <View style={[styles.settingRow, styles.settingRowBorder, { borderTopColor: theme.border }]}>
-                <MobileIcon name="moon" size={20} color={theme.textSecondary} />
+                <MobileIcon name="moon" size={20} color={tokens.colors.icon.secondary} />
                 <Text style={[styles.navLabel, { color: theme.textHeading }]}>
                   {t.mobile.settings.darkMode}
                 </Text>
@@ -422,14 +444,14 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel={t.mobile.settings.language}
               >
-                <MobileIcon name="globe" size={20} color={theme.textSecondary} />
+                <MobileIcon name="globe" size={20} color={tokens.colors.icon.secondary} />
                 <Text style={[styles.navLabel, { color: theme.textHeading }]}>
                   {t.mobile.settings.language}
                 </Text>
                 <Text style={[styles.settingValue, { color: theme.textSecondary }]}>
                   {currentLanguageLabel}
                 </Text>
-                <MobileIcon name="chevron-right" size={18} tone="muted" />
+                <MobileIcon name="chevron-right" size={18} color={tokens.colors.icon.secondary} />
               </TouchableOpacity>
             </View>
               </ScrollView>
@@ -443,7 +465,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                     accessibilityRole="button"
                     accessibilityLabel="Back"
                   >
-                    <MobileIcon name="chevron-left" size={20} tone="active" />
+                    <MobileIcon name="chevron-left" size={20} color={tokens.colors.icon.dark} />
                   </TouchableOpacity>
                   <Text style={[styles.subTitle, { color: theme.textHeading }]}>{subViewTitle}</Text>
                 </View>
@@ -494,8 +516,9 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                       email: userEmail,
                       phone: userPhone,
                     }}
+                    appVersion="0.1.0"
                     onSignOut={handleSignOut}
-                    onNestedViewChange={setAccountNested}
+                    onNestedViewChange={handleAccountNestedChange}
                   />
                 ) : settingsView === 'roleMenu' && submenuParent?.children ? (
                   <View style={[styles.languageList, nativeElevation(1), { backgroundColor: theme.card }]}>
@@ -517,7 +540,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                           <Text style={[styles.navLabel, { color: theme.textHeading }]}>
                             {t.mobile.drawerMenu[child.labelKey]}
                           </Text>
-                          <MobileIcon name="chevron-right" size={18} tone="muted" />
+                          <MobileIcon name="chevron-right" size={18} color={tokens.colors.icon.secondary} />
                         </TouchableOpacity>
                       );
                     })}
@@ -560,61 +583,46 @@ const styles = StyleSheet.create({
     borderRadius: PANEL_RADIUS,
   },
   scrollContent: {
-    paddingTop: 14,
+    paddingTop: 8,
     paddingBottom: 20,
   },
   heroCard: {
-    borderRadius: 20,
-    paddingVertical: 22,
-    paddingHorizontal: 18,
-    minHeight: 108,
-    justifyContent: 'flex-end',
-    marginBottom: 12,
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  heroSubtitle: {
-    fontFamily: tokens.typography.native.body,
-    fontSize: 13,
-    lineHeight: 19,
-    color: 'rgba(255,255,255,0.88)',
-    marginTop: 4,
-  },
-  closeBtn: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
+  headerActionBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  closeBtnText: {
-    color: tokens.colors.primary,
-    fontSize: 22,
-    lineHeight: 24,
-    fontWeight: '600',
-    marginTop: -1,
   },
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     borderRadius: 16,
-    padding: 14,
-    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 4,
   },
   profileAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: tokens.colors.brand[500],
     alignItems: 'center',
     justifyContent: 'center',
   },
   profileAvatarText: {
     fontFamily: tokens.typography.native.headingEn,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: tokens.colors.primary,
   },
@@ -634,9 +642,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: tokens.colors.textSecondary,
   },
-  moreBtn: {
-    fontSize: 20,
-    color: tokens.colors.textSecondary,
+  editAction: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '600',
     paddingHorizontal: 4,
   },
   sectionLabel: {
@@ -645,8 +655,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.8,
     color: tokens.colors.textSecondary,
-    marginBottom: 10,
-    marginTop: 14,
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  sectionLabelFirst: {
+    marginTop: 8,
   },
   roleGrid: {
     flexDirection: 'row',
@@ -656,19 +669,20 @@ const styles = StyleSheet.create({
   roleChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
     borderWidth: 1,
-  },
-  roleChipEmoji: {
-    fontSize: 12,
+    flexGrow: 1,
+    flexBasis: '46%',
+    maxWidth: '48%',
   },
   roleChipLabel: {
     fontFamily: tokens.typography.native.body,
     fontSize: 12,
-    fontWeight: '500',
+    lineHeight: 18,
+    fontWeight: '600',
     color: tokens.colors.textSecondary,
   },
   navLabel: {
@@ -678,10 +692,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: tokens.colors.textHeading,
     fontWeight: '500',
-  },
-  chevron: {
-    fontSize: 18,
-    color: tokens.colors.placeholder,
   },
   settingsCard: {
     borderRadius: 16,
@@ -707,15 +717,15 @@ const styles = StyleSheet.create({
     marginRight: 2,
   },
   subPane: {
-    paddingTop: 14,
+    paddingTop: 10,
     flex: 1,
   },
   subHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 16,
-    paddingTop: 6,
+    marginBottom: 12,
+    paddingTop: 4,
   },
   subBackBtn: {
     width: 32,

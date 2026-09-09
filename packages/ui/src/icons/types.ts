@@ -9,6 +9,8 @@ export type AppIconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'chevron-down'
+  | 'close'
+  | 'heart'
   | 'dots-vertical'
   | 'trash'
   | 'calendar'
