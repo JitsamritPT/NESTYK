@@ -1,4 +1,4 @@
-# Real room photos (local API storage)
+# Real room photos (Supabase Storage)
 
 The agent mobile wizard selects 5–12 photos from the device library, previews them,
 allows removal and makes the tapped image the cover. It uploads at final submission,
@@ -12,28 +12,32 @@ a JPEG with longest edge at most 2400 pixels. JPEG, PNG and WebP are supported;
 HEIF/AVIF decoding depends on the installed Sharp codecs. The iOS picker requests
 compatible representations. Corrupt, animated and non-image files are rejected.
 
-Files are stored in `.data/room-photos/<agent-id>/<random-uuid>.jpg` at the repository
-root, outside Git. `ROOM_PHOTO_DIR` can override this with an absolute persistent
-folder. No database migration is needed: room URLs and cover flags use `room_medias`.
-Room creation rejects missing, duplicate or other agents' uploaded files.
+New files are stored in Supabase Storage at
+`<SUPABASE_BUCKET_PROPERTIES>/<agent-id>/<random-uuid>.jpg` (default bucket:
+`property-images`). Configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in
+root `.env.api`; the service role key must stay on the API server. Like NETIQ, the API automatically creates a missing public bucket on first upload,
+allowing `image/jpeg` up to 10 MiB. Existing buckets retain their settings and must
+be public. Failed initialization is retried on the next upload. NESTYK keeps its
+`property-images` bucket and agent/UUID paths so existing photo URLs remain valid.
+Client uploads still pass through the authenticated agent API; no anonymous write
+policy is needed. Missing configuration or failed uploads return 503, without a
+local-disk fallback. Restart the API after changing configuration.
 
-The image URL uses the upload request's origin by default. If behind a proxy, set
-`PUBLIC_API_URL` to the externally accessible API origin **without `/api/v1`**.
-The phone's `EXPO_PUBLIC_API_URL` must reach that machine, for example
-`http://192.168.1.10:4000/api/v1`; localhost on a physical phone points at the phone.
-Restart the API and Expo after installing dependencies. A custom native development
-build must be rebuilt to include expo-image-picker; Expo Go SDK 54 includes it.
+The returned `mediaUrl` is the Supabase public URL. No database migration is needed:
+room URLs and cover flags use `room_medias`. Saving verifies that every cloud photo
+exists and belongs to the current agent's folder, rejecting duplicates and foreign URLs.
+Supabase images are public, including photos attached to private listings; this
+bucket must never hold identity, bank or ownership documents.
 
-Local image URLs can be read by anyone possessing the URL (including photos on
-private listings). This endpoint is for room photos only, never identity/bank documents.
-Keep the storage folder across API restarts/deployments. Files uploaded before an
-abandoned/failed save remain on disk; automatic orphan cleanup is not implemented.
-Deleting a photo in the wizard removes it from the new listing's payload.
+Legacy local photo serving has been removed. Delete old local references using
+`migrations/20260909-remove-local-room-photos.sql`, then remove `.data/room-photos`.
+Rooms without photos remain in the listings with no cover image.
+Abandoned Supabase uploads are not automatically cleaned up.
 
-Verification: `npm run test:room-photos --workspace @nestyk/api` starts an isolated
-HTTP server and uses a temporary folder. It does not connect to the application DB.
-It tests auth, multipart uploads, corrupt/oversize files, retrieval, normalization,
-metadata removal, duplicate/foreign/missing URLs and persistence across service instances.
+Verification: `npm run test:room-photos --workspace @nestyk/api` runs the real
+multipart API with an in-memory Supabase storage test double . It checks auth, corrupt/oversize files, image normalization, cloud URLs,
+ownership, duplicates, missing objects, storage failures and rejection of legacy URLs.
+It does not connect to the application DB or a live Supabase project.
 
 Device acceptance: create a room with five photos, cancel then reopen the picker,
 remove/reselect photos, choose a cover, save, and check the cover in My Listings.

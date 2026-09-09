@@ -2,7 +2,6 @@ import { LeadEntity } from '../entities/lead.entity';
 import { AgentLeadsService } from './leads/agent-leads.service';
 import { AgentLeadsController } from './leads/agent-leads.controller';
 import { RoomPhotoStorageService } from './rooms/room-photo-storage.service';
-import { RoomImagesController } from './rooms/room-images.controller';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
@@ -58,7 +57,7 @@ import { AgentPlacesService } from './places/agent-places.service';
       RentRoomDocumentEntity,
     ]),
   ],
-  controllers: [AgentLeadsController, RoomImagesController, AgentRoomsController, AgentListingsController, AgentPlacesController],
+  controllers: [AgentLeadsController, AgentRoomsController, AgentListingsController, AgentPlacesController],
   providers: [AgentLeadsService, RoomPhotoStorageService, AgentRoomsService, AgentListingsService, AgentPlacesService],
   exports: [AgentRoomsService, AgentListingsService, AgentPlacesService],
 })

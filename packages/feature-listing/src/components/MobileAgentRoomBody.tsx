@@ -1,6 +1,7 @@
+import { Image } from 'expo-image';
 import { initialPhotoLoad, photoLoadReducer } from './room-photo-load';
-import React, { useReducer, useMemo, useEffect } from 'react';
-import { View, Text, Image, ScrollView, StyleSheet, useWindowDimensions, Linking, ActivityIndicator } from 'react-native';
+import React, { useReducer, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, useWindowDimensions, Linking, ActivityIndicator } from 'react-native';
 import { useLocale } from '@nestyk/i18n';
 import { MobileButton, MobileBadge, tokens, useMobileTheme } from '@nestyk/ui/native';
 
@@ -19,15 +20,14 @@ export type AgentRoomDetail = {
 
 function Photo({ uri, width, fallback, retryLabel }: { uri: string; width: number; fallback: string; retryLabel: string }) {
   const [state, dispatch] = useReducer(photoLoadReducer, initialPhotoLoad);
-  const source = useMemo(() => ({ uri, cache: state.attempt === 0 ? 'default' as const : 'reload' as const }), [uri, state.attempt]);
   useEffect(() => {
     if (state.status !== 'loading') return;
-    const timeout = setTimeout(() => dispatch({ type: 'failed', attempt: state.attempt }), 15000);
+    const timeout = setTimeout(() => dispatch({ type: 'timeout', attempt: state.attempt }), 8000);
     return () => clearTimeout(timeout);
   }, [state.attempt, state.status]);
   return <View style={[styles.photo, { width, overflow: 'hidden' }]}>
     {state.status !== 'failed' && <Image
-      key={`${uri}:${state.attempt}`} source={source} resizeMode="contain"
+      key={`${uri}:${state.attempt}`} source={{ uri }} contentFit="contain" cachePolicy="memory-disk"
       style={{ width: '100%', height: '100%' }}
       onLoad={() => dispatch({ type: 'loaded', attempt: state.attempt })}
       onError={() => dispatch({ type: 'failed', attempt: state.attempt })}

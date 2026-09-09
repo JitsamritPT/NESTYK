@@ -12,7 +12,7 @@ const { photoLoadReducer: reduce, initialPhotoLoad: initial } = loaded.exports;
 test('first successful load displays without reopening the room', () => {
   assert.deepEqual(reduce(initial, { type: 'loaded', attempt: 0 }), { attempt: 0, status: 'loaded' });
 });
-test('a transient error or timeout retries once automatically', () => {
+test('a transient error retries once automatically', () => {
   const retrying = reduce(initial, { type: 'failed', attempt: 0 });
   assert.deepEqual(retrying, { attempt: 1, status: 'loading' });
   assert.equal(reduce(retrying, { type: 'loaded', attempt: 1 }).status, 'loaded');
@@ -28,4 +28,11 @@ test('persistent errors stop retrying and allow retry from the same screen', () 
   const failed = reduce({ attempt: 1, status: 'loading' }, { type: 'failed', attempt: 1 });
   assert.equal(failed.status, 'failed');
   assert.deepEqual(reduce(failed, { type: 'retry' }), { attempt: 2, status: 'loading' });
+});
+
+test('a stalled request stops at the deadline and permits manual retry', () => {
+  const failed = reduce(initial, { type: 'timeout', attempt: 0 });
+  assert.deepEqual(failed, { attempt: 0, status: 'failed' });
+  assert.equal(reduce(failed, { type: 'loaded', attempt: 0 }), failed);
+  assert.deepEqual(reduce(failed, { type: 'retry' }), { attempt: 1, status: 'loading' });
 });
