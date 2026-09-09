@@ -1,6 +1,11 @@
 import React from 'react';
-import { View, Text, TextInput, StyleSheet, TextInputProps, ViewStyle } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TextInputProps, ViewStyle, TextStyle, Platform } from 'react-native';
 import { tokens } from '../theme/tokens';
+
+// Keep Safari's read-only text color override on the web only.
+const readOnlyWebStyle: TextStyle & Pick<React.CSSProperties, 'WebkitTextFillColor'> = {
+  WebkitTextFillColor: tokens.colors.primary,
+};
 
 export interface MobileInputProps extends TextInputProps {
   label?: string;
@@ -44,6 +49,7 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
           style={[
             styles.input,
             !editable ? styles.inputReadOnly : null,
+            !editable && Platform.OS === 'web' ? readOnlyWebStyle : null,
             error ? { borderColor: tokens.colors.error } : null,
             style,
           ]}
@@ -89,7 +95,6 @@ const styles = StyleSheet.create({
     backgroundColor: tokens.colors.background,
     color: tokens.colors.primary,
     opacity: 1,
-    WebkitTextFillColor: tokens.colors.primary,
   } as const,
   errorText: {
     fontFamily: tokens.typography.native.body,

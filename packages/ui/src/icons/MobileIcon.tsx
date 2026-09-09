@@ -31,6 +31,13 @@ import {
   CheckCircle,
   CalendarPlus,
   QrCode,
+  Buildings,
+  Bed,
+  Camera,
+  Coins,
+  MapPin,
+  NotePencil,
+  WarningCircle,
   IconProps,
 } from 'phosphor-react-native';
 import { tokens } from '../theme/tokens';
@@ -68,6 +75,13 @@ const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
   check: CheckCircle,
   'calendar-plus': CalendarPlus,
   'qr-code': QrCode,
+  buildings: Buildings,
+  bed: Bed,
+  camera: Camera,
+  coins: Coins,
+  'map-pin': MapPin,
+  note: NotePencil,
+  warning: WarningCircle,
 };
 
 const TONE_COLORS: Record<AppIconTone, string> = {

@@ -74,7 +74,7 @@ export function AgentRoomsScreen({ onCreate }: { onCreate: () => void }) {
           <View style={{ flex: 1 }}><MobileButton variant="outline" disabled={saving} onPress={() => { if (editing) setEditing(false); else setSelected(null); }}>{`‹ ${editing ? copy.cancelEdit : copy.backToRooms}`}</MobileButton></View>
           {room && !editing && <MobileButton onPress={() => setEditing(true)}>{copy.editRoom}</MobileButton>}
         </View>
-        {!modalReady ? <ActivityIndicator /> : detailError ? <View style={{ padding: 24, gap: 16 }}><Text style={{ color: theme.textHeading }}>{detailError}</Text><MobileButton onPress={() => setDetailRefresh((n) => n + 1)}>{copy.retry}</MobileButton></View> : room ? (editing ? <View style={{ flex: 1, padding: 16 }}><AgentRoomEditor room={room} onBusy={setSaving} onSaved={() => { setEditing(false); setDetailRefresh((n) => n + 1); setRefresh((n) => n + 1); }} /></View> : <MobileAgentRoomBody key={`${room.id}-${detailRefresh}`} room={room} />) : <ActivityIndicator />}
+        {!modalReady ? <ActivityIndicator /> : detailError ? <View style={{ padding: 24, gap: 16 }}><Text style={{ color: theme.textHeading }}>{detailError}</Text><MobileButton onPress={() => setDetailRefresh((n) => n + 1)}>{copy.retry}</MobileButton></View> : room ? (editing ? <View style={{ flex: 1, padding: 16 }}><AgentRoomEditor room={room} onBusy={setSaving} onSaved={() => { setEditing(false); setDetailRefresh((n) => n + 1); setRefresh((n) => n + 1); }} /></View> : <MobileAgentRoomBody mapsApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY} key={`${room.id}-${detailRefresh}`} room={room} />) : <ActivityIndicator />}
       </SafeAreaView>
       </SafeAreaProvider>
     </Modal>

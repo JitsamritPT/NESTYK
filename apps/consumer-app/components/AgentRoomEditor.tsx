@@ -2,8 +2,8 @@ import React, { useMemo } from 'react';
 import { AgentRoomDetail, CreateRoomWizardSubmitData, MobileCreateListingWizardBody, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import { useLocale } from '@nestyk/i18n';
 import { pickRoomPhotos, uploadRoomPhoto } from '../lib/room-photos';
-import { fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, updateAgentRoom } from '../lib/agent-listings-api';
-import { searchPlaces, getPlaceDetails } from '../lib/places-api';
+import { fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities, updateAgentRoom } from '../lib/agent-listings-api';
+import { searchPlaces, getPlaceDetails, searchNearbyPlaces } from '../lib/places-api';
 
 export function AgentRoomEditor({ room, onSaved, onBusy }: { room: AgentRoomDetail; onSaved: () => void; onBusy: (busy: boolean) => void }) {
   const { t, locale } = useLocale();
@@ -27,7 +27,9 @@ export function AgentRoomEditor({ room, onSaved, onBusy }: { room: AgentRoomDeta
     waterRatePerUnit: room.waterRatePerUnit == null ? undefined : Number(room.waterRatePerUnit),
     electricRatePerUnit: room.electricRatePerUnit == null ? undefined : Number(room.electricRatePerUnit),
     medias: room.medias.filter((m) => m.mediaType === 'image').map((m, index) => ({ mediaUrl: m.mediaUrl, category: 'room', isCover: m.isCover, sortOrder: index })),
-    facilities: [], documents: [],
+    facilities: room.facilityItems ?? [], customFacilities: room.customFacilities ?? [],
+    nearbyOther: room.nearbyOther ?? '', nearbyPlaces: room.nearbyPlaces,
+    documents: room.documents ?? [],
     latitude: room.latitude == null ? undefined : Number(room.latitude),
     longitude: room.longitude == null ? undefined : Number(room.longitude),
   }), [room]);
@@ -36,7 +38,8 @@ export function AgentRoomEditor({ room, onSaved, onBusy }: { room: AgentRoomDeta
     title={t.agent.listings.editRoom} submitLabel={t.agent.listings.saveChanges}
     onSubmittingChange={onBusy} pickPhotos={pickRoomPhotos} uploadPhoto={uploadRoomPhoto}
     listContacts={fetchAgentContacts} listPropertyTypes={fetchAgentPropertyTypes}
-    listContractTypes={fetchAgentContractTypes} listRoomTypes={fetchAgentRoomTypes}
+    listContractTypes={fetchAgentContractTypes} listRoomTypes={fetchAgentRoomTypes} listFacilities={fetchAgentFacilities} mapsApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+    searchNearby={(lat, lng) => searchNearbyPlaces(lat, lng, locale)}
     searchPlaces={(q) => searchPlaces(q, locale)} getPlaceDetails={(id) => getPlaceDetails(id, locale)}
     onSubmitListing={async (data) => { await updateAgentRoom(room.id, data); onSaved(); }}
   />;

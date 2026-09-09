@@ -28,7 +28,7 @@ const room = {
   ],
   layout_values: [{ layout: { code: 'bedroom' }, value: '1' }],
   facilities: [], custom_facilities: [],
-  owner_identity_number: 'must-not-leak', documents: [{ media_url: 'secret' }],
+  owner_identity_number: 'must-not-leak', documents: [{ id: 1, kind: 'ownership', media_url: 'https://example.com/ownership.pdf', sort_order: 0 }],
 };
 
 test('detail endpoint scopes access, returns all prices and cover first, excludes sensitive fields', async (t) => {
@@ -60,7 +60,9 @@ test('detail endpoint scopes access, returns all prices and cover first, exclude
   assert.equal(detail.medias[0].mediaUrl, 'cover.jpg');
   assert.equal(detail.contacts.length, 1);
   assert.equal(detail.layout[0].value, '1');
-  assert.equal(detail.documents, undefined);
+  assert.deepEqual(detail.documents, [{ kind: 'ownership', mediaUrl: 'https://example.com/ownership.pdf', sortOrder: 0 }]);
+  assert.deepEqual(detail.facilityItems, []);
+  assert.deepEqual(detail.customFacilities, []);
   assert.equal(detail.owner_identity_number, undefined);
 });
 

@@ -1,3 +1,5 @@
+import { validateNearbyPlaces, validCoordinates, distanceMeters } from '../places/nearby-places';
+import type { NearbyPlace } from '@nestyk/types';
 import { RoomPhotoStorageService } from './room-photo-storage.service';
 import {
   BadRequestException,
@@ -17,7 +19,6 @@ import { MasterListingSourceEntity } from '../../entities/master-listing-source.
 import { MasterRoomStatusEntity } from '../../entities/master-room-status.entity';
 import { MasterLayoutEntity } from '../../entities/master-layout.entity';
 import { MasterFacilityEntity } from '../../entities/master-facility.entity';
-import { MasterFacilitiesGroupEntity } from '../../entities/master-facilities-group.entity';
 import { RentRoomEntity } from '../../entities/rent-room.entity';
 import { RentRoomContactEntity } from '../../entities/rent-room-contact.entity';
 import { RentRoomPriceEntity } from '../../entities/rent-room-price.entity';
@@ -82,6 +83,11 @@ export class AgentRoomsService {
       code: row.code,
       termMonths: row.term_months,
     }));
+  }
+
+  async listFacilities() {
+    const rows = await this.facilitiesRepo.find({ relations: { group: true }, order: { group: { sort_order: 'ASC', id: 'ASC' }, sort_order: 'ASC', id: 'ASC' } });
+    return rows.filter((row) => !['aircon', 'air_con', 'air_conditioner'].includes(row.code)).map((row) => ({ code: row.code, groupCode: row.group.code, isExtraCharge: row.is_extra_charge }));
   }
 
   async listRoomTypes() {
@@ -168,6 +174,7 @@ export class AgentRoomsService {
 
   async createScoutRoom(agent: AuthRequestUser, body: CreateRoomBody, baseUrl: string, existingId?: number) {
     this.validateCreateBody(body);
+    body = { ...body, medias: body.medias ?? [] };
 
     return this.dataSource.transaction(async (manager) => {
       const existing = existingId == null ? null : await manager.findOne(RentRoomEntity, {
@@ -187,6 +194,14 @@ export class AgentRoomsService {
       const roomType = await this.resolveRoomType(manager, body.roomTypeId);
       const listingSource = await this.resolveListingSource(manager, body.listingSourceCode);
 
+      const property = await manager.findOne(PropertyEntity, { where: { id: propertyId } });
+      const originLat = body.latitude ?? (property?.latitude == null ? null : Number(property.latitude));
+      const originLng = body.longitude ?? (property?.longitude == null ? null : Number(property.longitude));
+      const nearbyPlaces = (body.nearbyPlaces ?? existing?.nearby_places ?? []) as NearbyPlace[];
+      if (nearbyPlaces.length && !validCoordinates(originLat, originLng)) throw new BadRequestException('Property coordinates required for nearby places');
+      const savedNearby = nearbyPlaces.map((p) => ({ ...p, name: p.name.trim(),
+        distanceMeters: distanceMeters(originLat!, originLng!, p.latitude, p.longitude),
+      })).sort((a, b) => a.distanceMeters - b.distanceMeters);
       const status = await manager.findOne(MasterRoomStatusEntity, {
         where: { code: 'available' },
       });
@@ -209,7 +224,7 @@ export class AgentRoomsService {
         latitude: body.latitude != null ? String(body.latitude) : null,
         longitude: body.longitude != null ? String(body.longitude) : null,
         nearby_other: body.nearbyOther ?? existing?.nearby_other ?? null,
-        nearby_places: body.nearbyPlaces ?? existing?.nearby_places ?? [],
+        nearby_places: savedNearby,
         water_rate_per_unit:
           body.waterRatePerUnit != null && Number(body.waterRatePerUnit) > 0
             ? String(body.waterRatePerUnit)
@@ -287,26 +302,15 @@ export class AgentRoomsService {
         }
       }
 
-      if (!existing && body.facilities?.length) {
+      if (existing && body.facilities !== undefined) {
+        await manager.delete(RoomFacilityEntity, { rent_room_id: saved.id });
+      }
+      if (body.facilities?.length) {
         for (const item of body.facilities) {
-          let facility = await manager.findOne(MasterFacilityEntity, {
-            where: { code: item.code },
+          const facility = await manager.findOne(MasterFacilityEntity, {
+            where: { code: item.code, ...(item.groupCode ? { group: { code: item.groupCode } } : {}) },
             relations: { group: true },
           });
-          if (!facility && item.groupCode) {
-            const group = await manager.findOne(MasterFacilitiesGroupEntity, {
-              where: { code: item.groupCode },
-            });
-            if (!group) {
-              throw new BadRequestException(`Unknown facility group: ${item.groupCode}`);
-            }
-            facility = await manager.save(
-              manager.create(MasterFacilityEntity, {
-                group_id: group.id,
-                code: item.code,
-              }),
-            );
-          }
           if (!facility) {
             throw new BadRequestException(`Unknown facility code: ${item.code}`);
           }
@@ -336,7 +340,7 @@ export class AgentRoomsService {
           }),
         );
       }
-      if (!coverSet) {
+      if (!coverSet && body.medias!.length > 0) {
         await manager.query(
           `UPDATE room_medias SET is_cover = TRUE WHERE rent_id = $1 AND id = (
              SELECT id FROM room_medias WHERE rent_id = $1 ORDER BY sort_order ASC, id ASC LIMIT 1
@@ -345,7 +349,10 @@ export class AgentRoomsService {
         );
       }
 
-      if (!existing && body.documents?.length) {
+      if (existing && body.documents !== undefined) {
+        await manager.delete(RentRoomDocumentEntity, { rent_id: saved.id });
+      }
+      if (body.documents?.length) {
         for (let i = 0; i < body.documents.length; i++) {
           const d = body.documents[i];
           await manager.save(
@@ -371,6 +378,39 @@ export class AgentRoomsService {
   }
 
   private validateCreateBody(body: CreateRoomBody) {
+    if (body.nearbyPlaces !== undefined) validateNearbyPlaces(body.nearbyPlaces);
+    if ((body.latitude !== undefined || body.longitude !== undefined) && !validCoordinates(body.latitude, body.longitude)) throw new BadRequestException('Valid latitude and longitude required');
+    if (body.listingDescription !== undefined && (typeof body.listingDescription !== 'string' || body.listingDescription.length > 10000)) {
+      throw new BadRequestException('listingDescription must be text up to 10000 characters');
+    }
+    if (body.nearbyOther !== undefined && (typeof body.nearbyOther !== 'string' || body.nearbyOther.length > 500)) {
+      throw new BadRequestException('nearbyOther must be text up to 500 characters');
+    }
+    if (body.availableFromDate !== undefined) {
+      const date = body.availableFromDate;
+      if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) {
+        throw new BadRequestException('availableFromDate must be a valid YYYY-MM-DD date');
+      }
+    }
+    if (body.customFacilities !== undefined && (!Array.isArray(body.customFacilities) || body.customFacilities.length > 50 || body.customFacilities.some((v) => typeof v !== 'string' || !v.trim() || v.length > 100))) {
+      throw new BadRequestException('customFacilities must contain at most 50 names, up to 100 characters each');
+    }
+    if (body.facilities !== undefined && (!Array.isArray(body.facilities) || body.facilities.length > 100 || body.facilities.some((v) => !v || typeof v.code !== 'string' || !v.code.trim() || v.code.length > 64 || (v.groupCode !== undefined && (typeof v.groupCode !== 'string' || !v.groupCode.trim() || v.groupCode.length > 64))))) {
+      throw new BadRequestException('Invalid facilities');
+    }
+    if (body.facilities && new Set(body.facilities.map((v) => `${v.groupCode ?? ''}:${v.code}`)).size !== body.facilities.length) {
+      throw new BadRequestException('Duplicate facilities');
+    }
+    if (body.documents !== undefined) {
+      if (!Array.isArray(body.documents) || body.documents.length > 20) throw new BadRequestException('At most 20 documents allowed');
+      for (const document of body.documents) {
+        if (!document || !['id_passport', 'bookbank', 'ownership', 'other'].includes(document.kind) || typeof document.mediaUrl !== 'string' || document.mediaUrl.length > 500) throw new BadRequestException('Invalid document');
+        try {
+          const url = new URL(document.mediaUrl);
+          if (url.protocol !== 'https:' || !url.hostname) throw new Error();
+        } catch { throw new BadRequestException('Document URL must be HTTPS'); }
+      }
+    }
     if (!body.visibility || !['private', 'published'].includes(body.visibility)) {
       throw new BadRequestException('visibility must be private or published');
     }
@@ -439,7 +479,7 @@ export class AgentRoomsService {
     }
     if ((body.medias?.length ?? 0) > 12) throw new BadRequestException('At most 12 room photos allowed');
     const roomMedias = (body.medias ?? []).filter((m) => (m.category ?? 'room') === 'room');
-    if (roomMedias.length < 5) {
+    if (body.visibility === 'published' && roomMedias.length < 5) {
       throw new BadRequestException('medias must include at least 5 items with category room');
     }
     for (const m of body.medias ?? []) {

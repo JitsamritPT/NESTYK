@@ -18,6 +18,11 @@ export class AgentPlacesController {
     return this.placesService.autocomplete(q ?? '', this.normalizeLanguage(language));
   }
 
+  @Get('nearby')
+  nearby(@Query('latitude') latitude?: string, @Query('longitude') longitude?: string, @Query('language') language?: string) {
+    return this.placesService.nearby(latitude?.trim() ? Number(latitude) : NaN, longitude?.trim() ? Number(longitude) : NaN, this.normalizeLanguage(language));
+  }
+
   @Get('details')
   details(
     @Query('placeId') placeId?: string,

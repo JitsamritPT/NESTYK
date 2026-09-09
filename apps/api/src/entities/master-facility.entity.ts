@@ -4,6 +4,12 @@ import { MasterFacilitiesGroupEntity } from './master-facilities-group.entity';
 
 @Entity({ name: 'master_facilities' })
 export class MasterFacilityEntity extends SerialEntity {
+  @Column({ type: 'int', default: 100 })
+  sort_order: number;
+
+  @Column({ type: 'boolean', default: false })
+  is_extra_charge: boolean;
+
   @Column({ type: 'int' })
   group_id: number;
 

@@ -1,3 +1,5 @@
+/// <reference path="./png.d.ts" />
+
 import brandIcon from '../../assets/logo/icon.png';
 import brandLogo from '../../assets/logo/Logo.png';
 import brandLogoWhite from '../../assets/logo/logo-white.png';

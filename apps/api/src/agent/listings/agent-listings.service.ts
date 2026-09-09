@@ -143,7 +143,7 @@ export class AgentListingsService {
         property: { property_type: true }, room_type: true, room_status: true,
         listing_source: true, medias: true, price_rows: { contract_type: true },
         room_contacts: { contact: true }, layout_values: { layout: true },
-        facilities: { facility: true },
+        facilities: { facility: { group: true } }, documents: true,
       },
     });
     if (!room) throw new NotFoundException('Room not found');
@@ -167,6 +167,11 @@ export class AgentListingsService {
         .map((m) => ({ id: m.id, mediaUrl: m.media_url, mediaType: m.media_type, isCover: m.is_cover })),
       layout: (room.layout_values ?? []).map((v) => ({ code: v.layout.code, value: v.value })),
       facilities: [...(room.facilities ?? []).map((f) => f.facility.code), ...(room.custom_facilities ?? [])],
+      facilityItems: (room.facilities ?? []).map((f) => ({ code: f.facility.code, groupCode: f.facility.group?.code })),
+      customFacilities: room.custom_facilities ?? [],
+      nearbyPlaces: room.nearby_places ?? [],
+      documents: [...(room.documents ?? [])].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+        .map((d) => ({ kind: d.kind, mediaUrl: d.media_url, sortOrder: d.sort_order })),
       nearbyOther: room.nearby_other,
       contacts: [...(room.room_contacts ?? [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
         .filter((link) => link.contact?.created_by_user_id === agentId)

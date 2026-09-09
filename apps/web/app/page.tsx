@@ -37,7 +37,7 @@ export default function HomePage() {
             backgroundColor: tokens.colors.brand[50],
             padding: '6px 14px',
             borderRadius: '20px',
-            border: `1px solid ${tokens.colors.brand[200]}`,
+            border: `1px solid ${tokens.colors.brand[100]}`,
           }}
         >
           {MOCK_HERO.badge}

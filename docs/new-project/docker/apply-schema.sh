@@ -10,6 +10,7 @@ DB_NAME="${POSTGRES_DB:-nestyk_db}"
 FILES=(
   "docs/new-project/roles/schema.sql"
   "docs/new-project/agent/create-room/schema.sql"
+  "docs/new-project/agent/create-room/migrations/20260909-amenities-catalog.sql"
   "docs/new-project/agent/leads/schema.sql"
   "docs/new-project/agent/leads/migrations/20260908-room-seeker-preferences.sql"
   "docs/new-project/agent/leads/migrations/20260908-lead-profile.sql"

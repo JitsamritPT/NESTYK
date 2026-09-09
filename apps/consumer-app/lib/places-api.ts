@@ -22,3 +22,10 @@ export async function getPlaceDetails(
   const params = new URLSearchParams({ placeId, language });
   return apiGet<PlaceDetails>(`/agent/places/details?${params.toString()}`);
 }
+
+export async function searchNearbyPlaces(latitude: number, longitude: number, language = 'th'): Promise<import('@nestyk/types').NearbyPlace[]> {
+  await ensureAgentSession();
+  const params = new URLSearchParams({ latitude: String(latitude), longitude: String(longitude), language });
+  const result = await apiGet<{ places: import('@nestyk/types').NearbyPlace[] }>(`/agent/places/nearby?${params}`);
+  return result.places;
+}

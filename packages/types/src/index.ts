@@ -5,3 +5,4 @@ export * from './contracts';
 export * from './api';
 
 export type { CreateLeadInput, AgentLead, AgentLeadsPage } from "./leads";
+export type { NearbyPlace, FacilityOption } from './nearby';

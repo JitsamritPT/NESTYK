@@ -1,3 +1,9 @@
+import type { FacilityOption, NearbyPlace } from '@nestyk/types';
+import { RoomFacilitiesEditor } from './RoomFacilitiesEditor';
+import { RoomNearbyEditor, type NearbySearch } from './RoomNearbyEditor';
+import { RoomEditSectionList } from './RoomEditSectionList';
+import { relocateNearby, isCustomPlace } from '../nearby';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -25,7 +31,8 @@ import { ListingEngineConfig } from '../config';
 import { PlaceDetails, PlaceSuggestion } from '../places';
 import { PropertyPlaceMap } from './PropertyPlaceMap';
 
-const TOTAL_STEPS = 5;
+const CREATE_STEPS = [1, 2, 6, 5, 8];
+const EDIT_STEPS = [1, 2, 5, 8, 6, 3, 4, 7];
 const OWNER_NOTE_MAX = 200;
 const DEFAULT_MAP = { latitude: 13.7563, longitude: 100.5018 };
 const ADVANCE_MONTH_OPTIONS = [0, 1, 2] as const;
@@ -96,7 +103,9 @@ export type CreateRoomWizardSubmitData = {
   advanceRentMonths: number;
   depositMonths: number;
   layout: Array<{ code: string; value: string }>;
-  facilities: Array<{ code: string }>;
+  facilities: FacilityOption[];
+  customFacilities?: string[];
+  nearbyPlaces?: NearbyPlace[];
   nearbyOther?: string;
   medias: Array<{
     mediaUrl: string;
@@ -104,7 +113,7 @@ export type CreateRoomWizardSubmitData = {
     isCover?: boolean;
     sortOrder: number;
   }>;
-  documents: Array<{ kind: 'other'; mediaUrl: string; sortOrder: number }>;
+  documents: Array<{ kind: 'id_passport' | 'bookbank' | 'ownership' | 'other'; mediaUrl: string; sortOrder: number }>;
   isScoutRoom: true;
   latitude?: number;
   longitude?: number;
@@ -127,6 +136,9 @@ export interface MobileCreateListingWizardBodyProps {
   listPropertyTypes?: () => Promise<PropertyTypeOption[]>;
   listContractTypes?: () => Promise<ContractTypeOption[]>;
   listRoomTypes?: () => Promise<RoomTypeOption[]>;
+  listFacilities?: () => Promise<FacilityOption[]>;
+  searchNearby?: NearbySearch;
+  mapsApiKey?: string;
 }
 
 function nativeElevation(level: 1 | 2 | 3) {
@@ -175,12 +187,35 @@ export const MobileCreateListingWizardBody: React.FC<
   listPropertyTypes,
   listContractTypes,
   listRoomTypes,
+  listFacilities,
+  searchNearby,
+  mapsApiKey,
 }) => {
   const { t } = useLocale();
   const cr = t.agent.createRoom;
   const themeColor = tokens.colors.roles[config.actorRole];
 
   const [step, setStep] = useState(1);
+  const visibleSteps = initialData ? EDIT_STEPS : CREATE_STEPS;
+  const stepIndex = visibleSteps.indexOf(step);
+  const [description, setDescription] = useState('');
+  const [availableFrom, setAvailableFrom] = useState('');
+  const [nearbyOther, setNearbyOther] = useState('');
+  const [nearbyPlaces, setNearbyPlaces] = useState<NearbyPlace[]>([]);
+  const [customFacilities, setCustomFacilities] = useState('');
+  const [facilities, setFacilities] = useState<CreateRoomWizardSubmitData['facilities']>([]);
+  const [facilityOptions, setFacilityOptions] = useState<FacilityOption[]>([]);
+  const [facilityError, setFacilityError] = useState('');
+  const [facilitiesLoading, setFacilitiesLoading] = useState(false);
+  const [documents, setDocuments] = useState<CreateRoomWizardSubmitData['documents']>([]);
+  const loadFacilities = async () => {
+    if (!listFacilities) return;
+    setFacilitiesLoading(true); setFacilityError('');
+    try { setFacilityOptions(await listFacilities()); }
+    catch { setFacilityError(cr.detailsLoadError); }
+    finally { setFacilitiesLoading(false); }
+  };
+  useEffect(() => { if (initialData) void loadFacilities(); }, [listFacilities, !!initialData]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [propertyName, setPropertyName] = useState('');
@@ -260,6 +295,13 @@ export const MobileCreateListingWizardBody: React.FC<
 
   useEffect(() => {
     if (!initialData) return;
+    setDescription(initialData.listingDescription ?? '');
+    setAvailableFrom(initialData.availableFromDate ?? '');
+    setNearbyOther(initialData.nearbyOther ?? '');
+    setNearbyPlaces(initialData.nearbyPlaces ?? []);
+    setCustomFacilities((initialData.customFacilities ?? []).join('\n'));
+    setFacilities(initialData.facilities);
+    setDocuments(initialData.documents);
     const p = initialData.property;
     setPropertyName(p.name); setAddress(p.address); setDistrict(p.district); setProvince(p.province);
     setSubdistrict(p.subdistrict ?? ''); setPostalCode(p.postalCode ?? ''); setPropertyTypeId(p.propertyTypeId);
@@ -282,12 +324,20 @@ export const MobileCreateListingWizardBody: React.FC<
     skipPlacesSearch.current = true;
   }, [initialData]);
 
+  useEffect(() => {
+    if (latitude == null || longitude == null) return;
+    setNearbyPlaces((current) => relocateNearby(current, latitude, longitude));
+  }, [latitude, longitude]);
+
   const stepTitle = useMemo(() => {
     const keys = [
       cr.steps.property,
       cr.steps.layout,
+      cr.steps.facilities,
+      cr.steps.nearby,
       cr.steps.pricing,
       cr.steps.photos,
+      cr.detailsTitle,
       cr.steps.ownerVisibility,
     ] as const;
     return keys[step - 1] ?? '';
@@ -321,6 +371,10 @@ export const MobileCreateListingWizardBody: React.FC<
   };
 
   const requiredMessage = (key: string) => {
+    if (key === 'nearbyPlaces') return cr.invalidNearby;
+    if (key === 'availableFrom') return cr.invalidDate;
+    if (key === 'documents') return cr.invalidDocumentUrl;
+    if (key === 'customFacilities') return cr.customFacilitiesHint;
     if (key === 'photos') return cr.photosMinError;
     if (key === 'ownerPick') return cr.ownerPickRequired;
     if (key === 'contractTerm') return cr.contractTermRequired;
@@ -443,7 +497,7 @@ export const MobileCreateListingWizardBody: React.FC<
   }, [propertyName, cr.placesError]);
 
   useEffect(() => {
-    if (step !== 5) return;
+    if (step !== 8) return;
     const loadOwners = listContactsRef.current;
     if (!loadOwners) return;
     let cancelled = false;
@@ -620,7 +674,7 @@ export const MobileCreateListingWizardBody: React.FC<
     }
   };
 
-  const validateStep = (current: number): string | null => {
+  const collectStepErrors = (current: number): Record<string, string> => {
     const nextErrors: Record<string, string> = {};
 
     if (current === 1) {
@@ -640,10 +694,10 @@ export const MobileCreateListingWizardBody: React.FC<
       }
       if (!isFilledCount(bedroom)) nextErrors.bedroom = cr.required;
       if (!isFilledCount(bathroom)) nextErrors.bathroom = cr.required;
-      if (!sizeSqm.trim() || Number(sizeSqm) <= 0) nextErrors.sizeSqm = cr.required;
+      if (sizeSqm.trim() && (!Number.isFinite(Number(sizeSqm)) || Number(sizeSqm) <= 0)) nextErrors.sizeSqm = cr.required;
     }
 
-    if (current === 3) {
+    if (current === 5) {
       if (selectedContractTypeIds.length === 0) nextErrors.contractTerm = cr.contractTermRequired;
       for (const opt of contractTypes) {
         if (!selectedContractTypeIds.includes(opt.id)) continue;
@@ -654,11 +708,11 @@ export const MobileCreateListingWizardBody: React.FC<
       }
     }
 
-    if (current === 4 && photoCount < 5) {
+    if (current === 6 && initialData?.visibility === 'published' && photoCount < 5) {
       nextErrors.photos = cr.photosMinError;
     }
 
-    if (current === 5) {
+    if (current === 8) {
       if (selectedOwnerId) {
         // existing owner is enough
       } else if (ownerMode === 'pick' && listContactsRef.current) {
@@ -669,9 +723,97 @@ export const MobileCreateListingWizardBody: React.FC<
       }
     }
 
+    if (current === 7) {
+      if (availableFrom && (!/^\d{4}-\d{2}-\d{2}$/.test(availableFrom) || !Number.isFinite(Date.parse(availableFrom)) || new Date(availableFrom).toISOString().slice(0, 10) !== availableFrom)) nextErrors.availableFrom = cr.invalidDate;
+      if (documents.some((d) => { try { const url = new URL(d.mediaUrl); return url.protocol !== 'https:' || !url.hostname || d.mediaUrl.length > 500; } catch { return true; } })) nextErrors.documents = cr.invalidDocumentUrl;
+
+    }
+    if (current === 3) {
+      const custom = customFacilities.split('\n').map((v) => v.trim()).filter(Boolean);
+      if (custom.length > 50 || custom.some((v) => v.length > 100)) nextErrors.customFacilities = cr.customFacilitiesHint;
+    }
+    if (current === 4) {
+      const customCount = nearbyPlaces.filter(isCustomPlace).length;
+      if (nearbyPlaces.some((p) => !p.name.trim()) || customCount > 5 || nearbyPlaces.length - customCount > 24) nextErrors.nearbyPlaces = cr.invalidNearby;
+      if (nearbyPlaces.length && (latitude == null || longitude == null)) nextErrors.nearbyPlaces = cr.nearbyMissingCoords;
+    }
+    return nextErrors;
+  };
+
+  const validateStep = (current: number): string | null => {
+    const nextErrors = collectStepErrors(current);
     setErrors(nextErrors);
     return Object.keys(nextErrors)[0] ?? null;
   };
+
+  // Edit mode: overview of all sections with completeness, or a single section form.
+  const [editView, setEditView] = useState<'overview' | 'section'>('overview');
+  const showOverview = !!initialData && editView === 'overview';
+  const openSection = (target: number) => {
+    setErrors({});
+    setStep(target);
+    if (initialData) setEditView('section');
+  };
+  const backToOverview = () => {
+    setErrors({});
+    setEditView('overview');
+  };
+
+  const sectionHasData = (current: number): boolean => {
+    if (current === 3) return facilities.length > 0 || customFacilities.trim().length > 0;
+    if (current === 4) return nearbyPlaces.length > 0 || nearbyOther.trim().length > 0;
+    if (current === 6) return photoCount > 0;
+    if (current === 7) return description.trim().length > 0;
+    return true;
+  };
+
+  // Error keys that describe an invalid value rather than a missing field.
+  const NON_FIELD_KEYS = ['nearbyPlaces', 'availableFrom', 'documents', 'customFacilities', 'ownerPick'];
+
+  const editSections = (() => {
+    if (!initialData) return [];
+    const ov = cr.editOverview;
+    const defs: Array<{ step: number; icon: 'buildings' | 'bed' | 'camera' | 'coins' | 'sparkle' | 'map-pin' | 'note' | 'user'; label: string; hint: string }> = [
+      { step: 1, icon: 'buildings', label: cr.steps.property, hint: ov.sectionHints.property },
+      { step: 2, icon: 'bed', label: cr.steps.layout, hint: ov.sectionHints.layout },
+      { step: 6, icon: 'camera', label: cr.steps.photos, hint: ov.sectionHints.photos },
+      { step: 5, icon: 'coins', label: cr.steps.pricing, hint: ov.sectionHints.pricing },
+      { step: 3, icon: 'sparkle', label: cr.steps.facilities, hint: ov.sectionHints.facilities },
+      { step: 4, icon: 'map-pin', label: cr.steps.nearby, hint: ov.sectionHints.nearby },
+      { step: 7, icon: 'note', label: cr.detailsTitle, hint: ov.sectionHints.details },
+      { step: 8, icon: 'user', label: cr.steps.ownerVisibility, hint: ov.sectionHints.contact },
+    ];
+    return defs.map((def) => {
+      const missing = Object.keys(collectStepErrors(def.step));
+      if (missing.length > 0) {
+        const fieldKeys = missing.filter((key) => !NON_FIELD_KEYS.includes(key));
+        const allFields = fieldKeys.length === missing.length;
+        return {
+          ...def,
+          status: 'incomplete' as const,
+          statusLabel: allFields ? interpolate(ov.missingFields, { count: missing.length }) : requiredMessage(missing[0]),
+          detail: allFields ? interpolate(ov.missingList, { fields: fieldKeys.map(fieldLabel).join(', ') }) : requiredMessage(missing[0]),
+        };
+      }
+      if (!sectionHasData(def.step)) {
+        return { ...def, status: 'empty' as const, statusLabel: ov.notAdded, detail: ov.notAdded };
+      }
+      return { ...def, status: 'complete' as const, statusLabel: ov.complete, detail: ov.complete };
+    });
+  })();
+  const incompleteSectionCount = editSections.filter((s) => s.status === 'incomplete').length;
+  const currentSection = editSections.find((s) => s.step === step);
+
+  useEffect(() => {
+    if (!initialData || editView !== 'section') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (submitLock.current) return true;
+      setErrors({});
+      setEditView('overview');
+      return true;
+    });
+    return () => sub.remove();
+  }, [initialData, editView]);
 
   const goNext = () => {
     const invalid = validateStep(step);
@@ -679,7 +821,7 @@ export const MobileCreateListingWizardBody: React.FC<
       setRequiredPrompt(requiredMessage(invalid));
       return;
     }
-    setStep((s) => Math.min(TOTAL_STEPS, s + 1));
+    setStep(visibleSteps[Math.min(visibleSteps.length - 1, stepIndex + 1)]);
   };
 
   const goBack = () => {
@@ -687,7 +829,7 @@ export const MobileCreateListingWizardBody: React.FC<
       setListingSourceCode(null);
       return;
     }
-    setStep((s) => Math.max(1, s - 1));
+    setStep(visibleSteps[Math.max(0, stepIndex - 1)]);
   };
 
   const buildPayload = (uploadedPhotos: RoomPhoto[]): CreateRoomWizardSubmitData => {
@@ -701,14 +843,15 @@ export const MobileCreateListingWizardBody: React.FC<
     const layout = [
       { code: 'bedroom', value: bedroom.trim() },
       { code: 'bathroom', value: bathroom.trim() },
-      { code: 'room_size', value: sizeSqm.trim() },
     ];
+    if (sizeSqm.trim()) layout.push({ code: 'room_size', value: sizeSqm.trim() });
     if (floor.trim()) layout.push({ code: 'floor', value: floor.trim() });
     if (building.trim()) layout.push({ code: 'building', value: building.trim() });
 
     const contactPayload = selectedOwnerId
-      ? { contactId: selectedOwnerId }
+      ? { contactId: selectedOwnerId, contact: undefined }
       : {
+          contactId: undefined,
           contact: {
             name: ownerName.trim(),
             phone: ownerPhone.trim(),
@@ -745,9 +888,14 @@ export const MobileCreateListingWizardBody: React.FC<
       advanceRentMonths,
       depositMonths,
       layout,
-      facilities: [],
+      listingDescription: description.trim(),
+      availableFromDate: availableFrom || undefined,
+      nearbyOther: nearbyOther.trim(),
+      nearbyPlaces: latitude != null && longitude != null ? relocateNearby(nearbyPlaces, latitude, longitude) : nearbyPlaces,
+      customFacilities: [...new Set(customFacilities.split('\n').map((v) => v.trim()).filter(Boolean))],
+      facilities,
       medias,
-      documents: [],
+      documents: documents.map((d, index) => ({ ...d, mediaUrl: d.mediaUrl.trim(), sortOrder: index })),
       isScoutRoom: true,
       latitude: latitude ?? undefined,
       longitude: longitude ?? undefined,
@@ -756,12 +904,16 @@ export const MobileCreateListingWizardBody: React.FC<
 
   const handleSubmit = async () => {
     if (!listingSourceCode) return;
-    const invalid = validateStep(TOTAL_STEPS);
+    let invalid: string | null = null;
+    for (const current of visibleSteps) {
+      invalid = validateStep(current);
+      if (invalid) { setStep(current); if (initialData) setEditView('section'); break; }
+    }
     if (invalid || submitLock.current) {
       if (invalid) setRequiredPrompt(requiredMessage(invalid));
       return;
     }
-    if (onSubmitListing && uploadPhoto) {
+    if (onSubmitListing && (uploadPhoto || photos.every((photo) => photo.mediaUrl))) {
       submitLock.current = true;
       setSubmitting(true);
       onSubmittingChange?.(true);
@@ -769,7 +921,7 @@ export const MobileCreateListingWizardBody: React.FC<
       try {
         const uploadedPhotos: RoomPhoto[] = [];
         for (const photo of photos) {
-          const mediaUrl = photo.mediaUrl ?? await uploadPhoto(photo);
+          const mediaUrl = photo.mediaUrl ?? await uploadPhoto!(photo);
           uploadedPhotos.push({ ...photo, mediaUrl });
           setPhotos((current) => current.map((item) => item.uri === photo.uri ? { ...item, mediaUrl } : item));
           setUploadProgress(uploadedPhotos.length);
@@ -790,7 +942,13 @@ export const MobileCreateListingWizardBody: React.FC<
 
   const renderNav = (opts?: { isLast?: boolean }) => (
     <View style={styles.btnRow}>
-      {step > 1 || (listingSourceCode && !initialData) ? (
+      {initialData ? (
+        <View style={{ flex: 1 }}>
+          <MobileButton variant="outline" onPress={backToOverview} disabled={submitting}>
+            {cr.editOverview.backToSections}
+          </MobileButton>
+        </View>
+      ) : step > 1 || listingSourceCode ? (
         <View style={{ flex: 1 }}>
           <MobileButton variant="outline" onPress={goBack} disabled={submitting}>
             {cr.back}
@@ -811,7 +969,7 @@ export const MobileCreateListingWizardBody: React.FC<
     </View>
   );
 
-  const navOpts = step === TOTAL_STEPS ? { isLast: true as const } : undefined;
+  const navOpts = initialData || stepIndex === visibleSteps.length - 1 ? { isLast: true as const } : undefined;
   const pickingSource = !listingSourceCode;
   const sourceLabels: Record<ListingSourceCode, string> = {
     co_agent: cr.sourceCoAgent,
@@ -829,35 +987,76 @@ export const MobileCreateListingWizardBody: React.FC<
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>{title ?? cr.title}</Text>
           </View>
-          {pickingSource ? null : (
+          {pickingSource || showOverview ? null : (
             <MobileBadge
               role={config.actorRole}
-              label={interpolate(cr.stepOf, { step, total: TOTAL_STEPS })}
+              label={initialData ? cr.editSections : interpolate(cr.stepOf, { step: stepIndex + 1, total: visibleSteps.length })}
             />
           )}
         </View>
 
         {pickingSource ? (
           <Text style={styles.subtitle}>{cr.sourcePrompt}</Text>
+        ) : showOverview ? (
+          <Text style={styles.subtitle}>{cr.editSections}</Text>
         ) : (
           <>
-            <View style={[styles.progressTrack]}>
+            {!initialData && <View style={[styles.progressTrack]}>
               <View
                 style={[
                   styles.progressFill,
                   {
-                    width: `${(step / TOTAL_STEPS) * 100}%`,
+                    width: `${((stepIndex + 1) / visibleSteps.length) * 100}%`,
                     backgroundColor: themeColor,
                   },
                 ]}
               />
             </View>
+            }
             <Text style={[styles.stepLabel, { color: themeColor }]}>{stepTitle}</Text>
+            {!initialData && <Text style={styles.hint}>{cr.quickCreateHint}</Text>}
+            {initialData && currentSection && (
+              <View style={styles.sectionStatusRow}>
+                <MobileIcon
+                  name={currentSection.status === 'incomplete' ? 'warning' : 'check'}
+                  size={16}
+                  weight="fill"
+                  color={currentSection.status === 'incomplete' ? tokens.colors.warning : currentSection.status === 'complete' ? tokens.colors.success : tokens.colors.textSecondary}
+                />
+                <Text
+                  style={[
+                    styles.sectionStatusText,
+                    { color: currentSection.status === 'incomplete' ? tokens.colors.warning : currentSection.status === 'complete' ? tokens.colors.success : tokens.colors.textSecondary },
+                  ]}
+                >
+                  {currentSection.detail}
+                </Text>
+              </View>
+            )}
           </>
         )}
       </View>
 
-      {pickingSource ? (
+      {showOverview ? (
+        <Animated.View key="overview" entering={FadeIn.duration(150)} style={styles.formScroll}>
+          <ScrollView
+            style={styles.formScroll}
+            contentContainerStyle={styles.formScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <RoomEditSectionList
+              sections={editSections}
+              themeColor={themeColor}
+              disabled={submitting}
+              summaryTone={incompleteSectionCount > 0 ? 'warning' : 'success'}
+              summaryLabel={incompleteSectionCount > 0
+                ? interpolate(cr.editOverview.needsAttention, { count: incompleteSectionCount })
+                : cr.editOverview.allComplete}
+              onSelect={openSection}
+            />
+          </ScrollView>
+        </Animated.View>
+      ) : pickingSource ? (
         <View style={styles.sourceScreen}>
           <View style={styles.sourceRow}>
             {LISTING_SOURCE_OPTIONS.map((opt) => {
@@ -889,7 +1088,11 @@ export const MobileCreateListingWizardBody: React.FC<
           </View>
         </View>
       ) : (
-        <>
+        <Animated.View
+          key={initialData ? `section-${step}` : 'form'}
+          entering={initialData ? FadeIn.duration(150) : undefined}
+          style={styles.formPane}
+        >
       <ScrollView
         ref={formScrollRef}
         style={styles.formScroll}
@@ -1156,6 +1359,7 @@ export const MobileCreateListingWizardBody: React.FC<
                   />
                 </View>
               </View>
+              {initialData && <>
               <View style={styles.fieldGrid}>
                 <View style={styles.fieldGridItem}>
                   <MobileInput
@@ -1209,7 +1413,6 @@ export const MobileCreateListingWizardBody: React.FC<
                     keyboardType="numeric"
                     placeholder="28"
                     value={sizeSqm}
-                    required
                     onChangeText={(v) => {
                       setSizeSqm(v);
                       clearFieldError('sizeSqm');
@@ -1218,10 +1421,11 @@ export const MobileCreateListingWizardBody: React.FC<
                   />
                 </View>
               </View>
+              </>}
             </>
           )}
 
-          {step === 3 && (
+          {step === 5 && (
             <>
               <View>
                 <Text style={styles.fieldLabel}>
@@ -1337,13 +1541,13 @@ export const MobileCreateListingWizardBody: React.FC<
             </>
           )}
 
-          {step === 4 && (
+          {step === 6 && (
             <>
               <Text style={styles.fieldLabel}>
                 {cr.steps.photos}
-                <Text style={styles.requiredMark}> *</Text>
+                {initialData?.visibility === 'published' && <Text style={styles.requiredMark}> *</Text>}
               </Text>
-              <Text style={styles.hint}>{cr.photosHint}</Text>
+              <Text style={styles.hint}>{initialData?.visibility === 'published' ? cr.photosHint : cr.optionalPhotosHint}</Text>
               <Text style={[styles.photoCount, { color: themeColor }]}>
                 {interpolate(cr.photosCount, { count: photoCount })}
               </Text>
@@ -1386,7 +1590,29 @@ export const MobileCreateListingWizardBody: React.FC<
 
           {submitting && <Text accessibilityLiveRegion="polite" style={styles.hint}>{interpolate(cr.uploadProgress, { count: uploadProgress, total: photoCount })}</Text>}
 
-          {step === 5 && (
+          {step === 3 && <>
+            <RoomFacilitiesEditor options={facilityOptions} selected={facilities} onChange={setFacilities} custom={customFacilities} onCustomChange={setCustomFacilities} loading={facilitiesLoading} error={facilityError} onRetry={loadFacilities} color={themeColor} />
+            {!!errors.customFacilities && <Text style={styles.errorText}>{errors.customFacilities}</Text>}
+          </>}
+          {step === 4 && <>
+            <RoomNearbyEditor latitude={latitude} longitude={longitude} value={nearbyPlaces} onChange={(value) => { setNearbyPlaces(value); clearFieldError('nearbyPlaces'); }} search={searchNearby} apiKey={mapsApiKey} color={themeColor} error={errors.nearbyPlaces} />
+            <MobileInput label={cr.nearbyNotes} placeholder={cr.nearbyPlaceholder} value={nearbyOther} onChangeText={setNearbyOther} multiline maxLength={500} style={{ height: 100, textAlignVertical: 'top' }} />
+          </>}
+          {step === 7 && <>
+            <Text style={styles.hint}>{cr.detailsHint}</Text>
+            <MobileInput label={cr.listingDescription} value={description} onChangeText={setDescription} multiline maxLength={10000} style={{ height: 150, textAlignVertical: 'top' }} />
+            <MobileInput label={cr.availableFrom} placeholder="YYYY-MM-DD" value={availableFrom} onChangeText={setAvailableFrom} maxLength={10} error={errors.availableFrom} />
+            <Text style={styles.fieldLabel}>{cr.steps.documents}</Text>
+            <Text style={styles.hint}>{cr.documentLinksHint}</Text>
+            {documents.map((document, index) => <View key={index} style={styles.ownerCard}>
+              <View style={styles.typeRow}>{(['id_passport', 'bookbank', 'ownership', 'other'] as const).map((kind) => <Pressable key={kind} accessibilityRole="radio" accessibilityState={{ checked: document.kind === kind }} onPress={() => setDocuments((current) => current.map((d, i) => i === index ? { ...d, kind } : d))} style={[styles.typeChip, document.kind === kind && { backgroundColor: themeColor, borderColor: themeColor }]}><Text style={[styles.typeChipText, document.kind === kind && styles.typeChipTextSelected]}>{cr.documentKinds[kind]}</Text></Pressable>)}</View>
+              <MobileInput label={cr.documentUrl} placeholder="https://" autoCapitalize="none" value={document.mediaUrl} maxLength={500} onChangeText={(mediaUrl) => setDocuments((current) => current.map((d, i) => i === index ? { ...d, mediaUrl } : d))} />
+              <MobileButton variant="outline" onPress={() => setDocuments((current) => current.filter((_, i) => i !== index))}>{cr.removeDocument}</MobileButton>
+            </View>)}
+            {!!errors.documents && <Text style={styles.errorText}>{errors.documents}</Text>}
+            <MobileButton variant="outline" disabled={documents.length >= 20} onPress={() => setDocuments((current) => [...current, { kind: 'other', mediaUrl: '', sortOrder: current.length }])}>{cr.addDocumentLink}</MobileButton>
+          </>}
+          {step === 8 && (
             <>
               {ownerMode === 'pick' && listContacts ? (
                 <>
@@ -1543,6 +1769,7 @@ export const MobileCreateListingWizardBody: React.FC<
                       </MobileButton>
                     </View>
                   ) : null}
+                  {initialData && (
                   <MobileInput
                     label={cr.ownerOther}
                     placeholder={cr.ownerOtherPlaceholder}
@@ -1553,6 +1780,7 @@ export const MobileCreateListingWizardBody: React.FC<
                     helperText={interpolate(cr.ownerOtherCount, { count: ownerOther.length })}
                     style={{ height: 96, textAlignVertical: 'top', paddingTop: 10 }}
                   />
+                  )}
                 </>
               )}
             </>
@@ -1561,7 +1789,7 @@ export const MobileCreateListingWizardBody: React.FC<
         </View>
       </ScrollView>
       <View style={styles.footer}>{renderNav(navOpts)}</View>
-        </>
+        </Animated.View>
       )}
 
       <Modal
@@ -1597,12 +1825,29 @@ const styles = StyleSheet.create({
   chrome: {
     gap: 12,
   },
+  formPane: {
+    flex: 1,
+    minHeight: 0,
+    gap: 12,
+  },
   formScroll: {
     flex: 1,
     minHeight: 0,
   },
   formScrollContent: {
     paddingBottom: 8,
+  },
+  sectionStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  sectionStatusText: {
+    flex: 1,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   footer: {
     paddingTop: 4,

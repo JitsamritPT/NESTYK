@@ -29,7 +29,14 @@ export type AppIconName =
   | 'globe'
   | 'check'
   | 'calendar-plus'
-  | 'qr-code';
+  | 'qr-code'
+  | 'buildings'
+  | 'bed'
+  | 'camera'
+  | 'coins'
+  | 'map-pin'
+  | 'note'
+  | 'warning';
 
 export type AppIconTone =
   | 'active'

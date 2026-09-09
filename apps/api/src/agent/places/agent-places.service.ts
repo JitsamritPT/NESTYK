@@ -1,3 +1,5 @@
+import type { NearbyPlace } from '@nestyk/types';
+import { NEARBY_TYPES, validCoordinates, distanceMeters } from './nearby-places';
 import {
   BadGatewayException,
   BadRequestException,
@@ -196,6 +198,28 @@ function normalizePlaceId(value?: string): string {
 export class AgentPlacesService {
   private readonly logger = new Logger(AgentPlacesService.name);
 
+  async nearby(latitude: number, longitude: number, language: string): Promise<{ places: NearbyPlace[] }> {
+    if (!validCoordinates(latitude, longitude)) throw new BadRequestException('Valid latitude and longitude required');
+    const results = await Promise.all(NEARBY_TYPES.map(async ({ type, radius, limit }) => {
+      const data = await this.googlePost<{ places?: Array<{
+        id?: string; displayName?: { text?: string }; location?: { latitude?: number; longitude?: number };
+        formattedAddress?: string; userRatingCount?: number;
+      }> }>('https://places.googleapis.com/v1/places:searchNearby', {
+        includedTypes: [type], maxResultCount: 20, rankPreference: 'DISTANCE', languageCode: language,
+        locationRestriction: { circle: { center: { latitude, longitude }, radius } },
+      }, 'places.id,places.displayName,places.location,places.formattedAddress' + (type === 'park' ? ',places.userRatingCount' : ''));
+      return (data.places ?? []).filter((p) => p.id && p.displayName?.text && validCoordinates(p.location?.latitude, p.location?.longitude) && (type !== 'park' || (p.userRatingCount ?? 0) >= 120))
+        .map((p): NearbyPlace => ({ placeId: p.id!, name: p.displayName!.text!, type,
+          latitude: p.location!.latitude!, longitude: p.location!.longitude!,
+          distanceMeters: distanceMeters(latitude, longitude, p.location!.latitude!, p.location!.longitude!),
+          vicinity: p.formattedAddress,
+        })).filter((p) => p.distanceMeters <= radius).sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, limit);
+    }));
+    const seen = new Set<string>();
+    return { places: results.flat().filter((p) => { if (seen.has(p.placeId)) return false; seen.add(p.placeId); return true; })
+      .sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 24) };
+  }
+
   async autocomplete(query: string, language: string): Promise<{ suggestions: PlaceSuggestion[] }> {
     const input = query.trim();
     if (input.length < 2) {
@@ -316,6 +340,7 @@ export class AgentPlacesService {
     return this.parseGoogleResponse<T>(
       await fetch(url, {
         method: 'POST',
+        signal: AbortSignal.timeout(10000),
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': this.apiKey(),

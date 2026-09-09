@@ -10,7 +10,8 @@
     "start:prod": "node dist/main",
     "test:room-photos": "node --test test/room-photos.test.cjs",
     "test:agent-listings": "node --test test/agent-listings.test.cjs",
-    "test:agent-leads": "node --test test/agent-leads.test.cjs"
+    "test:agent-leads": "node --test test/agent-leads.test.cjs",
+    "test:room-details": "node --test test/room-update.test.cjs test/nearby-places.test.cjs test/agent-listings.test.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

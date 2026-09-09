@@ -1,3 +1,4 @@
+import type { NearbyPlace } from '@nestyk/types';
 export type CreateRoomMediaInput = {
   mediaUrl: string;
   mediaType?: 'image' | 'video';
@@ -66,7 +67,7 @@ export type CreateRoomBody = {
   latitude?: number;
   longitude?: number;
   nearbyOther?: string;
-  nearbyPlaces?: unknown[];
+  nearbyPlaces?: NearbyPlace[];
   customFacilities?: string[];
   layout?: CreateRoomLayoutInput[];
   facilities?: CreateRoomFacilityInput[];

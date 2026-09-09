@@ -105,3 +105,8 @@ export async function updateAgentRoom(id: number, data: CreateRoomWizardSubmitDa
   const { isScoutRoom: _scout, ...body } = data;
   return apiRequest(`/agent/rooms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
+
+export async function fetchAgentFacilities(): Promise<import('@nestyk/types').FacilityOption[]> {
+  await ensureAgentSession();
+  return apiGet('/agent/rooms/facilities');
+}

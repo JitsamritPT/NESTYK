@@ -23,9 +23,9 @@ import {
 import { UserRole } from '@nestyk/types';
 import { MobileCreateListingWizardBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import { MobileServiceCatalogBody } from '@nestyk/feature-services';
-import { createAgentScoutRoom, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
+import { createAgentScoutRoom, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities } from '../lib/agent-listings-api';
 import { pickRoomPhotos, uploadRoomPhoto } from '../lib/room-photos';
-import { searchPlaces, getPlaceDetails } from '../lib/places-api';
+import { searchPlaces, getPlaceDetails, searchNearbyPlaces } from '../lib/places-api';
 import {
   MOCK_USER,
   MOCK_LISTINGS,
@@ -411,7 +411,8 @@ export default function AppHomeScreen() {
             listContacts={handleListContacts}
             listPropertyTypes={handleListPropertyTypes}
             listContractTypes={handleListContractTypes}
-            listRoomTypes={handleListRoomTypes}
+            listRoomTypes={handleListRoomTypes} listFacilities={fetchAgentFacilities} mapsApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+    searchNearby={(lat, lng) => searchNearbyPlaces(lat, lng, locale)}
             onSubmitListing={async (data) => {
               await createAgentScoutRoom(data);
               Alert.alert(

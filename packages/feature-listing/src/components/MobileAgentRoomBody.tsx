@@ -1,3 +1,5 @@
+import { NearbyPlacesMap } from './NearbyPlacesMap';
+import type { NearbyPlace } from '@nestyk/types';
 import { Image } from 'expo-image';
 import { initialPhotoLoad, photoLoadReducer } from './room-photo-load';
 import React, { useReducer, useEffect } from 'react';
@@ -15,6 +17,10 @@ export type AgentRoomDetail = {
   advanceRentMonths: number; depositMonths: number; waterRatePerUnit: string | null; electricRatePerUnit: string | null;
   medias: { id: number; mediaUrl: string; mediaType: string; isCover: boolean }[];
   layout: { code: string; value: string }[]; facilities: string[]; nearbyOther: string | null;
+  facilityItems?: { code: string; groupCode?: string }[];
+  customFacilities?: string[];
+  nearbyPlaces?: NearbyPlace[];
+  documents?: { kind: 'id_passport' | 'bookbank' | 'ownership' | 'other'; mediaUrl: string; sortOrder: number }[];
   contacts: { id: number; name: string; phone: string; email: string | null; note: string | null; isPrimary: boolean }[];
 };
 
@@ -37,7 +43,7 @@ function Photo({ uri, width, fallback, retryLabel }: { uri: string; width: numbe
   </View>;
 }
 
-export function MobileAgentRoomBody({ room }: { room: AgentRoomDetail }) {
+export function MobileAgentRoomBody({ room, mapsApiKey }: { room: AgentRoomDetail; mapsApiKey?: string }) {
   const { t } = useLocale();
   const { theme } = useMobileTheme();
   const { width } = useWindowDimensions();
@@ -72,8 +78,21 @@ export function MobileAgentRoomBody({ room }: { room: AgentRoomDetail }) {
       {row(cr.waterRate, room.waterRatePerUnit)}{row(cr.electricRate, room.electricRatePerUnit)}
     </>)}
     {section(cr.address, <><Text selectable style={{ color: theme.textHeading }}>{address}</Text>{room.latitude != null && room.longitude != null && <MobileButton variant="outline" onPress={() => { void Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${room.latitude},${room.longitude}`)}`); }}>{copy.openMap}</MobileButton>}</>)}
-    {room.facilities.length > 0 && section(cr.steps.facilities, <Text style={{ color: theme.textHeading }}>{room.facilities.join(' · ')}</Text>)}
+    {room.facilities.length > 0 && section(cr.steps.facilities, <>
+      {room.facilityItems ? [...new Set(room.facilityItems.map((f) => f.groupCode ?? 'other'))].map((group) => <View key={group} style={{ gap: 6 }}>
+        <Text style={[styles.heading, { color: theme.textHeading }]}>{t.masters.facilityGroups[group] ?? group}</Text>
+        <Text style={{ color: theme.textHeading }}>{room.facilityItems!.filter((f) => (f.groupCode ?? 'other') === group).map((f) => t.masters.facilities[f.code] ?? f.code).join(' · ')}</Text>
+      </View>) : <Text style={{ color: theme.textHeading }}>{room.facilities.map((code) => t.masters.facilities[code] ?? code).join(' · ')}</Text>}
+      {!!room.customFacilities?.length && <View style={{ gap: 6 }}><Text style={[styles.heading, { color: theme.textHeading }]}>{cr.customFacilities}</Text><Text style={{ color: theme.textHeading }}>{room.customFacilities.join(' · ')}</Text></View>}
+    </>)}
+    {!!room.nearbyPlaces?.length && section(cr.steps.nearby, <>
+      {room.latitude != null && room.longitude != null && <NearbyPlacesMap latitude={Number(room.latitude)} longitude={Number(room.longitude)} places={room.nearbyPlaces} selectedIds={room.nearbyPlaces.map((p) => p.placeId)} apiKey={mapsApiKey} readOnly />}
+      {room.nearbyPlaces.map((place) => row(place.name, cr.distanceStraight.replace('{meters}', place.distanceMeters.toLocaleString())))}
+    </>)}
     {room.nearbyOther && section(cr.steps.nearby, <Text style={{ color: theme.textHeading }}>{room.nearbyOther}</Text>)}
+    {!!room.documents?.length && section(cr.steps.documents, <>{room.documents.map((document, index) => <MobileButton key={index} variant="outline" onPress={() => {
+      try { const url = new URL(document.mediaUrl); if (url.protocol === 'https:') void Linking.openURL(url.toString()); } catch { /* Invalid legacy links cannot be opened. */ }
+    }}>{cr.documentKinds[document.kind]} {index + 1}</MobileButton>)}</>)}
     {section(copy.contacts, <>
       {row(cr.sourcePrompt, room.listingSourceCode === 'owner' ? cr.sourceOwner : room.listingSourceCode === 'co_agent' ? cr.sourceCoAgent : null)}
       {!room.contacts.length && <Text style={{ color: theme.textSecondary }}>{copy.notSpecified}</Text>}
