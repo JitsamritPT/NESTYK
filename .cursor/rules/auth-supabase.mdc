@@ -1,0 +1,32 @@
+---
+description: Supabase auth, login/logout, and portable DEV credentials
+globs: apps/consumer-app/**/*.{tsx,ts},apps/api/src/auth/**/*.{ts},docs/new-project/docker/**
+alwaysApply: false
+---
+
+# Auth — Supabase + Dev Login
+
+## Rules
+
+1. **Client** never embeds `SUPABASE_SERVICE_ROLE_KEY` — anon key only (`EXPO_PUBLIC_SUPABASE_*`).
+2. After login always call **`POST /auth/sync`** so `users` + `user_roles` stay in sync.
+3. Logout must: `supabase.auth.signOut()` (if mode=supabase) + clear `nestyk.auth.session.v1` + reset UI to guest.
+4. API `Authorization` prefers stored session token; fall back to anonymous `dev|…` identity only for unauthenticated tooling.
+5. **DEV sample account** (local / clone portability):
+   - Email: `admin@jitsamrit.com`
+   - Password: `Jitsamrit2026`
+   - UUID: `00000000-0000-4000-8000-000000000001`
+   - Env: `EXPO_PUBLIC_USE_DEV_AUTH=true` + matching `EXPO_PUBLIC_DEV_LOGIN_*`
+   - Seed: `./docs/new-project/docker/seed-dev-user.sh`
+6. Never commit real production passwords; DEV credentials belong only in `.env.example` labeled development.
+7. Login UI: `apps/consumer-app/app/login.tsx` — reuse `@nestyk/ui` MobileInput / MobileButton / brand yellow hero.
+
+## Flow
+
+```
+signIn → (Supabase password | DEV credentials)
+      → Bearer JWT or dev|uuid|email|…
+      → POST /auth/sync
+      → optional POST /auth/dev/roles { role: 'admin' } when ALLOW_DEV_ROLE_GRANT
+      → persist session → home
+```

@@ -3,6 +3,7 @@ import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
+import { useRouter } from 'expo-router';
 import { useLocale } from '@nestyk/i18n';
 import {
   MobileModePage,
@@ -26,8 +27,9 @@ import { MobileServiceCatalogBody } from '@nestyk/feature-services';
 import { createAgentScoutRoom, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
 import { pickRoomPhotos, uploadRoomPhoto } from '../lib/room-photos';
 import { searchPlaces, getPlaceDetails } from '../lib/places-api';
+import { useAuth } from '../lib/auth/AuthContext';
+import { APP_CONFIG } from '../lib/config';
 import {
-  MOCK_USER,
   MOCK_LISTINGS,
   MOCK_ACTIVITY_NOTIFICATIONS,
   MOCK_MESSAGE_NOTIFICATIONS,
@@ -76,8 +78,12 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
 export default function AppHomeScreen() {
   const { t, locale } = useLocale();
   const { theme } = useMobileTheme();
-  const [activeRole, setActiveRole] = useState<UserRole>('guest');
-  const [activeTab, setActiveTab] = useState<MobileAppTab>(() => getDefaultTabForRole('guest'));
+  const router = useRouter();
+  const { isAuthenticated, session, displayName, initials, signOut } = useAuth();
+  const [activeRole, setActiveRole] = useState<UserRole>(APP_CONFIG.defaultRole);
+  const [activeTab, setActiveTab] = useState<MobileAppTab>(() =>
+    getDefaultTabForRole(APP_CONFIG.defaultRole),
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -443,6 +449,33 @@ export default function AppHomeScreen() {
     return null;
   };
 
+  const profileName = isAuthenticated ? displayName : t.roles.guest;
+  const profileEmail = isAuthenticated ? session!.email : t.common.signIn;
+  const profilePhone = isAuthenticated ? session?.phone ?? undefined : undefined;
+  const profileInitials = isAuthenticated ? initials : '?';
+
+  const handleAuthAction = async () => {
+    setDrawerOpen(false);
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+    try {
+      await signOut();
+      Alert.alert(t.common.signOut, t.mobile.auth.signedOut);
+    } catch {
+      Alert.alert(t.common.signOut, t.mobile.auth.signedOut);
+    }
+  };
+
+  const handleRequireAuth = () => {
+    setDrawerOpen(false);
+    Alert.alert(t.common.signIn, t.mobile.auth.signInToContinue, [
+      { text: t.common.cancel, style: 'cancel' },
+      { text: t.common.signIn, onPress: () => router.push('/login') },
+    ]);
+  };
+
   const isWizardTab =
     activeTab === 'createListing' || (activeTab === 'listings' && activeRole === 'owner');
 
@@ -454,7 +487,8 @@ export default function AppHomeScreen() {
         scrollable={!isWizardTab}
         header={
           <MobileHeaderActions
-            initials={MOCK_USER.initials}
+            initials={profileInitials}
+            isAuthenticated={isAuthenticated}
             notificationCount={unreadCount}
             onAvatarPress={() => setDrawerOpen(true)}
             onNotificationsPress={() => setNotificationsOpen(true)}
@@ -475,16 +509,18 @@ export default function AppHomeScreen() {
       <MobileProfileDrawer
         visible={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        userName={MOCK_USER.name}
-        userEmail={MOCK_USER.email}
-        userPhone={MOCK_USER.phone}
-        initials={MOCK_USER.initials}
+        userName={profileName}
+        userEmail={profileEmail}
+        userPhone={profilePhone}
+        initials={profileInitials}
         activeRole={activeRole}
+        isAuthenticated={isAuthenticated}
+        onRequireAuth={handleRequireAuth}
         onRoleChange={(role) => {
           handleRoleChange(role);
-          setDrawerOpen(false);
         }}
-        onSignOut={() => Alert.alert('Sign Out', 'Signed out (mock)')}
+        onSignOut={handleAuthAction}
+        signOutLabel={isAuthenticated ? t.common.signOut : t.common.signIn}
         onMenuAction={(action) => {
           if (action.type === 'tab') {
             setActiveTab(action.tab);

@@ -89,7 +89,7 @@
 บังคับใช้ Native Libraries เพื่อประสิทธิภาพระดับ 60/120fps บน iOS/Android โดยใช้ `*.web.tsx` เป็น Fallback สำหรับ Web:
 * Lists: `@shopify/flash-list`
 * Animation/Gestures: `react-native-reanimated` + `react-native-gesture-handler`
-* Bottom Sheet: `@gorhom/bottom-sheet`
+* Bottom Sheet: `@gorhom/bottom-sheet` (snap / gesture เต็มรูปแบบ) · สำหรับ action/role/photo sheet ใช้ **`MobileBottomSheet`** (`@nestyk/ui`) — **ห้าม** `Modal animationType="slide"` (overlay จะลอยขึ้นมาด้วย)
 * Images/Caching: `expo-image`
 * Lightbox Zoom: `react-native-zoom-toolkit`
 * Maps: `react-native-maps` (Web ใช้ `@vis.gl/react-google-maps`)

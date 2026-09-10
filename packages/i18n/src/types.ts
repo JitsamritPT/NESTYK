@@ -14,6 +14,7 @@ export interface TranslationSchema {
     payWithQr: string;
     schedule: string;
     signOut: string;
+    signIn: string;
   };
   roles: {
     guest: string;
@@ -75,6 +76,11 @@ export interface TranslationSchema {
     profile: {
       hubSubtitle: string;
       switchRole: string;
+      role: string;
+      rolePickerSubtitle: string;
+      currentRole: string;
+      viewProfile: string;
+      roleDescriptions: Record<'guest' | 'tenant' | 'owner' | 'agent' | 'admin', string>;
       navigation: string;
       settings: string;
       myRental: string;
@@ -147,14 +153,40 @@ export interface TranslationSchema {
       title: string;
       personalInfo: string;
       fullName: string;
+      firstName: string;
+      lastName: string;
       email: string;
       phone: string;
       editProfile: string;
       editProfileHint: string;
+      changePhoto: string;
+      takePhoto: string;
+      chooseFromLibrary: string;
+      removePhoto: string;
+      photoPermissionDenied: string;
+      emailManagedInLinkedAccounts: string;
       profileSaved: string;
       security: string;
       changePassword: string;
       changePasswordHint: string;
+      linkedAccounts: {
+        title: string;
+        subtitle: string;
+        connect: string;
+        disconnect: string;
+        connected: string;
+        notConnected: string;
+        connectSoon: string;
+        disconnectSoon: string;
+        footnote: string;
+        providers: {
+          email: string;
+          phone: string;
+          google: string;
+          facebook: string;
+          apple: string;
+        };
+      };
       password: {
         current: string;
         new: string;
@@ -170,6 +202,42 @@ export interface TranslationSchema {
       notifications: string;
       pushNotifications: string;
       emailNotifications: string;
+    };
+    auth: {
+      heroHeadline: string;
+      loginTitle: string;
+      loginSubtitle: string;
+      loginButton: string;
+      passwordPlaceholder: string;
+      forgotPassword: string;
+      socialDivider: string;
+      newHere: string;
+      signUp: string;
+      showPassword: string;
+      hidePassword: string;
+      socialLogin: string;
+      unavailable: string;
+      signupUnavailable: string;
+      resetUnavailable: string;
+      requiredFields: string;
+      signIn: string;
+      email: string;
+      password: string;
+      welcomeTitle: string;
+      welcomeSubtitle: string;
+      continueAsGuest: string;
+      invalidCredentials: string;
+      signedOut: string;
+      signInToContinue: string;
+      devHintTitle: string;
+      devHintBody: string;
+      devNoSupabase: string;
+    };
+    preload: {
+      preparing: string;
+      preparingEn: string;
+      welcome: string;
+      tapToEnter: string;
     };
   };
   tenant: {

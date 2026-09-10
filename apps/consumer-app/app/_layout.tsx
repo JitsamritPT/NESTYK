@@ -1,13 +1,14 @@
 import 'react-native-gesture-handler';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import * as Localization from 'expo-localization';
 import { LocaleProvider, resolveSupportedLocale } from '@nestyk/i18n';
-import { MobileThemeProvider } from '@nestyk/ui/native';
+import { MobileThemeProvider, MobilePreloadScreen } from '@nestyk/ui/native';
 import { Slot } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
+import { AuthProvider, useAuth } from '../lib/auth/AuthContext';
 import { Mitr_400Regular, Mitr_500Medium } from '@expo-google-fonts/mitr';
 import {
   Baloo2_400Regular,
@@ -24,9 +25,34 @@ import {
 
 SplashScreen.preventAutoHideAsync();
 
+const PRELOAD_MIN_MS = 1100;
+
 const deviceLocale = resolveSupportedLocale(
   Localization.getLocales()[0]?.languageTag ?? Localization.getLocales()[0]?.languageCode,
 );
+
+function BootstrapGate({ children }: { children: React.ReactNode }) {
+  const { ready } = useAuth();
+  const [minElapsed, setMinElapsed] = useState(false);
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMinElapsed(true), PRELOAD_MIN_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const bootstrapReady = ready && minElapsed;
+  const showPreload = !entered;
+
+  return (
+    <>
+      {children}
+      {showPreload ? (
+        <MobilePreloadScreen ready={bootstrapReady} onEnter={() => setEntered(true)} />
+      ) : null}
+    </>
+  );
+}
 
 export default function Layout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -56,9 +82,13 @@ export default function Layout() {
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <LocaleProvider defaultLocale={deviceLocale}>
         <MobileThemeProvider>
-          <GestureHandlerRootView style={{ flex: 1 }}>
-            <Slot />
-          </GestureHandlerRootView>
+          <AuthProvider>
+            <GestureHandlerRootView style={{ flex: 1 }}>
+              <BootstrapGate>
+                <Slot />
+              </BootstrapGate>
+            </GestureHandlerRootView>
+          </AuthProvider>
         </MobileThemeProvider>
       </LocaleProvider>
     </SafeAreaProvider>

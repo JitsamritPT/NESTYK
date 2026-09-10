@@ -1,0 +1,37 @@
+---
+description: Mobile bottom sheets — fade scrim + slide panel only (never Modal slide)
+globs: packages/ui/**/*.{tsx,ts},apps/consumer-app/**/*.{tsx,ts},apps/**/app/**/*.{tsx,ts}
+alwaysApply: false
+---
+
+# Mobile Bottom Sheet Animation
+
+## Rule (บังคับ)
+
+เมื่อทำ bottom sheet / action sheet / role picker / photo picker บน Mobile:
+
+1. **ใช้ `MobileBottomSheet` จาก `@nestyk/ui`** (`packages/ui/src/components/MobileBottomSheet.tsx`)
+2. **ห้าม** ใช้ React Native `Modal` ด้วย `animationType="slide"` สำหรับ sheet — จะทำให้ **overlay ดำเลื่อนขึ้นมาด้วย** (ดูแปลก)
+3. Motion ที่ถูกต้อง:
+   - **Scrim / dim**: fade อยู่กับที่ (`opacity`)
+   - **แผ่น sheet**: slide จากล่าง (`translateY`) เท่านั้น
+4. `Modal` ห่อ sheet ต้องเป็น `transparent` + `animationType="none"` (คอมโพเนนต์กลางจัดการให้แล้ว)
+5. ดัก Android `BackHandler` ให้ปิด sheet (มีใน `MobileBottomSheet` แล้ว)
+
+## ตัวอย่าง
+
+```tsx
+import { MobileBottomSheet } from '@nestyk/ui/native';
+
+<MobileBottomSheet visible={open} onClose={() => setOpen(false)}>
+  {/* header + list / actions */}
+</MobileBottomSheet>
+```
+
+## เมื่อต้องแก้ animation
+
+แก้ที่ **`MobileBottomSheet` เท่านั้น** — ห้ามคัดลอก logic fade/slide ไปซ้ำในแต่ละหน้า
+
+## ทางเลือกถัดไป
+
+ถ้าต้องการ gesture dismiss / snap points เต็มรูปแบบ ให้ migrate ไป `@gorhom/bottom-sheet` แล้วห่อเป็น API เดียวกับ `MobileBottomSheet` — อย่าให้แต่ละหน้าเรียก gorhom ตรงๆ คนละแบบ

@@ -31,6 +31,12 @@ import {
   CheckCircle,
   CalendarPlus,
   QrCode,
+  Envelope,
+  Phone,
+  GoogleLogo,
+  FacebookLogo,
+  AppleLogo,
+  ArrowsLeftRight,
   IconProps,
 } from 'phosphor-react';
 import { tokens } from '../theme/tokens';
@@ -68,6 +74,12 @@ const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
   check: CheckCircle,
   'calendar-plus': CalendarPlus,
   'qr-code': QrCode,
+  envelope: Envelope,
+  phone: Phone,
+  google: GoogleLogo,
+  facebook: FacebookLogo,
+  apple: AppleLogo,
+  swap: ArrowsLeftRight,
 };
 
 const TONE_COLORS: Record<AppIconTone, string> = {

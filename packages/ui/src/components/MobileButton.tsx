@@ -58,6 +58,8 @@ export const MobileButton: React.FC<MobileButtonProps> = ({
 
   return (
     <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled || isLoading), busy: isLoading }}
       style={[containerStyle, style]}
       onPress={onPress}
       disabled={disabled || isLoading}
