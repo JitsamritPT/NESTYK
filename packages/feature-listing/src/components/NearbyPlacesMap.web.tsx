@@ -1,3 +1,4 @@
+/// <reference types="google.maps" />
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import {
@@ -6,15 +7,28 @@ import {
   AdvancedMarker,
   Pin,
   useApiLoadingStatus,
+  useMap,
   APILoadingStatus,
 } from "@vis.gl/react-google-maps";
 import { useLocale } from "@nestyk/i18n";
 import { MobileButton, tokens } from "@nestyk/ui/native";
 import { categoryColors, nearbyCategory, type NearbyMapProps } from "../nearby";
 
+function RadiusCircle({ latitude, longitude, radiusKm }: { latitude: number; longitude: number; radiusKm: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map) return;
+    const circle = new google.maps.Circle({ map, center: { lat: latitude, lng: longitude }, radius: radiusKm * 1000, strokeColor: '#db2777', strokeWeight: 2, fillColor: '#db2777', fillOpacity: 0.1, clickable: false });
+    return () => circle.setMap(null);
+  }, [map, latitude, longitude, radiusKm]);
+  return null;
+}
+
 function MapBody({
   latitude,
   longitude,
+  markerTitle,
+  radiusKm,
   places,
   selectedIds,
   customMode,
@@ -22,14 +36,18 @@ function MapBody({
   onMapPress,
   onPlacePress,
   readOnly,
+  showRecenter = true,
 }: NearbyMapProps) {
   const { t } = useLocale();
   const status = useApiLoadingStatus();
   const [center, setCenter] = useState({ lat: latitude, lng: longitude });
-  const [zoom, setZoom] = useState(15);
+  const [zoom, setZoom] = useState(radiusKm ? (radiusKm === 1 ? 14 : 12) : 15);
   useEffect(() => {
     setCenter({ lat: latitude, lng: longitude });
   }, [latitude, longitude]);
+  useEffect(() => {
+    if (radiusKm != null) setZoom(radiusKm === 1 ? 14 : 12);
+  }, [radiusKm]);
   if (
     status === APILoadingStatus.FAILED ||
     status === APILoadingStatus.AUTH_FAILURE
@@ -68,7 +86,7 @@ function MapBody({
         >
           <AdvancedMarker
             position={{ lat: latitude, lng: longitude }}
-            title={t.agent.createRoom.propertyName}
+            title={markerTitle ?? t.agent.createRoom.propertyName}
             zIndex={100}
           >
             <Pin
@@ -77,6 +95,7 @@ function MapBody({
               glyphColor="#ffffff"
             />
           </AdvancedMarker>
+          {radiusKm != null && <RadiusCircle latitude={latitude} longitude={longitude} radiusKm={radiusKm} />}
           {places.map((place, index) => {
             const checked = selectedIds.includes(place.placeId);
             return (
@@ -103,15 +122,15 @@ function MapBody({
           })}
         </Map>
       </View>
-      <MobileButton
+      {showRecenter && <MobileButton
         variant="outline"
         onPress={() => {
           setCenter({ lat: latitude, lng: longitude });
-          setZoom(15);
+          setZoom(radiusKm ? (radiusKm === 1 ? 14 : 12) : 15);
         }}
       >
         {t.agent.createRoom.recenterMap}
-      </MobileButton>
+      </MobileButton>}
     </View>
   );
 }

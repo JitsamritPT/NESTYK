@@ -56,3 +56,17 @@ test('upstream errors propagate instead of appearing as an empty successful sear
   service.googlePost = async () => { throw new Error('Upstream failed'); };
   await assert.rejects(service.nearby(13.75, 100.5, 'th'), /Upstream failed/);
 });
+
+test('reverse map pin preserves chosen coordinates and resolves Thai province',async(t)=>{
+ const original=global.fetch; const key=process.env.GOOGLE_MAPS_API_KEY;
+ process.env.GOOGLE_MAPS_API_KEY='test';
+ t.after(()=>{global.fetch=original;if(key===undefined)delete process.env.GOOGLE_MAPS_API_KEY;else process.env.GOOGLE_MAPS_API_KEY=key;});
+ const service=new AgentPlacesService();service.apiKey=()=> 'test';
+ global.fetch=async()=>({ok:true,json:async()=>({status:'OK',results:[{place_id:'abc',formatted_address:'วัฒนา กรุงเทพมหานคร',address_components:[{long_name:'ประเทศไทย',short_name:'TH',types:['country']},{long_name:'กรุงเทพมหานคร',short_name:'กรุงเทพมหานคร',types:['administrative_area_level_1']},{long_name:'เขตวัฒนา',short_name:'วัฒนา',types:['sublocality_level_1']}]}]})});
+ const result=await service.reverse(13.737,100.56);assert.equal(result.province,'กรุงเทพมหานคร');assert.equal(result.latitude,13.737);assert.equal(result.longitude,100.56);assert.equal(result.district,'วัฒนา');
+ await assert.rejects(()=>service.reverse(NaN,100));
+ global.fetch=async()=>({ok:true,json:async()=>({status:'REQUEST_DENIED'})});
+ await assert.rejects(()=>service.reverse(13,100));
+ global.fetch=async()=>({ok:true,json:async()=>({status:'OK',results:[{address_components:[{short_name:'US',types:['country']}]}]})});
+ await assert.rejects(()=>service.reverse(13,100));
+});

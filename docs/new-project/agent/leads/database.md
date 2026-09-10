@@ -90,3 +90,19 @@ API (authenticated agent):
 
 Mobile: Leads tab → Listing Lead → Create Lead. After save the list refreshes;
 tapping a card shows all profile fields. Existing email/source/contact-channel columns remain intact.
+
+### Province and areas
+Apply [location migration](./migrations/20260910-lead-locations.sql) before deploying the updated API. Province is optional when no map pin or area is specified; map pins require a canonical Thai province. Existing leads keep a NULL province and their original `preferred_location` text (now additional location details); no province is guessed.
+
+`GET /agent/leads/locations` returns 77 provinces and distinct districts from existing properties, normalizing province names and district prefixes. This is the initial area catalog, not a complete neighborhood catalog. Provinces without property districts remain selectable.
+
+List filters: `province`, `locations` (JSON string array), and `includeUnspecified=true`. Multiple areas use OR matching; unspecified areas are included only within the selected province. All filters apply before pagination. Legacy leads without a province remain visible in the unfiltered list and text search.
+
+### Google Maps preference pin
+Apply [map migration](./migrations/20260910-lead-map.sql) after the province migration. Optional fields: `location_place_id`, `location_name`, `latitude`, `longitude`, `radius_km` (1, 3, or 5). A pin must have a name, both coordinates and radius; otherwise all map fields are NULL. Existing province and free-text data remain intact.
+
+The form reuses Agent Places autocomplete/details. Map taps use the authenticated `/agent/places/reverse` endpoint (Google Geocoding API) to resolve the new province; failures preserve the previous pin. The Google backend key must enable Geocoding API as well as Places API; the existing frontend Maps key renders the interactive map. Radius is straight-line distance, not travel time. The automatically resolved district is saved in `locations` so existing area filters continue to work, and the catalog also includes the current agent's saved areas.
+
+Reference: https://developers.google.com/maps/documentation/geocoding/guides-v3/requests-reverse-geocoding
+
+The create form reserves map space before selection and overlays search results there. Province is read-only and comes from the selected place or reverse geocoding; removing the pin clears it. Leads without a pin can be saved with NULL province, using the existing nullable column.

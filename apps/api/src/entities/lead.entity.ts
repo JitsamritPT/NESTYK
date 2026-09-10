@@ -30,6 +30,27 @@ export class LeadEntity extends SerialTimestampEntity {
   @Column({ type: 'varchar', length: 120, nullable: true })
   nationality: string | null;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  location_place_id: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  location_name: string | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  latitude: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  longitude: number | null;
+
+  @Column({ type: 'smallint', nullable: true })
+  radius_km: number | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  province: string | null;
+
+  @Column({ type: 'text', array: true, default: () => "'{}'::text[]" })
+  locations: string[];
+
   @Column({ type: 'varchar', length: 500, nullable: true })
   preferred_location: string | null;
 

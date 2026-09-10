@@ -1,3 +1,4 @@
+import { LeadMapLocationPicker, type LeadMapPin } from './LeadMapLocationPicker';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Alert, Pressable, StyleSheet } from 'react-native';
 import type { AgentLead, CreateLeadInput } from '@nestyk/types';
@@ -10,6 +11,9 @@ type TextKey = 'name' | 'phone' | 'nationality' | 'budgetMin' | 'budgetMax' | 'p
 const empty: Record<TextKey, string> = { name: '', phone: '', nationality: '', budgetMin: '', budgetMax: '', preferredLocation: '', moveInPlan: '', occupation: '', occupantCount: '' };
 export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead) => void; onBusy: (busy: boolean) => void }) {
   const { t } = useLocale(); const c = t.agent.leads; const { theme } = useMobileTheme();
+  const [province, setProvince] = useState('');
+  const [pin, setPin] = useState<LeadMapPin | null>(null);
+  const [mapResolving, setMapResolving] = useState(false);
   const [form, setForm] = useState(empty);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<{ hasPets: boolean | null; usesCar: boolean | null; isSmoker: boolean | null }>({ hasPets: null, usesCar: null, isSmoker: null });
@@ -36,7 +40,7 @@ export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead)
   const roomLabel = (code: string) => t.masters.roomTypes[code as keyof typeof t.masters.roomTypes] || code;
   const months = (n: number) => t.agent.createRoom.contractMonths.replace('{months}', String(n));
   const field = (key: TextKey, maxLength: number, numeric = false) => <View onLayout={(e) => { offsets.current[key] = e.nativeEvent.layout.y; }} key={key}><MobileInput
-    label={c[key]} value={form[key]} required={key === 'name' || key === 'phone'} editable={!busy} maxLength={maxLength}
+    label={key === 'preferredLocation' ? c.locationNotes : c[key]} value={form[key]} required={key === 'name' || key === 'phone'} editable={!busy} maxLength={maxLength}
     keyboardType={key === 'phone' ? 'phone-pad' : numeric ? 'decimal-pad' : 'default'}
     error={errors[key]} helperText={key === 'moveInPlan' ? c.moveInHint : undefined}
     onChangeText={(value) => { setForm((current) => ({ ...current, [key]: value })); setErrors((current) => ({ ...current, [key]: '' })); }}
@@ -48,11 +52,11 @@ export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead)
     </View>;
   const toggle = (key: keyof typeof choices) => <View key={key} style={styles.group}><Text style={{ color: theme.textHeading }}>{c[key]}</Text><View style={styles.chips}>{[null, true, false].map((value) => <Pressable key={String(value)} disabled={busy} accessibilityRole="radio" accessibilityState={{ checked: choices[key] === value }} onPress={() => setChoices((current) => ({ ...current, [key]: value }))} style={[styles.chip, choices[key] === value && styles.selected]}><Text style={{ color: theme.textHeading }}>{value == null ? c.unknown : value ? c.yes : c.no}</Text></Pressable>)}</View></View>;
   const submit = async () => {
-    if (lock.current) return;
+    if (lock.current || mapResolving) return;
     const next: Record<string, string> = {};
     if (!form.name.trim()) next.name = c.required;
     if (!form.phone.trim()) next.phone = c.required;
-    const body: CreateLeadInput = { name: form.name.trim(), phone: form.phone.trim(), ...choices, desiredRoomTypeId: roomType, visaTypeId: visaType, leaseDurationMonths: leaseMonths };
+    const body: CreateLeadInput = { province: province || null, locations: [], ...pin, name: form.name.trim(), phone: form.phone.trim(), ...choices, desiredRoomTypeId: roomType, visaTypeId: visaType, leaseDurationMonths: leaseMonths };
     for (const key of ['nationality', 'preferredLocation', 'moveInPlan', 'occupation'] as const) body[key] = form[key].trim() || null;
     for (const key of ['budgetMin', 'budgetMax', 'occupantCount'] as const) {
       const value = form[key].trim(); const n = Number(value);
@@ -77,13 +81,15 @@ export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead)
       {field('occupation', 255)}
       {chips('visaType', visaType, [{ id: null, text: c.unknown }, ...visas.map((item) => ({ id: item.id, text: visaLabel(item.code) }))], setVisaType)}
       <Text style={[styles.heading, { color: theme.textHeading }]}>{c.requirements}</Text>
-      {field('budgetMin', 13, true)}{field('budgetMax', 13, true)}{field('preferredLocation', 500)}{field('moveInPlan', 255)}
+      {field('budgetMin', 13, true)}{field('budgetMax', 13, true)}
+      <LeadMapLocationPicker pin={pin} province={province} disabled={busy} onResolving={setMapResolving} onChange={(value, nextProvince) => { setPin(value); if (!value) setProvince(''); else if (nextProvince) setProvince(nextProvince); }} />
+      {field('preferredLocation', 500)}{field('moveInPlan', 255)}
       {chips('leaseDurationMonths', leaseMonths, [{ id: null, text: c.unknown }, ...contracts.map((item) => ({ id: item.termMonths, text: months(item.termMonths) }))], setLeaseMonths)}
       {field('occupantCount', 5, true)}
       {toggle('hasPets')}{toggle('usesCar')}{toggle('isSmoker')}
       {chips('roomType', roomType, [{ id: null, text: c.unknown }, ...types.map((item) => ({ id: item.id, text: roomLabel(item.code) }))], setRoomType)}
       {typesError && <View style={styles.group}><Text style={{ color: theme.textSecondary }}>{c.loadError}</Text><MobileButton variant="outline" onPress={() => setTypeRetry((n) => n + 1)}>{c.retry}</MobileButton></View>}
-      <MobileButton onPress={submit} isLoading={busy} disabled={busy}>{c.save}</MobileButton>
+      <MobileButton onPress={submit} isLoading={busy} disabled={busy || mapResolving}>{c.save}</MobileButton>
     </ScrollView>
   </KeyboardAvoidingView>;
 }

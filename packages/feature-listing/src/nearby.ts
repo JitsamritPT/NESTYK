@@ -81,6 +81,8 @@ export function createCustomPlace(
   };
 }
 export type NearbyMapProps = {
+  markerTitle?: string;
+  radiusKm?: number;
   latitude: number;
   longitude: number;
   places: NearbyPlace[];
@@ -89,6 +91,7 @@ export type NearbyMapProps = {
   customMode?: boolean;
   apiKey?: string;
   readOnly?: boolean;
+  showRecenter?: boolean;
   onPlacePress?: (place: NearbyPlace) => void;
   onMapPress?: (latitude: number, longitude: number) => void;
 };

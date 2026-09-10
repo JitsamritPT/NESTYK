@@ -23,6 +23,11 @@ export class AgentPlacesController {
     return this.placesService.nearby(latitude?.trim() ? Number(latitude) : NaN, longitude?.trim() ? Number(longitude) : NaN, this.normalizeLanguage(language));
   }
 
+  @Get('reverse')
+  reverse(@Query('latitude') latitude?: string, @Query('longitude') longitude?: string) {
+    return this.placesService.reverse(latitude?.trim() ? Number(latitude) : NaN, longitude?.trim() ? Number(longitude) : NaN);
+  }
+
   @Get('details')
   details(
     @Query('placeId') placeId?: string,

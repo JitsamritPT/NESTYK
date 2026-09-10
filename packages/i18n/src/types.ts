@@ -188,6 +188,29 @@ export interface TranslationSchema {
   };
   agent: {
     leads: {
+      mapLocation: string;
+      mapSearchHint: string;
+      mapPinHint: string;
+      mapRadius: string;
+      mapWithin: string;
+      removePin: string;
+      mapThailand: string;
+      mapSearchFailed: string;
+
+      searchFilters: string;
+      applyFilters: string;
+      province: string;
+      selectProvince: string;
+      allProvinces: string;
+      areas: string;
+      unspecifiedArea: string;
+      areasHint: string;
+      locationNotes: string;
+      includeUnspecified: string;
+      clearFilters: string;
+      searchLocations: string;
+      noAreas: string;
+
       title: string;
       create: string;
       listing: string;

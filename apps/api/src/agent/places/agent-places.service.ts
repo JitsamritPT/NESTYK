@@ -298,6 +298,20 @@ export class AgentPlacesService {
     };
   }
 
+  async reverse(latitude: number, longitude: number): Promise<PlaceDetails> {
+    if (!validCoordinates(latitude, longitude)) throw new BadRequestException('Valid coordinates required');
+    const params = new URLSearchParams({ latlng: `${latitude},${longitude}`, language: 'th', key: this.apiKey() });
+    const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new BadGatewayException('Unable to resolve map location');
+    const data = await response.json() as { status: string; results?: Array<{ place_id: string; formatted_address: string; address_components: Array<{ long_name: string; short_name: string; types: string[] }> }> };
+    if (data.status !== 'OK' || !data.results?.length) throw new BadGatewayException('Unable to resolve map location');
+    const result = data.results[0];
+    if (!result.address_components.some((c) => c.types.includes('country') && c.short_name === 'TH')) throw new BadRequestException('Please select a location in Thailand');
+    const components = result.address_components.map((c) => ({ longText: c.long_name, shortText: c.short_name, types: c.types }));
+    const split = splitAddressComponents(components, '', result.formatted_address, '');
+    return { placeId: result.place_id, name: result.formatted_address, ...split, district: split.district.replace(/^(เขต|อำเภอ)\s*/, '').trim(), latitude, longitude };
+  }
+
   private mapAutocomplete(data: GoogleAutocompleteResponse): PlaceSuggestion[] {
     return (data.suggestions ?? [])
       .map((row) => row.placePrediction)

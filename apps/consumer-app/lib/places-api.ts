@@ -29,3 +29,8 @@ export async function searchNearbyPlaces(latitude: number, longitude: number, la
   const result = await apiGet<{ places: import('@nestyk/types').NearbyPlace[] }>(`/agent/places/nearby?${params}`);
   return result.places;
 }
+
+export async function reverseMapLocation(latitude: number, longitude: number): Promise<PlaceDetails> {
+  await ensureAgentSession();
+  return apiGet(`/agent/places/reverse?${new URLSearchParams({ latitude: String(latitude), longitude: String(longitude) })}`);
+}

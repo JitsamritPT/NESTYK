@@ -1,15 +1,11 @@
 import React from 'react';
+import { NearbyPlacesMap } from '@nestyk/feature-listing';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AgentLead } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
-import { MobileIcon, getCardElevation, tokens, useMobileTheme } from '@nestyk/ui/native';
+import { tokens, useMobileTheme } from '@nestyk/ui/native';
 
 const NEW_BADGE = { color: '#BE185D', background: '#FCE7F3' };
-
-function nativeElevation(level: 1 | 2 | 3) {
-  const { boxShadow: _webOnly, ...rest } = getCardElevation(level);
-  return rest;
-}
 
 export function LeadStatusBadge({ status }: { status: string }) {
   const { t } = useLocale();
@@ -52,7 +48,9 @@ export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
     [c.visaType, visa],
   ];
   const requirementRows: Array<[string, string]> = [
-    [c.preferredLocation, display(lead.preferredLocation)],
+    [c.province, display(lead.province)],
+    [c.preferredLocation, lead.locationName ? `${lead.locationName} · ${c.mapWithin.replace('{km}', String(lead.radiusKm))}` : lead.locations?.length ? lead.locations.join(' · ') : c.unspecifiedArea],
+    [c.locationNotes, display(lead.preferredLocation)],
     [c.moveInPlan, display(lead.moveInPlan)],
     [c.leaseDurationMonths, lease],
     [c.occupantCount, display(lead.occupantCount)],
@@ -75,11 +73,8 @@ export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
       contentContainerStyle={styles.scroll}
       showsVerticalScrollIndicator={false}
     >
-      <View style={[styles.hero, nativeElevation(1), { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View style={[styles.hero, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <View style={styles.heroTop}>
-          <View style={[styles.avatar, { backgroundColor: `${agentColor}18` }]}>
-            <MobileIcon name="user" size={28} color={agentColor} weight="fill" />
-          </View>
           <View style={{ flex: 1, gap: 6 }}>
             <Text style={[styles.heroName, { color: theme.textHeading }]}>{lead.name}</Text>
             <LeadStatusBadge status={lead.status} />
@@ -97,16 +92,22 @@ export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
             pressed && Platform.OS === 'ios' ? { opacity: 0.75 } : null,
           ]}
         >
-          <MobileIcon name="chat" size={18} color={agentColor} />
           <Text style={[styles.phoneText, { color: agentColor }]}>{lead.phone}</Text>
           <Text style={[styles.callHint, { color: agentColor }]}>{c.callPhone}</Text>
         </Pressable>
 
-        <View style={styles.budgetBlock}>
+        <View style={[styles.budgetBlock, { borderColor: theme.border }]}>
           <Text style={[styles.budgetLabel, { color: theme.textSecondary }]}>{c.budget}</Text>
           <Text style={[styles.budgetValue, { color: agentColor }]}>{budget}</Text>
         </View>
       </View>
+
+      {lead.latitude != null && lead.longitude != null && lead.radiusKm != null && <Section title={c.mapLocation} theme={theme}>
+        <View style={{ paddingVertical: 12, gap: 8 }}>
+          <Text style={{ color: theme.textHeading }}>{lead.locationName} · {c.mapWithin.replace('{km}', String(lead.radiusKm))}</Text>
+          <NearbyPlacesMap showRecenter={false} latitude={lead.latitude} longitude={lead.longitude} radiusKm={lead.radiusKm} markerTitle={lead.locationName ?? undefined} places={[]} selectedIds={[]} readOnly apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY} />
+        </View>
+      </Section>}
 
       <Section title={c.profile} theme={theme}>
         {profileRows.map(([label, value], index) => (
@@ -115,35 +116,12 @@ export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
       </Section>
 
       <Section title={c.requirements} theme={theme}>
-        {requirementRows.map(([label, value], index) => (
-          <DetailRow key={label} label={label} value={value} theme={theme} divider={index < requirementRows.length - 1 || flags.some(([, v]) => v != null)} />
+        {requirementRows.map(([label, value]) => (
+          <DetailRow key={label} label={label} value={value} theme={theme} divider />
         ))}
-        {flags.some(([, v]) => v != null) ? (
-          <View style={styles.chipWrap}>
-            {flags.map(([label, value]) => {
-              if (value == null) return null;
-              const on = value === true;
-              return (
-                <View
-                  key={label}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: on ? `${agentColor}14` : '#F1F5F9',
-                      borderColor: on ? `${agentColor}55` : theme.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.chipText, { color: on ? agentColor : theme.textSecondary }]}>
-                    {label}: {on ? c.yes : c.no}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        ) : (
-          <DetailRow label={`${c.hasPets} / ${c.usesCar} / ${c.isSmoker}`} value={c.unknown} theme={theme} divider={false} />
-        )}
+        {flags.map(([label, value], index) => (
+          <DetailRow key={label} label={label} value={display(value)} theme={theme} divider={index < flags.length - 1} />
+        ))}
       </Section>
     </ScrollView>
   );
@@ -159,7 +137,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <View style={[styles.sectionCard, nativeElevation(1), { backgroundColor: theme.surface, borderColor: theme.border }]}>
+    <View style={[styles.sectionCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <Text style={[styles.sectionTitle, { color: theme.textHeading }]}>{title}</Text>
       {children}
     </View>
@@ -194,20 +172,13 @@ const styles = StyleSheet.create({
   hero: {
     borderWidth: 1,
     borderRadius: 16,
-    padding: 16,
-    gap: 14,
+    padding: 20,
+    gap: 16,
   },
   heroTop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-  },
-  avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   heroName: {
     fontFamily: tokens.typography.native.headingTh,
@@ -249,7 +220,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   budgetBlock: {
-    gap: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 16,
+    gap: 4,
   },
   budgetLabel: {
     fontFamily: tokens.typography.native.body,
@@ -272,7 +245,7 @@ const styles = StyleSheet.create({
     fontFamily: tokens.typography.native.headingTh,
     fontSize: 16,
     lineHeight: 24,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   row: {
     paddingVertical: 12,
@@ -287,24 +260,6 @@ const styles = StyleSheet.create({
     fontFamily: tokens.typography.native.body,
     fontSize: 15,
     lineHeight: 22,
-    fontWeight: '600',
-  },
-  chipWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    paddingVertical: 12,
-  },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  chipText: {
-    fontFamily: tokens.typography.native.body,
-    fontSize: 12,
-    lineHeight: 18,
     fontWeight: '600',
   },
 });

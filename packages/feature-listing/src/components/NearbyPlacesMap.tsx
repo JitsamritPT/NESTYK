@@ -1,30 +1,33 @@
 import React, { useEffect, useRef } from "react";
 import { Platform, View } from "react-native";
-import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Circle, Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import { useLocale } from "@nestyk/i18n";
 import { MobileButton } from "@nestyk/ui/native";
 import { categoryColors, nearbyCategory, type NearbyMapProps } from "../nearby";
 export function NearbyPlacesMap({
   latitude,
   longitude,
+  markerTitle,
+  radiusKm,
   places,
   selectedIds,
   customMode,
   onPlacePress,
   onMapPress,
   readOnly,
+  showRecenter = true,
 }: NearbyMapProps) {
   const { t } = useLocale();
   const map = useRef<MapView>(null);
   const region = {
     latitude,
     longitude,
-    latitudeDelta: 0.035,
-    longitudeDelta: 0.035,
+    latitudeDelta: radiusKm ? radiusKm * 0.025 : 0.035,
+    longitudeDelta: radiusKm ? radiusKm * 0.025 : 0.035,
   };
   useEffect(() => {
     map.current?.animateToRegion(region);
-  }, [latitude, longitude]);
+  }, [latitude, longitude, radiusKm]);
   return (
     <View style={{ gap: 8 }}>
       <View style={{ height: 330, borderRadius: 14, overflow: "hidden" }}>
@@ -48,8 +51,9 @@ export function NearbyPlacesMap({
           <Marker
             coordinate={{ latitude, longitude }}
             pinColor="#111827"
-            title={t.agent.createRoom.propertyName}
+            title={markerTitle ?? t.agent.createRoom.propertyName}
           />
+          {radiusKm != null && <Circle center={{ latitude, longitude }} radius={radiusKm * 1000} strokeColor="#db2777" fillColor="rgba(219,39,119,0.10)" strokeWidth={2} />}
           {places.map((place, index) => (
             <Marker
               key={place.placeId}
@@ -68,12 +72,12 @@ export function NearbyPlacesMap({
           ))}
         </MapView>
       </View>
-      <MobileButton
+      {showRecenter && <MobileButton
         variant="outline"
         onPress={() => map.current?.animateToRegion(region)}
       >
         {t.agent.createRoom.recenterMap}
-      </MobileButton>
+      </MobileButton>}
     </View>
   );
 }
