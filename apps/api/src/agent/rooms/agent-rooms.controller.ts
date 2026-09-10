@@ -72,6 +72,15 @@ export class AgentRoomsController {
     return this.photos.upload(user.id, file, `${request.protocol}://${request.get('host')}`);
   }
 
+  @Post('media/enhance')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_ROOM_PHOTO_BYTES, files: 1, fields: 0 } }))
+  enhanceMedia(@CurrentUser() user: AuthRequestUser,
+    @UploadedFile() file: { buffer: Buffer; size: number } | undefined,
+    @Req() request: { protocol: string; get(name: string): string }) {
+    return this.photos.enhance(user.id, file, `${request.protocol}://${request.get('host')}`);
+  }
+
   @Patch(':id')
   update(@CurrentUser() user: AuthRequestUser, @Param('id', ParseIntPipe) id: number,
     @Body() body: CreateRoomBody, @Req() request: { protocol: string; get(name: string): string }) {

@@ -102,3 +102,48 @@ test('real multipart room photo upload, retrieval and ownership validation', asy
   assert.equal((await fetch(`${base}/api/v1/room-images/7/00000000-0000-4000-8000-000000000000.jpg`)).status, 404);
   await storage.validateRoomPhotos(7, [], base);
 });
+
+test('AI photo enhance requires CLAID_API_KEY and returns enhanced upload when configured', async (t) => {
+  const previousKey = process.env.CLAID_API_KEY;
+  const previousUrl = process.env.CLAID_API_URL;
+  t.after(() => {
+    if (previousKey == null) delete process.env.CLAID_API_KEY; else process.env.CLAID_API_KEY = previousKey;
+    if (previousUrl == null) delete process.env.CLAID_API_URL; else process.env.CLAID_API_URL = previousUrl;
+  });
+  delete process.env.CLAID_API_KEY;
+  const objects = new Map();
+  const cloudOrigin = 'https://photos.supabase.co';
+  const storage = new RoomPhotoStorageService();
+  storage.storage = () => ({
+    upload: async (key, buffer) => { objects.set(key, buffer); return { error: null }; },
+    getPublicUrl: (key) => ({ data: { publicUrl: `${cloudOrigin}/storage/v1/object/public/property-images/${key}` } }),
+    exists: async (key) => ({ data: objects.has(key), error: null }),
+  });
+  storage.client = { storage: {
+    listBuckets: async () => ({ data: [{ name: 'property-images' }], error: null }),
+    createBucket: async () => ({ error: null }),
+  } };
+  const jpeg = await sharp({ create: { width: 200, height: 200, channels: 3, background: 'blue' } }).jpeg().toBuffer();
+  await assert.rejects(storage.enhance(7, { buffer: jpeg, size: jpeg.length }, 'http://localhost'), { status: 503 });
+
+  process.env.CLAID_API_KEY = 'test-key';
+  process.env.CLAID_API_URL = 'https://claid.test';
+  const originalFetch = globalThis.fetch;
+  const enhancedJpeg = await sharp({ create: { width: 180, height: 180, channels: 3, background: 'green' } }).jpeg().toBuffer();
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url === 'https://claid.test/v1/image/edit/upload') {
+      assert.equal(init.headers.Authorization, 'Bearer test-key');
+      assert.ok(init.body instanceof FormData);
+      return new Response(JSON.stringify({ data: { output: { tmp_url: 'https://claid.test/tmp/enhanced.jpg' } } }), { status: 200 });
+    }
+    if (url === 'https://claid.test/tmp/enhanced.jpg') {
+      return new Response(enhancedJpeg, { status: 200, headers: { 'Content-Type': 'image/jpeg' } });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const result = await storage.enhance(7, { buffer: jpeg, size: jpeg.length }, 'http://localhost');
+  assert.ok(result.mediaUrl.startsWith(`${cloudOrigin}/storage/v1/object/public/property-images/7/`));
+  assert.equal(objects.size, 1);
+});

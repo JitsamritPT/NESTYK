@@ -25,7 +25,7 @@ import { UserRole } from '@nestyk/types';
 import { MobileCreateListingWizardBody, defaultOwnerListingConfig, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import { MobileServiceCatalogBody } from '@nestyk/feature-services';
 import { createAgentScoutRoom, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities } from '../lib/agent-listings-api';
-import { pickRoomPhotos, uploadRoomPhoto } from '../lib/room-photos';
+import { pickRoomPhotos, uploadRoomPhoto, enhanceRoomPhoto } from '../lib/room-photos';
 import { searchPlaces, getPlaceDetails, searchNearbyPlaces } from '../lib/places-api';
 import { useAuth } from '../lib/auth/AuthContext';
 import { APP_CONFIG } from '../lib/config';
@@ -412,6 +412,7 @@ export default function AppHomeScreen() {
             config={defaultAgentListingConfig}
             pickPhotos={pickRoomPhotos}
             uploadPhoto={uploadRoomPhoto}
+            enhancePhoto={enhanceRoomPhoto}
             searchPlaces={handleSearchPlaces}
             getPlaceDetails={handleGetPlaceDetails}
             listContacts={handleListContacts}

@@ -39,3 +39,32 @@ export async function uploadRoomPhoto(photo: RoomPhoto): Promise<string> {
     clearTimeout(timeout);
   }
 }
+
+/** Upload + Claid enhance; returns a photo already stored with mediaUrl (skip re-upload on submit). */
+export async function enhanceRoomPhoto(photo: RoomPhoto): Promise<RoomPhoto> {
+  await ensureAgentSession();
+  const form = new FormData();
+  if (Platform.OS === 'web') {
+    const file = photo.file ?? await (await fetch(photo.uri)).blob();
+    form.append('file', file, photo.name);
+  } else {
+    form.append('file', { uri: photo.uri, name: photo.name, type: photo.mimeType } as unknown as Blob);
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const result = await apiRequest<{ mediaUrl: string }>('/agent/rooms/media/enhance', {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    });
+    return {
+      uri: result.mediaUrl,
+      mediaUrl: result.mediaUrl,
+      name: photo.name.replace(/\.[^.]+$/, '') + '-enhanced.jpg',
+      mimeType: 'image/jpeg',
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
