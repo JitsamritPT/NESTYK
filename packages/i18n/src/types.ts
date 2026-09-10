@@ -226,6 +226,15 @@ export interface TranslationSchema {
       details: string;
       back: string;
       newLead: string;
+      statuses: {
+        new: string;
+        viewed: string;
+        inprogress: string;
+        lost: string;
+        booked: string;
+      };
+      callPhone: string;
+      budget: string;
       loadError: string;
       retry: string;
       previous: string;

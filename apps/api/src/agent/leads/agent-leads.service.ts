@@ -66,7 +66,9 @@ export class AgentLeadsService {
       desired_room_type_id: b.desiredRoomTypeId, created_by_user_id: agentId,
       rent_room_id: null, status: 'new', other_contacts: [],
     }));
-    return this.view(agentId, row.id);
+    const saved = await this.leads.findOne({ where: { id: row.id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
+    if (!saved) throw new NotFoundException('Lead not found');
+    return toLead(saved);
   }
 
   async list(agentId: number, query: { q?: string; page?: string; limit?: string }) {
@@ -84,6 +86,11 @@ export class AgentLeadsService {
   async view(agentId: number, id: number) {
     const row = await this.leads.findOne({ where: { id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
     if (!row) throw new NotFoundException('Lead not found');
+    if (row.status === 'new') {
+      row.status = 'viewed';
+      row.viewed_at = new Date();
+      await this.leads.save(row);
+    }
     return toLead(row);
   }
 }

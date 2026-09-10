@@ -1,0 +1,310 @@
+import React from 'react';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { AgentLead } from '@nestyk/types';
+import { useLocale } from '@nestyk/i18n';
+import { MobileIcon, getCardElevation, tokens, useMobileTheme } from '@nestyk/ui/native';
+
+const NEW_BADGE = { color: '#BE185D', background: '#FCE7F3' };
+
+function nativeElevation(level: 1 | 2 | 3) {
+  const { boxShadow: _webOnly, ...rest } = getCardElevation(level);
+  return rest;
+}
+
+export function LeadStatusBadge({ status }: { status: string }) {
+  const { t } = useLocale();
+  const c = t.agent.leads;
+  if (status !== 'new') return null;
+  return (
+    <Text style={[styles.badge, { color: NEW_BADGE.color, backgroundColor: NEW_BADGE.background }]}>
+      {c.statuses.new || c.newLead}
+    </Text>
+  );
+}
+
+export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
+  const { t } = useLocale();
+  const c = t.agent.leads;
+  const { theme } = useMobileTheme();
+  const agentColor = tokens.colors.roles.agent;
+
+  const display = (v: string | number | boolean | null | undefined) =>
+    v == null || v === '' ? c.unknown : typeof v === 'boolean' ? (v ? c.yes : c.no) : String(v);
+
+  const roomType = lead.desiredRoomTypeCode
+    ? t.masters.roomTypes[lead.desiredRoomTypeCode as keyof typeof t.masters.roomTypes] || lead.desiredRoomTypeCode
+    : c.unknown;
+  const visa = lead.visaTypeCode
+    ? t.masters.visaTypes[lead.visaTypeCode as keyof typeof t.masters.visaTypes] || lead.visaTypeCode
+    : c.unknown;
+  const lease = lead.leaseDurationMonths == null
+    ? c.unknown
+    : t.agent.createRoom.contractMonths.replace('{months}', String(lead.leaseDurationMonths));
+  const budget =
+    lead.budgetMin == null && lead.budgetMax == null
+      ? c.unknown
+      : [lead.budgetMin?.toLocaleString(), lead.budgetMax?.toLocaleString()].filter(Boolean).join(' – ')
+        + t.agent.listings.rentPerMonth.replace('{price}', '');
+
+  const profileRows: Array<[string, string]> = [
+    [c.nationality, display(lead.nationality)],
+    [c.occupation, display(lead.occupation)],
+    [c.visaType, visa],
+  ];
+  const requirementRows: Array<[string, string]> = [
+    [c.preferredLocation, display(lead.preferredLocation)],
+    [c.moveInPlan, display(lead.moveInPlan)],
+    [c.leaseDurationMonths, lease],
+    [c.occupantCount, display(lead.occupantCount)],
+    [c.roomType, roomType],
+  ];
+  const flags: Array<[string, boolean | null]> = [
+    [c.hasPets, lead.hasPets],
+    [c.usesCar, lead.usesCar],
+    [c.isSmoker, lead.isSmoker],
+  ];
+
+  const call = () => {
+    const digits = lead.phone.replace(/[^\d+]/g, '');
+    if (!digits) return;
+    void Linking.openURL(`tel:${digits}`);
+  };
+
+  return (
+    <ScrollView
+      contentContainerStyle={styles.scroll}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={[styles.hero, nativeElevation(1), { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={styles.heroTop}>
+          <View style={[styles.avatar, { backgroundColor: `${agentColor}18` }]}>
+            <MobileIcon name="user" size={28} color={agentColor} weight="fill" />
+          </View>
+          <View style={{ flex: 1, gap: 6 }}>
+            <Text style={[styles.heroName, { color: theme.textHeading }]}>{lead.name}</Text>
+            <LeadStatusBadge status={lead.status} />
+          </View>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${c.callPhone} ${lead.phone}`}
+          onPress={call}
+          android_ripple={{ color: `${agentColor}22` }}
+          style={({ pressed }) => [
+            styles.phoneRow,
+            { borderColor: `${agentColor}44`, backgroundColor: `${agentColor}0F` },
+            pressed && Platform.OS === 'ios' ? { opacity: 0.75 } : null,
+          ]}
+        >
+          <MobileIcon name="chat" size={18} color={agentColor} />
+          <Text style={[styles.phoneText, { color: agentColor }]}>{lead.phone}</Text>
+          <Text style={[styles.callHint, { color: agentColor }]}>{c.callPhone}</Text>
+        </Pressable>
+
+        <View style={styles.budgetBlock}>
+          <Text style={[styles.budgetLabel, { color: theme.textSecondary }]}>{c.budget}</Text>
+          <Text style={[styles.budgetValue, { color: agentColor }]}>{budget}</Text>
+        </View>
+      </View>
+
+      <Section title={c.profile} theme={theme}>
+        {profileRows.map(([label, value], index) => (
+          <DetailRow key={label} label={label} value={value} theme={theme} divider={index < profileRows.length - 1} />
+        ))}
+      </Section>
+
+      <Section title={c.requirements} theme={theme}>
+        {requirementRows.map(([label, value], index) => (
+          <DetailRow key={label} label={label} value={value} theme={theme} divider={index < requirementRows.length - 1 || flags.some(([, v]) => v != null)} />
+        ))}
+        {flags.some(([, v]) => v != null) ? (
+          <View style={styles.chipWrap}>
+            {flags.map(([label, value]) => {
+              if (value == null) return null;
+              const on = value === true;
+              return (
+                <View
+                  key={label}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: on ? `${agentColor}14` : '#F1F5F9',
+                      borderColor: on ? `${agentColor}55` : theme.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.chipText, { color: on ? agentColor : theme.textSecondary }]}>
+                    {label}: {on ? c.yes : c.no}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : (
+          <DetailRow label={`${c.hasPets} / ${c.usesCar} / ${c.isSmoker}`} value={c.unknown} theme={theme} divider={false} />
+        )}
+      </Section>
+    </ScrollView>
+  );
+}
+
+function Section({
+  title,
+  theme,
+  children,
+}: {
+  title: string;
+  theme: { surface: string; border: string; textHeading: string };
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={[styles.sectionCard, nativeElevation(1), { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <Text style={[styles.sectionTitle, { color: theme.textHeading }]}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  theme,
+  divider,
+}: {
+  label: string;
+  value: string;
+  theme: { textSecondary: string; textHeading: string; border: string };
+  divider: boolean;
+}) {
+  return (
+    <View style={[styles.row, divider ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border } : null]}>
+      <Text style={[styles.rowLabel, { color: theme.textSecondary }]}>{label}</Text>
+      <Text selectable style={[styles.rowValue, { color: theme.textHeading }]}>{value}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  scroll: {
+    padding: 16,
+    gap: 14,
+    paddingBottom: 40,
+  },
+  hero: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    gap: 14,
+  },
+  heroTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroName: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 20,
+    lineHeight: 30,
+  },
+  badge: {
+    alignSelf: 'flex-start',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    overflow: 'hidden',
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  phoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    minHeight: 48,
+  },
+  phoneText: {
+    flex: 1,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '600',
+  },
+  callHint: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+  },
+  budgetBlock: {
+    gap: 2,
+  },
+  budgetLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  budgetValue: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 22,
+    lineHeight: 33,
+  },
+  sectionCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  sectionTitle: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    marginBottom: 4,
+  },
+  row: {
+    paddingVertical: 12,
+    gap: 4,
+  },
+  rowLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  rowValue: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '600',
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  chip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  chipText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+});

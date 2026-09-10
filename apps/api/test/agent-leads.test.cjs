@@ -8,7 +8,7 @@ test('lead validation requires name/phone and preserves unknown versus false',()
 });
 test('lead HTTP API saves profile, rejects invalid catalogs and scopes reads to current agent',async(t)=>{
  process.env.ALLOW_DEV_AUTH='true';const saved=[];
- const repo={create:b=>({...b}),save:async b=>{const row={...b,id:saved.length+1,created_at:new Date(),desired_room_type:b.desired_room_type_id?{code:'studio'}:null,visa_type:b.visa_type_id?{code:'tourist'}:null};saved.push(row);return row;},findOne:async({where})=>saved.find(row=>row.id===where.id&&row.created_by_user_id===where.created_by_user_id)||null};
+ const repo={create:b=>({...b}),save:async b=>{if(b.id){const idx=saved.findIndex(row=>row.id===b.id);if(idx>=0){saved[idx]={...saved[idx],...b};return saved[idx];}}const row={...b,id:saved.length+1,created_at:new Date(),desired_room_type:b.desired_room_type_id?{code:'studio'}:null,visa_type:b.visa_type_id?{code:'tourist'}:null};saved.push(row);return row;},findOne:async({where})=>saved.find(row=>row.id===where.id&&row.created_by_user_id===where.created_by_user_id)||null};
  const catalog={findOne:async({where})=>where.id===1||where.term_months===12?{id:1,code:'tourist',term_months:12,is_active:true}:null,find:async()=>[{id:1,code:'tourist'}]};
  const service=new AgentLeadsService(repo,catalog,catalog,catalog);
  class TestModule{};Module({controllers:[AgentLeadsController],providers:[{provide:AgentLeadsService,useValue:service},{provide:AuthService,useValue:{findBySupabaseUserId:async id=>({id:Number(id)}),loadUserWithRoles:async id=>({id,roleNames:id===8?['guest']:['agent']})}}]})(TestModule);
@@ -26,5 +26,8 @@ test('lead HTTP API saves profile, rejects invalid catalogs and scopes reads to 
  const input={name:'Test lead',phone:'TEST',nationality:'Test',budgetMin:10000,budgetMax:15000,preferredLocation:'Test location',moveInPlan:'Next month',hasPets:false,occupation:'Test occupation',visaTypeId:1,leaseDurationMonths:12,usesCar:true,occupantCount:2,isSmoker:false,desiredRoomTypeId:1};
  const response=await post({...input,created_by_user_id:9,status:'booked'});assert.equal(response.status,201);const lead=await response.json();for(const [key,value]of Object.entries(input))assert.equal(lead[key],value,key);assert.equal(lead.visaTypeCode,'tourist');assert.equal(lead.status,'new');assert.equal(saved[0].created_by_user_id,7);assert.equal(saved[0].rent_room_id,null);
  assert.equal((await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(9)})).status,404);
- assert.equal((await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)})).status,200);
+ const firstView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});assert.equal(firstView.status,200);const viewed=await firstView.json();assert.equal(viewed.status,'viewed');assert.equal(saved[0].status,'viewed');assert.ok(saved[0].viewed_at);
+ const secondView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});assert.equal((await secondView.json()).status,'viewed');
+ saved[0].status='booked';saved[0].viewed_at=new Date('2020-01-01');
+ const bookedView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});const booked=await bookedView.json();assert.equal(booked.status,'booked');assert.equal(new Date(saved[0].viewed_at).toISOString(),'2020-01-01T00:00:00.000Z');
 });
