@@ -38,6 +38,12 @@ import {
   MapPin,
   NotePencil,
   WarningCircle,
+  Envelope,
+  Phone,
+  GoogleLogo,
+  FacebookLogo,
+  AppleLogo,
+  ArrowsLeftRight,
   IconProps,
 } from 'phosphor-react-native';
 import { tokens } from '../theme/tokens';
@@ -82,6 +88,12 @@ const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
   'map-pin': MapPin,
   note: NotePencil,
   warning: WarningCircle,
+  envelope: Envelope,
+  phone: Phone,
+  google: GoogleLogo,
+  facebook: FacebookLogo,
+  apple: AppleLogo,
+  swap: ArrowsLeftRight,
 };
 
 const TONE_COLORS: Record<AppIconTone, string> = {

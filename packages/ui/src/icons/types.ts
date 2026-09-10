@@ -36,7 +36,13 @@ export type AppIconName =
   | 'coins'
   | 'map-pin'
   | 'note'
-  | 'warning';
+  | 'warning'
+  | 'envelope'
+  | 'phone'
+  | 'google'
+  | 'facebook'
+  | 'apple'
+  | 'swap';
 
 export type AppIconTone =
   | 'active'

@@ -1,5 +1,6 @@
 import { APP_CONFIG } from './config';
 import { getOrCreateDevIdentity, toDevBearer } from './dev-identity';
+import { loadAuthSession } from './auth/session-storage';
 
 export class ApiError extends Error {
   status: number;
@@ -11,7 +12,14 @@ export class ApiError extends Error {
   }
 }
 
-async function authHeader(): Promise<Record<string, string>> {
+async function authHeader(overrideToken?: string): Promise<Record<string, string>> {
+  if (overrideToken) {
+    return { Authorization: `Bearer ${overrideToken}` };
+  }
+  const session = await loadAuthSession();
+  if (session?.accessToken) {
+    return { Authorization: `Bearer ${session.accessToken}` };
+  }
   const identity = await getOrCreateDevIdentity();
   return { Authorization: `Bearer ${toDevBearer(identity)}` };
 }
@@ -24,11 +32,15 @@ function messageFromBody(body: unknown, fallback: string): string {
   return fallback;
 }
 
-export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiRequest<T>(
+  path: string,
+  init?: RequestInit,
+  accessToken?: string,
+): Promise<T> {
   const headers = {
     Accept: 'application/json',
     ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
-    ...(await authHeader()),
+    ...(await authHeader(accessToken)),
     ...(init?.headers as Record<string, string> | undefined),
   };
 
@@ -49,10 +61,10 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
   return parsed as T;
 }
 
-export function apiGet<T>(path: string): Promise<T> {
-  return apiRequest<T>(path, { method: 'GET' });
+export function apiGet<T>(path: string, accessToken?: string): Promise<T> {
+  return apiRequest<T>(path, { method: 'GET' }, accessToken);
 }
 
-export function apiPost<T>(path: string, body: unknown): Promise<T> {
-  return apiRequest<T>(path, { method: 'POST', body: JSON.stringify(body) });
+export function apiPost<T>(path: string, body: unknown, accessToken?: string): Promise<T> {
+  return apiRequest<T>(path, { method: 'POST', body: JSON.stringify(body) }, accessToken);
 }

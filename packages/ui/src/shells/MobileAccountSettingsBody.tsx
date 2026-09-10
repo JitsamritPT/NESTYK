@@ -6,15 +6,15 @@ import {
   TouchableOpacity,
   Switch,
   ScrollView,
-  Alert,
   LayoutChangeEvent,
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useLocale } from '@nestyk/i18n';
 import { MobileIcon } from '../icons/MobileIcon';
 import { AppIconName } from '../icons/types';
-import { MobileInput } from '../components/MobileInput';
-import { MobileButton } from '../components/MobileButton';
+import { MobileProfileAvatar } from '../components/MobileProfileAvatar';
+import { MobileProfileEditBody } from '../components/MobileProfileEditBody';
+import { MobileLinkedAccountsBody } from '../components/MobileLinkedAccountsBody';
 import { tokens } from '../theme/tokens';
 import { getCardElevation } from '../theme/elevation';
 import { useMobileTheme } from '../theme/ThemeContext';
@@ -30,6 +30,7 @@ export interface MobileAccountProfile {
 export interface MobileAccountSettingsBodyProps {
   profile: MobileAccountProfile;
   onSignOut?: () => void;
+  signOutLabel?: string;
   onNestedViewChange?: (active: boolean, title?: string) => void;
   appVersion?: string;
 }
@@ -41,6 +42,7 @@ export interface MobileAccountSettingsBodyHandle {
 type SettingsView =
   | 'hub'
   | 'profile'
+  | 'linkedAccounts'
   | 'password'
   | 'about'
   | 'terms'
@@ -59,6 +61,7 @@ export const MobileAccountSettingsBody = forwardRef<
 >(function MobileAccountSettingsBody({
   profile,
   onSignOut,
+  signOutLabel,
   onNestedViewChange,
   appVersion = '0.1.0',
 }, ref) {
@@ -66,9 +69,6 @@ export const MobileAccountSettingsBody = forwardRef<
   const { theme } = useMobileTheme();
   const [settingsView, setSettingsView] = useState<SettingsView>('hub');
   const [paneWidth, setPaneWidth] = useState(0);
-  const [fullName, setFullName] = useState(profile.name);
-  const [email, setEmail] = useState(profile.email);
-  const [phone, setPhone] = useState(profile.phone ?? '');
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailNotifEnabled, setEmailNotifEnabled] = useState(true);
   const slideX = useSharedValue(0);
@@ -82,7 +82,9 @@ export const MobileAccountSettingsBody = forwardRef<
     (view: SettingsView): string | undefined => {
       switch (view) {
         case 'profile':
-          return t.mobile.appSettings.profileAndContact;
+          return t.mobile.account.editProfile;
+        case 'linkedAccounts':
+          return t.mobile.account.linkedAccounts.title;
         case 'password':
           return t.mobile.account.changePassword;
         case 'about':
@@ -142,10 +144,6 @@ export const MobileAccountSettingsBody = forwardRef<
     }
   };
 
-  const handleSave = () => {
-    Alert.alert(t.common.confirm, t.mobile.account.profileSaved);
-  };
-
   const renderLinkRow = (
     label: string,
     icon: AppIconName,
@@ -162,9 +160,9 @@ export const MobileAccountSettingsBody = forwardRef<
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <MobileIcon name={icon} size={20} color={tokens.colors.icon.secondary} />
+      <MobileIcon name={icon} size={20} color={theme.textSecondary} />
       <Text style={[styles.actionLabel, { color: theme.textHeading }]}>{label}</Text>
-      <MobileIcon name="chevron-right" size={18} color={tokens.colors.icon.secondary} />
+      <MobileIcon name="chevron-right" size={18} color={theme.textSecondary} />
     </TouchableOpacity>
   );
 
@@ -184,52 +182,20 @@ export const MobileAccountSettingsBody = forwardRef<
     switch (settingsView) {
       case 'profile':
         return (
-          <ScrollView
-            style={{ width: paneWidth }}
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={[styles.profileHero, nativeElevation(1), cardStyle]}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{profile.initials}</Text>
-              </View>
-              <Text style={[styles.profileName, { color: theme.textHeading }]}>{fullName}</Text>
-              <Text style={[styles.profileEmail, { color: theme.textSecondary }]}>{email}</Text>
-            </View>
-
-            <Text style={[styles.sectionLabel, { color: theme.textSecondary }]}>
-              {t.mobile.account.personalInfo}
-            </Text>
-            <View style={[styles.card, nativeElevation(1), cardStyle]}>
-              <MobileInput
-                label={t.mobile.account.fullName}
-                value={fullName}
-                onChangeText={setFullName}
-                placeholder={t.mobile.account.fullName}
-              />
-              <View style={styles.fieldGap} />
-              <MobileInput
-                label={t.mobile.account.email}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                placeholder={t.mobile.account.email}
-              />
-              <View style={styles.fieldGap} />
-              <MobileInput
-                label={t.mobile.account.phone}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                placeholder={t.mobile.account.phone}
-              />
-              <View style={styles.saveBtnWrap}>
-                <MobileButton onPress={handleSave}>{t.common.save}</MobileButton>
-              </View>
-            </View>
-          </ScrollView>
+          <View style={{ width: paneWidth, flex: 1 }}>
+            <MobileProfileEditBody
+              initials={profile.initials}
+              name={profile.name}
+              email={profile.email}
+              phone={profile.phone}
+            />
+          </View>
+        );
+      case 'linkedAccounts':
+        return (
+          <View style={{ width: paneWidth, flex: 1 }}>
+            <MobileLinkedAccountsBody email={profile.email} phone={profile.phone} />
+          </View>
         );
       case 'password':
         return (
@@ -264,9 +230,7 @@ export const MobileAccountSettingsBody = forwardRef<
               scrollEnabled={settingsView === 'hub'}
             >
               <View style={[styles.profileHero, nativeElevation(1), cardStyle]}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{profile.initials}</Text>
-                </View>
+                <MobileProfileAvatar initials={profile.initials} size="lg" style={styles.avatarSpacing} />
                 <Text style={[styles.profileName, { color: theme.textHeading }]}>{profile.name}</Text>
                 <Text style={[styles.profileEmail, { color: theme.textSecondary }]}>{profile.email}</Text>
               </View>
@@ -276,9 +240,14 @@ export const MobileAccountSettingsBody = forwardRef<
               </Text>
               <View style={[styles.card, styles.cardFlush, nativeElevation(1), cardStyle]}>
                 {renderLinkRow(
-                  t.mobile.appSettings.profileAndContact,
+                  t.mobile.account.editProfile,
                   'user',
                   () => openNested('profile'),
+                )}
+                {renderLinkRow(
+                  t.mobile.account.linkedAccounts.title,
+                  'key',
+                  () => openNested('linkedAccounts'),
                 )}
                 {renderLinkRow(
                   t.mobile.account.changePassword,
@@ -293,7 +262,7 @@ export const MobileAccountSettingsBody = forwardRef<
               </Text>
               <View style={[styles.card, nativeElevation(1), cardStyle]}>
                 <View style={styles.toggleRow}>
-                  <MobileIcon name="bell" size={20} color={tokens.colors.icon.secondary} />
+                  <MobileIcon name="bell" size={20} color={theme.textSecondary} />
                   <Text style={[styles.actionLabel, { color: theme.textHeading }]}>
                     {t.mobile.account.pushNotifications}
                   </Text>
@@ -306,7 +275,7 @@ export const MobileAccountSettingsBody = forwardRef<
                 </View>
                 <View style={[styles.rowDivider, { borderTopColor: theme.border }]} />
                 <View style={styles.toggleRow}>
-                  <MobileIcon name="chat" size={20} color={tokens.colors.icon.secondary} />
+                  <MobileIcon name="chat" size={20} color={theme.textSecondary} />
                   <Text style={[styles.actionLabel, { color: theme.textHeading }]}>
                     {t.mobile.account.emailNotifications}
                   </Text>
@@ -344,7 +313,7 @@ export const MobileAccountSettingsBody = forwardRef<
                 {renderLinkRow(t.mobile.appSettings.terms, 'clipboard', () => openNested('terms'))}
                 {renderLinkRow(t.mobile.appSettings.privacy, 'shield', () => openNested('privacy'))}
                 <View style={[styles.versionRow, { borderTopColor: theme.border }]}>
-                  <MobileIcon name="package" size={20} color={tokens.colors.icon.secondary} />
+                  <MobileIcon name="package" size={20} color={theme.textSecondary} />
                   <Text style={[styles.actionLabel, { color: theme.textHeading }]}>
                     {t.mobile.appSettings.version}
                   </Text>
@@ -361,7 +330,7 @@ export const MobileAccountSettingsBody = forwardRef<
                 onPress={onSignOut}
                 activeOpacity={0.8}
               >
-                <Text style={styles.signOutText}>{t.common.signOut}</Text>
+                <Text style={styles.signOutText}>{signOutLabel ?? t.common.signOut}</Text>
               </TouchableOpacity>
             </ScrollView>
 
@@ -396,20 +365,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 4,
   },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: tokens.colors.brand[500],
-    alignItems: 'center',
-    justifyContent: 'center',
+  avatarSpacing: {
     marginBottom: 8,
-  },
-  avatarText: {
-    fontFamily: tokens.typography.native.headingEn,
-    fontSize: 20,
-    fontWeight: '600',
-    color: tokens.colors.primary,
   },
   profileName: {
     fontFamily: tokens.typography.native.headingTh,
@@ -439,12 +396,6 @@ const styles = StyleSheet.create({
   cardFlush: {
     paddingVertical: 2,
     paddingHorizontal: 12,
-  },
-  fieldGap: {
-    height: 12,
-  },
-  saveBtnWrap: {
-    marginTop: 14,
   },
   actionRow: {
     flexDirection: 'row',

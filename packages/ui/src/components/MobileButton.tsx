@@ -1,5 +1,5 @@
 import React from 'react';
-import { TouchableOpacity, Text, ActivityIndicator, ViewStyle, TextStyle } from 'react-native';
+import { TouchableOpacity, Text, ActivityIndicator, ViewStyle, TextStyle, StyleProp } from 'react-native';
 import { ButtonVariant, tokens } from '../theme/tokens';
 
 export interface MobileButtonProps {
@@ -7,7 +7,7 @@ export interface MobileButtonProps {
   variant?: ButtonVariant;
   isLoading?: boolean;
   onPress?: () => void;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   textStyle?: TextStyle;
   disabled?: boolean;
 }
@@ -58,6 +58,8 @@ export const MobileButton: React.FC<MobileButtonProps> = ({
 
   return (
     <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled || isLoading), busy: isLoading }}
       style={[containerStyle, style]}
       onPress={onPress}
       disabled={disabled || isLoading}

@@ -20,7 +20,7 @@ module.exports = {
   splash: {
     image: './assets/splash-icon.png',
     resizeMode: 'contain',
-    backgroundColor: '#F8B615',
+    backgroundColor: '#FFFFFF',
   },
   ios: {
     supportsTablet: true,
@@ -48,5 +48,6 @@ module.exports = {
   extra: {
     apiUrl: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000/api/v1',
     baseUrl: process.env.EXPO_PUBLIC_BASE_URL || 'http://localhost:3000',
+    defaultRole: process.env.EXPO_PUBLIC_DEFAULT_ROLE || 'guest',
   },
 };

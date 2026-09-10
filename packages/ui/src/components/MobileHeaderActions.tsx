@@ -1,10 +1,14 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MobileIcon } from '../icons/MobileIcon';
+import { MobileProfileAvatar } from './MobileProfileAvatar';
 import { tokens } from '../theme/tokens';
+import { useMobileTheme } from '../theme/ThemeContext';
 
 export interface MobileHeaderActionsProps {
   initials?: string;
+  /** When false, show outline user icon instead of profile avatar. */
+  isAuthenticated?: boolean;
   notificationCount?: number;
   onAvatarPress?: () => void;
   onNotificationsPress?: () => void;
@@ -13,27 +17,41 @@ export interface MobileHeaderActionsProps {
 
 export const MobileHeaderActions: React.FC<MobileHeaderActionsProps> = ({
   initials = 'JD',
+  isAuthenticated = true,
   notificationCount = 0,
   onAvatarPress,
   onNotificationsPress,
   onThemeToggle,
 }) => {
+  const { theme } = useMobileTheme();
+
   return (
     <View style={styles.row}>
-      <TouchableOpacity style={styles.avatar} onPress={onAvatarPress} activeOpacity={0.8}>
-        <Text style={styles.avatarText}>{initials}</Text>
+      <TouchableOpacity
+        onPress={onAvatarPress}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={isAuthenticated ? undefined : 'Sign in'}
+      >
+        {isAuthenticated ? (
+          <MobileProfileAvatar initials={initials} size="sm" />
+        ) : (
+          <View style={[styles.guestAvatar, { borderColor: theme.border, backgroundColor: theme.card }]}>
+            <MobileIcon name="user" size={20} color={theme.textSecondary} />
+          </View>
+        )}
       </TouchableOpacity>
 
       <View style={styles.actions}>
         {onThemeToggle ? (
           <TouchableOpacity style={styles.iconBtn} onPress={onThemeToggle} activeOpacity={0.7}>
-            <MobileIcon name="moon" size={22} tone="inactive" />
+            <MobileIcon name="moon" size={22} color={theme.textSecondary} />
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity style={styles.iconBtn} onPress={onNotificationsPress} activeOpacity={0.7}>
-          <MobileIcon name="bell" size={22} tone="inactive" />
+          <MobileIcon name="bell" size={22} color={theme.textSecondary} />
           {notificationCount > 0 ? (
-            <View style={styles.badge}>
+            <View style={[styles.badge, { borderColor: theme.card }]}>
               <Text style={styles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
             </View>
           ) : null}
@@ -50,24 +68,18 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: tokens.colors.brand[500],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontFamily: tokens.typography.native.headingEn,
-    fontSize: 14,
-    fontWeight: '600',
-    color: tokens.colors.primary,
-  },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  guestAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconBtn: {
     width: 36,
@@ -89,7 +101,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
     borderWidth: 1.5,
-    borderColor: '#FFFFFF',
   },
   badgeText: {
     fontFamily: tokens.typography.native.body,
