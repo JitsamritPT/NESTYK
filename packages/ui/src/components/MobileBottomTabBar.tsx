@@ -19,6 +19,8 @@ export type MobileAppTab =
   | 'listingRoom'
   | 'createListing'
   | 'listingLead'
+  | 'clients'
+  | 'more'
   | 'contact'
   | 'contracts'
   | 'calendar'
@@ -32,7 +34,15 @@ export interface MobileBottomTabBarProps {
   activeRole: ExtendedTabRole;
   activeTab: MobileAppTab;
   onTabPress: (tab: MobileAppTab) => void;
+  /** Active icon/label tint when `indicatorColor` is unset (legacy role-accent mode). */
   accentColor?: string;
+  /**
+   * Active icon/label tint when using brand underline mode (e.g. Agent Overview).
+   * Defaults to theme.screenTitle / ink.
+   */
+  activeTintColor?: string;
+  /** Brand underline under the active tab (Agent design). */
+  indicatorColor?: string;
 }
 
 /** Shared slot so every tab label sits on the same baseline */
@@ -40,7 +50,13 @@ const ICON_SLOT = 24;
 const ICON_SIZE = 22;
 const SERVICES_LOGO_SIZE = 22;
 
-function ServicesTabIcon({ isActive, accentColor }: { isActive: boolean; accentColor: string }) {
+function ServicesTabIcon({
+  isActive,
+  tintColor,
+}: {
+  isActive: boolean;
+  tintColor: string;
+}) {
   const scale = useSharedValue(1);
 
   useEffect(() => {
@@ -61,10 +77,10 @@ function ServicesTabIcon({ isActive, accentColor }: { isActive: boolean; accentC
       <Animated.View
         style={[
           styles.servicesIconWrap,
-          isActive && { backgroundColor: `${accentColor}22` },
+          isActive && { backgroundColor: `${tintColor}18` },
           animStyle,
         ]}
-        >
+      >
         <MobileNestykLogo variant="mark" height={SERVICES_LOGO_SIZE} />
       </Animated.View>
     </View>
@@ -74,12 +90,12 @@ function ServicesTabIcon({ isActive, accentColor }: { isActive: boolean; accentC
 function RegularTabIcon({
   name,
   isActive,
-  accentColor,
+  activeColor,
   mutedColor,
 }: {
   name: AppIconName;
   isActive: boolean;
-  accentColor: string;
+  activeColor: string;
   mutedColor: string;
 }) {
   return (
@@ -87,7 +103,7 @@ function RegularTabIcon({
       <MobileIcon
         name={name}
         size={ICON_SIZE}
-        color={isActive ? accentColor : mutedColor}
+        color={isActive ? activeColor : mutedColor}
         weight={isActive ? 'bold' : 'regular'}
       />
     </View>
@@ -99,10 +115,16 @@ export const MobileBottomTabBar: React.FC<MobileBottomTabBarProps> = ({
   activeTab,
   onTabPress,
   accentColor = tokens.colors.accent,
+  activeTintColor,
+  indicatorColor,
 }) => {
   const { t } = useLocale();
   const { theme } = useMobileTheme();
   const tabs = getTabsForRole(activeRole);
+  const useUnderline = Boolean(indicatorColor);
+  const resolvedActive = useUnderline
+    ? activeTintColor || theme.screenTitle || tokens.colors.primary
+    : accentColor;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
@@ -121,24 +143,36 @@ export const MobileBottomTabBar: React.FC<MobileBottomTabBarProps> = ({
             accessibilityLabel={label}
           >
             {isServices ? (
-              <ServicesTabIcon isActive={isActive} accentColor={accentColor} />
+              <ServicesTabIcon isActive={isActive} tintColor={resolvedActive} />
             ) : (
               <RegularTabIcon
                 name={tab.icon}
                 isActive={isActive}
-                accentColor={accentColor}
+                activeColor={resolvedActive}
                 mutedColor={theme.textSecondary}
               />
             )}
             <Text
               style={[
                 styles.tabLabel,
-                isActive ? { color: accentColor, fontWeight: '600' } : { color: theme.textSecondary },
+                isActive
+                  ? { color: resolvedActive, fontWeight: '600' }
+                  : { color: theme.textSecondary },
               ]}
               numberOfLines={1}
             >
               {label}
             </Text>
+            {useUnderline ? (
+              <View
+                style={[
+                  styles.indicator,
+                  {
+                    backgroundColor: isActive ? indicatorColor : 'transparent',
+                  },
+                ]}
+              />
+            ) : null}
           </TouchableOpacity>
         );
       })}
@@ -151,7 +185,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderTopWidth: 1,
     paddingTop: 8,
-    paddingBottom: 6,
+    paddingBottom: 4,
     paddingHorizontal: 4,
   },
   tabItem: {
@@ -181,5 +215,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 15,
     fontWeight: '400',
+  },
+  indicator: {
+    marginTop: 2,
+    height: 3,
+    width: 22,
+    borderRadius: 2,
   },
 });

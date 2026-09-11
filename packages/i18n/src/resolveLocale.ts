@@ -2,6 +2,10 @@ import { SupportedLocale } from './types';
 
 const SUPPORTED_LOCALES: SupportedLocale[] = ['th', 'en', 'zh', 'ja'];
 
+export function isSupportedLocale(value: string | null | undefined): value is SupportedLocale {
+  return !!value && SUPPORTED_LOCALES.includes(value as SupportedLocale);
+}
+
 export function resolveSupportedLocale(
   languageTag?: string | null,
   fallback: SupportedLocale = 'en',
@@ -9,8 +13,8 @@ export function resolveSupportedLocale(
   if (!languageTag) return fallback;
 
   const base = languageTag.toLowerCase().split('-')[0];
-  if (SUPPORTED_LOCALES.includes(base as SupportedLocale)) {
-    return base as SupportedLocale;
+  if (isSupportedLocale(base)) {
+    return base;
   }
 
   return fallback;

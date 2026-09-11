@@ -224,6 +224,12 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
   }, [visible, contentSlideX]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setRolePickerOpen(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     setExpandedIds({});
     setSubmenuParent(null);
     if (settingsView === 'roleMenu') {
@@ -432,30 +438,32 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
               </View>
             )}
 
-            <TouchableOpacity
-              style={[styles.currentRoleRow, { borderTopColor: theme.border }]}
-              onPress={() => setRolePickerOpen(true)}
-              disabled={visibleRoleOptions.length < 2}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`${t.mobile.profile.role}: ${t.roles[activeRole]}`}
-              accessibilityState={{ expanded: rolePickerOpen, disabled: visibleRoleOptions.length < 2 }}
-            >
-              <View style={[styles.roleIconBox, { backgroundColor: roleIconTint(activeRole, isDark) }]}>
-                <MobileIcon
-                  name={ROLE_OPTIONS.find((role) => role.key === activeRole)!.icon}
-                  size={20}
-                  color={activeRole === 'admin' ? theme.textHeading : roleColor}
-                />
-              </View>
-              <View style={styles.profileText}>
-                <Text style={[styles.profileSub, { color: theme.textSecondary }]}>{t.mobile.profile.role}</Text>
-                <Text style={[styles.roleChipLabel, { color: theme.textHeading }]}>{t.roles[activeRole]}</Text>
-              </View>
-              {visibleRoleOptions.length > 1 && (
-                <MobileIcon name="swap" size={20} color={mutedIcon} />
-              )}
-            </TouchableOpacity>
+            {isAuthenticated ? (
+              <TouchableOpacity
+                style={[styles.currentRoleRow, { borderTopColor: theme.border }]}
+                onPress={() => setRolePickerOpen(true)}
+                disabled={visibleRoleOptions.length < 2}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`${t.mobile.profile.role}: ${t.roles[activeRole]}`}
+                accessibilityState={{ expanded: rolePickerOpen, disabled: visibleRoleOptions.length < 2 }}
+              >
+                <View style={[styles.roleIconBox, { backgroundColor: roleIconTint(activeRole, isDark) }]}>
+                  <MobileIcon
+                    name={ROLE_OPTIONS.find((role) => role.key === activeRole)!.icon}
+                    size={20}
+                    color={activeRole === 'admin' ? theme.textHeading : roleColor}
+                  />
+                </View>
+                <View style={styles.profileText}>
+                  <Text style={[styles.profileSub, { color: theme.textSecondary }]}>{t.mobile.profile.role}</Text>
+                  <Text style={[styles.roleChipLabel, { color: theme.textHeading }]}>{t.roles[activeRole]}</Text>
+                </View>
+                {visibleRoleOptions.length > 1 && (
+                  <MobileIcon name="swap" size={20} color={mutedIcon} />
+                )}
+              </TouchableOpacity>
+            ) : null}
             </View>
 
             {drawerSections.map((section) => (
@@ -587,7 +595,11 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
           </View>
           </Animated.View>
         </GestureDetector>
-        <MobileBottomSheet visible={rolePickerOpen} onClose={() => setRolePickerOpen(false)} maxHeight="85%">
+        <MobileBottomSheet
+          visible={rolePickerOpen && isAuthenticated}
+          onClose={() => setRolePickerOpen(false)}
+          maxHeight="85%"
+        >
           <View style={styles.sheetHeader}>
             <View style={styles.sheetHeaderText}>
               <Text accessibilityRole="header" style={[styles.sheetTitle, { color: theme.textHeading }]}>

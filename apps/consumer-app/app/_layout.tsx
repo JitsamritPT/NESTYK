@@ -1,14 +1,15 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import * as Localization from 'expo-localization';
-import { LocaleProvider, resolveSupportedLocale } from '@nestyk/i18n';
+import { LocaleProvider, resolveSupportedLocale, type SupportedLocale } from '@nestyk/i18n';
 import { MobileThemeProvider, MobilePreloadScreen } from '@nestyk/ui/native';
 import { Slot } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { AuthProvider, useAuth } from '../lib/auth/AuthContext';
+import { loadPreferredLocale, savePreferredLocale } from '../lib/locale-storage';
 import { Mitr_400Regular, Mitr_500Medium } from '@expo-google-fonts/mitr';
 import {
   Baloo2_400Regular,
@@ -67,20 +68,35 @@ export default function Layout() {
     NotoSansThai_600SemiBold,
     NotoSansThai_700Bold,
   });
+  const [initialLocale, setInitialLocale] = useState<SupportedLocale | null>(null);
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    let cancelled = false;
+    loadPreferredLocale().then((saved) => {
+      if (!cancelled) setInitialLocale(saved ?? deviceLocale);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleLocaleChange = useCallback((locale: SupportedLocale) => {
+    void savePreferredLocale(locale);
+  }, []);
+
+  useEffect(() => {
+    if ((fontsLoaded || fontError) && initialLocale) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, initialLocale]);
 
-  if (!fontsLoaded && !fontError) {
+  if ((!fontsLoaded && !fontError) || !initialLocale) {
     return null;
   }
 
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-      <LocaleProvider defaultLocale={deviceLocale}>
+      <LocaleProvider defaultLocale={initialLocale} onLocaleChange={handleLocaleChange}>
         <MobileThemeProvider>
           <AuthProvider>
             <GestureHandlerRootView style={{ flex: 1 }}>

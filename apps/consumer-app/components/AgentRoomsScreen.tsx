@@ -7,7 +7,20 @@ import { MobileButton, MobileInput, useMobileTheme } from '@nestyk/ui/native';
 import { useLocale } from '@nestyk/i18n';
 import { fetchMyAgentListings, fetchAgentRoom } from '../lib/agent-listings-api';
 
-export function AgentRoomsScreen({ onCreate }: { onCreate: () => void }) {
+export function AgentRoomsScreen({
+  onCreate,
+  reloadToken,
+  onReloadSettled,
+  searchOpen = false,
+  onSearchOpenChange,
+}: {
+  onCreate: () => void;
+  /** Shell pull-to-refresh (MobileModePage). Bump to reload listings. */
+  reloadToken?: number;
+  onReloadSettled?: (token: number) => void;
+  searchOpen?: boolean;
+  onSearchOpenChange?: (open: boolean) => void;
+}) {
   const { t } = useLocale();
   const { theme } = useMobileTheme();
   const copy = t.agent.listings;
@@ -39,10 +52,14 @@ export function AgentRoomsScreen({ onCreate }: { onCreate: () => void }) {
           if (page > 1 && !result.items.length) setPage(Math.max(1, Math.ceil(result.total / 20)));
         })
         .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
-        .finally(() => { if (!cancelled) setLoading(false); });
+        .finally(() => {
+          if (cancelled) return;
+          setLoading(false);
+          if (reloadToken) onReloadSettled?.(reloadToken);
+        });
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [query, filter, page, refresh]);
+  }, [query, filter, page, refresh, reloadToken, onReloadSettled]);
 
   useEffect(() => {
     if (selected === null) return;
@@ -55,13 +72,31 @@ export function AgentRoomsScreen({ onCreate }: { onCreate: () => void }) {
   }, [selected, detailRefresh]);
 
   return <View style={{ gap: 12 }}>
-    <MobileButton onPress={onCreate}>{copy.createCta}</MobileButton>
-    <MobileInput value={query} onChangeText={(value) => { setQuery(value); setPage(1); }} placeholder={copy.search} />
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <View style={{ flex: 1 }}>
+        <MobileButton onPress={onCreate}>{copy.createCta}</MobileButton>
+      </View>
+    </View>
+    {searchOpen || !!query.trim() ? (
+      <MobileInput
+        value={query}
+        onChangeText={(value) => { setQuery(value); setPage(1); }}
+        placeholder={copy.search}
+        autoFocus={searchOpen && !query.trim()}
+        onBlur={() => {
+          if (!query.trim()) onSearchOpenChange?.(false);
+        }}
+      />
+    ) : null}
     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
       {[['', copy.all], ['private', t.agent.createRoom.visibilityPrivate], ['published', t.agent.createRoom.visibilityPublished]].map(([value, label]) => <MobileButton key={value} variant={filter === value ? 'primary' : 'outline'} onPress={() => { setFilter(value); setPage(1); }}>{label}</MobileButton>)}
     </View>
     {!loading && !error && <Text style={{ color: theme.textSecondary }}>{copy.results.replace('{count}', String(total))}</Text>}
-    <MobileAgentListingsBody items={items} loading={loading} error={error} filtered={!!query.trim() || !!filter} onRetry={() => setRefresh((n) => n + 1)} onRoomPress={(id) => { setModalReady(false); setRoom(null); setDetailError(null); setSelected(id); }} />
+    {error && items.length > 0 && <View style={{ gap: 8 }} accessibilityLiveRegion="polite">
+      <Text style={{ color: theme.textSecondary }}>{error}</Text>
+      <MobileButton variant="outline" onPress={() => setRefresh((n) => n + 1)}>{copy.retry}</MobileButton>
+    </View>}
+    <MobileAgentListingsBody items={items} loading={loading && items.length === 0} error={items.length ? null : error} filtered={!!query.trim() || !!filter} onRetry={() => setRefresh((n) => n + 1)} onRoomPress={(id) => { setModalReady(false); setRoom(null); setDetailError(null); setSelected(id); }} />
     {!error && total > 20 && <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
       <MobileButton variant="outline" disabled={loading || page <= 1} onPress={() => setPage((n) => n - 1)}>{copy.previous}</MobileButton>
       <Text style={{ color: theme.textHeading }}>{page} / {Math.ceil(total / 20)}</Text>

@@ -7,5 +7,8 @@ export type { RoomPhoto, CreateRoomWizardSubmitData, ContactOption, PropertyOwne
 export type { AgentListingCard } from './components/MobileAgentListingsBody';
 
 export * from "./components/MobileAgentRoomBody";
+export * from './components/MobileAgentDashboardBody';
+export * from './dashboard/types';
+export * from './dashboard/demo-fixture';
 
 export { NearbyPlacesMap } from './components/NearbyPlacesMap';

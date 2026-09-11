@@ -28,6 +28,8 @@ export type DrawerMenuLabelKey =
   | 'calendar'
   | 'commission'
   | 'agentContracts'
+  | 'clients'
+  | 'moreTools'
   | 'users'
   | 'tickets'
   | 'system'
@@ -161,7 +163,7 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
             {
               id: 'listingRoom',
               labelKey: 'listingRoom',
-              icon: 'key',
+              icon: 'buildings',
               action: { type: 'tab', tab: 'listingRoom' },
             },
             {
@@ -171,6 +173,12 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
               action: { type: 'tab', tab: 'listingLead' },
             },
           ],
+        },
+        {
+          id: 'clients',
+          labelKey: 'clients',
+          icon: 'handshake',
+          action: { type: 'tab', tab: 'clients' },
         },
         {
           id: 'crm',
@@ -193,6 +201,12 @@ const DRAWER_MENU_MATRIX: Record<UserRole, DrawerMenuSection[]> = {
           labelKey: 'commission',
           icon: 'credit-card',
           action: { type: 'route', path: '/agent/commission' },
+        },
+        {
+          id: 'moreTools',
+          labelKey: 'moreTools',
+          icon: 'wrench',
+          action: { type: 'tab', tab: 'more' },
         },
       ],
     },
