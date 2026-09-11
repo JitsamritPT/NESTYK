@@ -14,6 +14,7 @@ export function AgentLeadsScreen() {
   const c = t.agent.leads;
   const { theme } = useMobileTheme();
   const agentColor = tokens.colors.roles.agent;
+  const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<AgentLead | null>(null);
@@ -98,6 +99,7 @@ export function AgentLeadsScreen() {
 
   const closeModal = () => {
     if (busy) return;
+    if (editing) { setEditing(false); return; }
     setCreating(false);
     setSelected(null);
     setDetailError(null);
@@ -220,15 +222,21 @@ export function AgentLeadsScreen() {
       >
         <SafeAreaProvider initialMetrics={initialWindowMetrics}>
           <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-            <View style={[styles.modalHeader, { borderColor: theme.border }]}>
-              <MobileButton variant="outline" disabled={busy} onPress={closeModal}>
-                {`‹ ${creating ? c.cancel : c.back}`}
-              </MobileButton>
-              <Text style={[styles.heading, { color: theme.textHeading }]}>
-                {creating ? c.create : c.details}
-              </Text>
+            <View style={[styles.modalHeader, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+              <View style={{ flex: 1 }}>
+                <MobileButton variant="outline" disabled={busy} onPress={closeModal}>
+                  {`‹ ${editing ? t.agent.listings.cancelEdit : creating ? c.cancel : c.back}`}
+                </MobileButton>
+              </View>
+              {selected && !editing && !creating && <MobileButton disabled={busy || detailLoading || !!detailError} onPress={() => setEditing(true)}>แก้ไข Lead</MobileButton>}
             </View>
-            {creating ? (
+            {editing && selected ? (
+              <CreateLeadForm key={selected.id} initialLead={selected} onBusy={setBusy} onSaved={(lead) => {
+                setSelected(lead); setEditing(false); setDetailError(null);
+                setItems(current => current.map(item => item.id === lead.id ? lead : item));
+                setRefresh(n => n + 1);
+              }} />
+            ) : creating ? (
               <CreateLeadForm
                 onBusy={setBusy}
                 onSaved={() => {
@@ -276,6 +284,6 @@ const styles = StyleSheet.create({
   factValue: { flex: 3, textAlign: 'right' },
   cardFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   detailLink: { fontFamily: tokens.typography.native.body, fontSize: 13, lineHeight: 20, fontWeight: '600' },
-  modalHeader: { padding: 16, gap: 12, borderBottomWidth: 1, flexShrink: 0 },
+  modalHeader: { paddingHorizontal: 16, paddingVertical: 12, gap: 12, borderBottomWidth: 1, flexShrink: 0, flexDirection: 'row', alignItems: 'center', zIndex: 1 },
   detailBanner: { marginHorizontal: 16, marginTop: 12, borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
 });

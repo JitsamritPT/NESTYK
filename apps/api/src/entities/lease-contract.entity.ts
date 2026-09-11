@@ -1,3 +1,4 @@
+import { MasterAgreementTypeEntity } from './master-agreement-type.entity';
 import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { SerialTimestampEntity } from './base.entity';
 import { RoomTenancyEntity } from './room-tenancy.entity';
@@ -20,6 +21,16 @@ export type LeaseContractStatus =
 
 @Entity({ name: 'lease_contracts' })
 export class LeaseContractEntity extends SerialTimestampEntity {
+  @Column({ type: 'varchar', length: 64, default: 'lease' })
+  agreement_type_code: string;
+
+  @ManyToOne(() => MasterAgreementTypeEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'agreement_type_code', referencedColumnName: 'code' })
+  agreement_type: MasterAgreementTypeEntity;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+  reservation_fee: string | null;
+
   @Column({ type: 'varchar', length: 32, unique: true, nullable: true })
   contract_no: string | null;
 

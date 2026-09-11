@@ -1,5 +1,5 @@
 import type { AgentLead, AgentLeadsPage, CreateLeadInput, LeadFilters, LeadLocationCatalog } from '@nestyk/types';
-import { apiGet, apiPost } from './api';
+import { apiGet, apiPost, apiRequest } from './api';
 import { ensureAgentSession } from './agent-session';
 
 export async function listAgentLeads(q: string, page: number, filters: LeadFilters = {}): Promise<AgentLeadsPage> {
@@ -29,4 +29,9 @@ export async function fetchAgentVisaTypes(): Promise<Array<{ id: number; code: s
 export async function fetchLeadLocations(): Promise<LeadLocationCatalog> {
   await ensureAgentSession();
   return apiGet('/agent/leads/locations');
+}
+
+export async function updateAgentLead(id: number, body: CreateLeadInput): Promise<AgentLead> {
+  await ensureAgentSession();
+  return apiRequest(`/agent/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }

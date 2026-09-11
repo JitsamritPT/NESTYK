@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
@@ -14,5 +14,6 @@ export class AgentLeadsController {
   @Get('visa-types') visaTypes() { return this.leads.listVisaTypes(); }
   @Post() create(@CurrentUser() user: AuthRequestUser, @Body() body: unknown) { return this.leads.create(user.id, body); }
   @Get() list(@CurrentUser() user: AuthRequestUser, @Query() query: { q?: string; page?: string; limit?: string; province?: string; locations?: string; includeUnspecified?: string }) { return this.leads.list(user.id, query); }
+  @Patch(':id') update(@CurrentUser() user: AuthRequestUser, @Param('id', ParseIntPipe) id: number, @Body() body: unknown) { return this.leads.update(user.id, id, body); }
   @Get(':id') view(@CurrentUser() user: AuthRequestUser, @Param('id', ParseIntPipe) id: number) { return this.leads.view(user.id, id); }
 }

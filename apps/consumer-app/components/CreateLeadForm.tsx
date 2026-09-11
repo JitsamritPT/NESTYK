@@ -1,25 +1,27 @@
 import { LeadMapLocationPicker, type LeadMapPin } from './LeadMapLocationPicker';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Alert, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, KeyboardAvoidingView, Platform, Pressable, StyleSheet } from 'react-native';
 import type { AgentLead, CreateLeadInput } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
 import { MobileButton, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
 import { fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
-import { createAgentLead, fetchAgentVisaTypes } from '../lib/agent-leads-api';
+import { createAgentLead, updateAgentLead, fetchAgentVisaTypes } from '../lib/agent-leads-api';
 
 type TextKey = 'name' | 'phone' | 'nationality' | 'budgetMin' | 'budgetMax' | 'preferredLocation' | 'moveInPlan' | 'occupation' | 'occupantCount';
 const empty: Record<TextKey, string> = { name: '', phone: '', nationality: '', budgetMin: '', budgetMax: '', preferredLocation: '', moveInPlan: '', occupation: '', occupantCount: '' };
-export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead) => void; onBusy: (busy: boolean) => void }) {
+export function CreateLeadForm({ initialLead, onSaved, onBusy }: { initialLead?: AgentLead; onSaved: (lead: AgentLead) => void; onBusy: (busy: boolean) => void }) {
   const { t } = useLocale(); const c = t.agent.leads; const { theme } = useMobileTheme();
-  const [province, setProvince] = useState('');
-  const [pin, setPin] = useState<LeadMapPin | null>(null);
+  const [province, setProvince] = useState(initialLead?.province || '');
+  const [pin, setPin] = useState<LeadMapPin | null>(initialLead?.latitude != null && initialLead.longitude != null ? { latitude: initialLead.latitude, longitude: initialLead.longitude, radiusKm: initialLead.radiusKm ?? 3, locationName: initialLead.locationName || '', locationPlaceId: initialLead.locationPlaceId || '', locations: initialLead.locations } : null);
+  const [locationChanged, setLocationChanged] = useState(false);
   const [mapResolving, setMapResolving] = useState(false);
-  const [form, setForm] = useState(empty);
+  const [form, setForm] = useState<Record<TextKey, string>>(() => Object.fromEntries(Object.keys(empty).map(key => [key, initialLead?.[key as TextKey] == null ? '' : String(initialLead[key as TextKey])])) as Record<TextKey, string>);
+  const [saveError, setSaveError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [choices, setChoices] = useState<{ hasPets: boolean | null; usesCar: boolean | null; isSmoker: boolean | null }>({ hasPets: null, usesCar: null, isSmoker: null });
-  const [roomType, setRoomType] = useState<number | null>(null);
-  const [visaType, setVisaType] = useState<number | null>(null);
-  const [leaseMonths, setLeaseMonths] = useState<number | null>(null);
+  const [choices, setChoices] = useState<{ hasPets: boolean | null; usesCar: boolean | null; isSmoker: boolean | null }>({ hasPets: initialLead?.hasPets ?? null, usesCar: initialLead?.usesCar ?? null, isSmoker: initialLead?.isSmoker ?? null });
+  const [roomType, setRoomType] = useState<number | null>(initialLead?.desiredRoomTypeId ?? null);
+  const [visaType, setVisaType] = useState<number | null>(initialLead?.visaTypeId ?? null);
+  const [leaseMonths, setLeaseMonths] = useState<number | null>(initialLead?.leaseDurationMonths ?? null);
   const [types, setTypes] = useState<Array<{ id: number; code: string }>>([]);
   const [visas, setVisas] = useState<Array<{ id: number; code: string }>>([]);
   const [contracts, setContracts] = useState<Array<{ id: number; termMonths: number }>>([]);
@@ -56,7 +58,7 @@ export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead)
     const next: Record<string, string> = {};
     if (!form.name.trim()) next.name = c.required;
     if (!form.phone.trim()) next.phone = c.required;
-    const body: CreateLeadInput = { province: province || null, locations: [], ...pin, name: form.name.trim(), phone: form.phone.trim(), ...choices, desiredRoomTypeId: roomType, visaTypeId: visaType, leaseDurationMonths: leaseMonths };
+    const body: CreateLeadInput = { province: province || null, locations: !locationChanged ? initialLead?.locations ?? [] : [], locationPlaceId: null, locationName: null, latitude: null, longitude: null, radiusKm: null, ...pin, name: form.name.trim(), phone: form.phone.trim(), ...choices, desiredRoomTypeId: roomType, visaTypeId: visaType, leaseDurationMonths: leaseMonths };
     for (const key of ['nationality', 'preferredLocation', 'moveInPlan', 'occupation'] as const) body[key] = form[key].trim() || null;
     for (const key of ['budgetMin', 'budgetMax', 'occupantCount'] as const) {
       const value = form[key].trim(); const n = Number(value);
@@ -68,13 +70,14 @@ export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead)
     if (body.budgetMin != null && body.budgetMax != null && body.budgetMin > body.budgetMax) next.budgetMax = c.budgetError;
     setErrors(next);
     if (Object.keys(next).length) { scroll.current?.scrollTo({ y: Math.max(0, (offsets.current[Object.keys(next)[0]] ?? 0) - 12), animated: true }); return; }
-    lock.current = true; setBusy(true); onBusy(true);
-    try { const lead = await createAgentLead(body); onSaved(lead); }
-    catch (error) { Alert.alert(c.saveError, error instanceof Error ? error.message : String(error)); }
+    setSaveError(''); lock.current = true; setBusy(true); onBusy(true);
+    try { const lead = initialLead ? await updateAgentLead(initialLead.id, body) : await createAgentLead(body); onSaved(lead); }
+    catch (error) { setSaveError(error instanceof Error ? error.message : String(error)); }
     finally { lock.current = false; setBusy(false); onBusy(false); }
   };
   return <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <ScrollView ref={scroll} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.form}>
+      <Text style={[styles.title, { color: theme.textHeading }]}>{initialLead ? 'แก้ไข Lead' : c.create}</Text>
       <Text style={{ color: theme.textSecondary }}>{c.optionalHint}</Text>
       <Text style={[styles.heading, { color: theme.textHeading }]}>{c.profile}</Text>
       {field('name', 255)}{field('phone', 50)}{field('nationality', 120)}
@@ -82,15 +85,16 @@ export function CreateLeadForm({ onSaved, onBusy }: { onSaved: (lead: AgentLead)
       {chips('visaType', visaType, [{ id: null, text: c.unknown }, ...visas.map((item) => ({ id: item.id, text: visaLabel(item.code) }))], setVisaType)}
       <Text style={[styles.heading, { color: theme.textHeading }]}>{c.requirements}</Text>
       {field('budgetMin', 13, true)}{field('budgetMax', 13, true)}
-      <LeadMapLocationPicker pin={pin} province={province} disabled={busy} onResolving={setMapResolving} onChange={(value, nextProvince) => { setPin(value); if (!value) setProvince(''); else if (nextProvince) setProvince(nextProvince); }} />
+      <LeadMapLocationPicker pin={pin} province={province} disabled={busy} onResolving={setMapResolving} onChange={(value, nextProvince) => { setLocationChanged(true); setPin(value); if (!value) setProvince(''); else if (nextProvince) setProvince(nextProvince); }} />
       {field('preferredLocation', 500)}{field('moveInPlan', 255)}
       {chips('leaseDurationMonths', leaseMonths, [{ id: null, text: c.unknown }, ...contracts.map((item) => ({ id: item.termMonths, text: months(item.termMonths) }))], setLeaseMonths)}
       {field('occupantCount', 5, true)}
       {toggle('hasPets')}{toggle('usesCar')}{toggle('isSmoker')}
       {chips('roomType', roomType, [{ id: null, text: c.unknown }, ...types.map((item) => ({ id: item.id, text: roomLabel(item.code) }))], setRoomType)}
       {typesError && <View style={styles.group}><Text style={{ color: theme.textSecondary }}>{c.loadError}</Text><MobileButton variant="outline" onPress={() => setTypeRetry((n) => n + 1)}>{c.retry}</MobileButton></View>}
-      <MobileButton onPress={submit} isLoading={busy} disabled={busy || mapResolving}>{c.save}</MobileButton>
+      {!!saveError && <Text accessibilityRole="alert" style={{ color: theme.textHeading }}>{c.saveError}: {saveError}</Text>}
+      <MobileButton onPress={submit} isLoading={busy} disabled={busy || mapResolving}>{initialLead ? t.agent.listings.saveChanges : c.save}</MobileButton>
     </ScrollView>
   </KeyboardAvoidingView>;
 }
-const styles = StyleSheet.create({ form: { padding: 20, gap: 16, paddingBottom: 40 }, heading: { fontFamily: tokens.typography.native.headingTh, fontSize: 18, marginTop: 8 }, group: { gap: 8 }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, chip: { borderWidth: 1, borderColor: '#CBD5E1', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12 }, selected: { borderColor: tokens.colors.roles.agent, backgroundColor: '#FFE4EF' } });
+const styles = StyleSheet.create({ title: { fontFamily: tokens.typography.native.headingTh, fontSize: 22, lineHeight: 32 }, form: { padding: 20, gap: 16, paddingBottom: 40 }, heading: { fontFamily: tokens.typography.native.headingTh, fontSize: 18, marginTop: 8 }, group: { gap: 8 }, chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, chip: { borderWidth: 1, borderColor: '#CBD5E1', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12 }, selected: { borderColor: tokens.colors.roles.agent, backgroundColor: '#FFE4EF' } });

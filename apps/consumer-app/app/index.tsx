@@ -1,3 +1,4 @@
+import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import React, { useState, useEffect, useCallback } from 'react';
@@ -342,16 +343,7 @@ export default function AppHomeScreen() {
     }
 
     if (activeTab === 'contracts') {
-      return (
-        <View style={styles.bodyContainer}>
-          <View style={[styles.card, cardStyle]}>
-            <Text style={[styles.sectionHeader, headingText]}>{t.mobile.screens.contracts}</Text>
-            <Text style={[styles.sectionDesc, secondaryText]}>
-              Draft · pending signature · active co-broke contracts (mock)
-            </Text>
-          </View>
-        </View>
-      );
+      return <View style={styles.bodyContainer}><AgentTenantsScreen /></View>;
     }
 
     if (activeTab === 'calendar') {

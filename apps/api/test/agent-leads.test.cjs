@@ -83,3 +83,27 @@ test('optional map pin requires complete valid coordinates, name and supported r
  for(const patch of [{latitude:91},{latitude:NaN},{longitude:-181},{longitude:Infinity},{radiusKm:2},{radiusKm:'3'},{longitude:null},{locationName:''},{latitude:undefined}]) assert.throws(()=>validateLead({...base,...pin,...patch}));
  assert.throws(()=>validateLead({...base,locationName:'orphan'}));
 });
+
+test('editing lead updates allowed fields, preserves booking links, and rejects cross-agent writes', async () => {
+  const row = {id: 41, created_by_user_id: 7, name: 'Before', phone: '0812345678', status: 'booked', tenant_id: 12, rent_room_id: 15, has_pets: false, province: null, locations: [], created_at: new Date()};
+  let writes = 0;
+  const repository = {
+    findOne: async ({where}) => where.id === row.id && where.created_by_user_id === row.created_by_user_id ? {...row} : null,
+    update: async (where, patch) => { assert.deepEqual(where, {id: 41, created_by_user_id: 7}); assert.equal(patch.status, undefined); assert.equal(patch.tenant_id, undefined); assert.equal(patch.created_by_user_id, undefined); Object.assign(row, patch); writes++; },
+  };
+  const service = new AgentLeadsService(repository, {}, {}, {});
+  const updated = await service.update(7, 41, {name: 'After', budgetMin: 0, status: 'new', tenant_id: null, created_by_user_id: 99});
+  assert.equal(updated.name, 'After'); assert.equal(updated.phone, '0812345678'); assert.equal(updated.hasPets, false); assert.equal(updated.budgetMin, 0);
+  assert.equal(row.status, 'booked'); assert.equal(row.tenant_id, 12); assert.equal(row.rent_room_id, 15);
+  await assert.rejects(() => service.update(8, 41, {name:'Other'}), e => e.getStatus() === 404);
+  await assert.rejects(() => service.update(7, 41, {name:''}), e => e.getStatus() === 400);
+  await assert.rejects(() => service.update(7, 41, []), e => e.getStatus() === 400);
+  assert.equal(writes, 1);
+});
+
+test('editing can explicitly clear map coordinates and nullable preferences', async () => {
+  const row = {id: 1, created_by_user_id: 7, name:'Lead',phone:'0812345678',status:'viewed',province:'กรุงเทพมหานคร',locations:['วัฒนา'],location_name:'Asok',location_place_id:'pin',latitude:13.7,longitude:100.5,radius_km:3,has_pets:true,created_at:new Date()};
+  const service = new AgentLeadsService({findOne:async()=>({...row}),update:async(_,patch)=>Object.assign(row,patch)}, {}, {}, {});
+  await service.update(7,1,{province:null,locations:[],locationName:null,locationPlaceId:null,latitude:null,longitude:null,radiusKm:null,hasPets:null});
+  assert.equal(row.latitude,null); assert.equal(row.location_name,null); assert.deepEqual(row.locations,[]); assert.equal(row.has_pets,null);
+});

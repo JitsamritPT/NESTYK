@@ -94,13 +94,7 @@ export class AgentLeadsService {
 
   async create(agentId: number, input: unknown) {
     const b = validateLead(input);
-    if (b.locations?.length && b.latitude == null) {
-      const province = (await this.locationCatalog()).find((p) => p.name === b.province);
-      if (b.locations.some((area) => !province?.locations.includes(area))) throw new BadRequestException('Location is not available in this province');
-    }
-    if (b.desiredRoomTypeId != null && !await this.roomTypes.findOne({ where: { id: b.desiredRoomTypeId, is_active: true } })) throw new BadRequestException('Room type is not available');
-    if (b.visaTypeId != null && !await this.visaTypes.findOne({ where: { id: b.visaTypeId, is_active: true } })) throw new BadRequestException('Visa type is not available');
-    if (b.leaseDurationMonths != null && !await this.contractTypes.findOne({ where: { term_months: b.leaseDurationMonths, is_active: true } })) throw new BadRequestException('Rental duration is not available');
+    await this.validateReferences(b);
     const row = await this.leads.save(this.leads.create({
       location_place_id: b.locationPlaceId, location_name: b.locationName, latitude: b.latitude, longitude: b.longitude, radius_km: b.radiusKm,
       province: b.province, locations: b.locations,
@@ -113,6 +107,37 @@ export class AgentLeadsService {
       rent_room_id: null, status: 'new', other_contacts: [],
     }));
     const saved = await this.leads.findOne({ where: { id: row.id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
+    if (!saved) throw new NotFoundException('Lead not found');
+    return toLead(saved);
+  }
+
+  private async validateReferences(b: CreateLeadInput) {
+    if (b.locations?.length && b.latitude == null) {
+      const province = (await this.locationCatalog()).find((p) => p.name === b.province);
+      if (b.locations.some((area) => !province?.locations.includes(area))) throw new BadRequestException('Location is not available in this province');
+    }
+    if (b.desiredRoomTypeId != null && !await this.roomTypes.findOne({ where: { id: b.desiredRoomTypeId, is_active: true } })) throw new BadRequestException('Room type is not available');
+    if (b.visaTypeId != null && !await this.visaTypes.findOne({ where: { id: b.visaTypeId, is_active: true } })) throw new BadRequestException('Visa type is not available');
+    if (b.leaseDurationMonths != null && !await this.contractTypes.findOne({ where: { term_months: b.leaseDurationMonths, is_active: true } })) throw new BadRequestException('Rental duration is not available');
+  }
+
+  async update(agentId: number, id: number, input: unknown) {
+    const existing = await this.leads.findOne({ where: { id, created_by_user_id: agentId } });
+    if (!existing) throw new NotFoundException('Lead not found');
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Lead data is required');
+    const b = validateLead({ ...toLead(existing), ...input });
+    await this.validateReferences(b);
+    await this.leads.update({ id, created_by_user_id: agentId }, {
+      location_place_id: b.locationPlaceId, location_name: b.locationName, latitude: b.latitude, longitude: b.longitude, radius_km: b.radiusKm,
+      province: b.province, locations: b.locations,
+      name: b.name, phone: b.phone, nationality: b.nationality,
+      budget_min: b.budgetMin == null ? null : String(b.budgetMin), budget_max: b.budgetMax == null ? null : String(b.budgetMax),
+      preferred_location: b.preferredLocation, move_in_plan: b.moveInPlan, has_pets: b.hasPets,
+      occupation: b.occupation, visa_type_id: b.visaTypeId, lease_duration_months: b.leaseDurationMonths,
+      uses_car: b.usesCar, occupant_count: b.occupantCount, is_smoker: b.isSmoker,
+      desired_room_type_id: b.desiredRoomTypeId,
+    });
+    const saved = await this.leads.findOne({ where: { id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
     if (!saved) throw new NotFoundException('Lead not found');
     return toLead(saved);
   }
