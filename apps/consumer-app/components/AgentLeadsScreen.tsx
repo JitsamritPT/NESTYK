@@ -9,12 +9,35 @@ import { getAgentLead, listAgentLeads } from '../lib/agent-leads-api';
 import { CreateLeadForm } from './CreateLeadForm';
 import { AgentLeadDetailBody, LeadStatusBadge } from './AgentLeadDetailBody';
 
-export function AgentLeadsScreen() {
+export function AgentLeadsScreen({
+  initialCreate = false,
+  workFilter = null,
+  onCreateConsumed,
+  reloadToken,
+  onReloadSettled,
+  searchOpen = false,
+  onSearchOpenChange,
+}: {
+  /** Open create-lead form once when landing from dashboard CTA. */
+  initialCreate?: boolean;
+  /** Soft filter chip from dashboard action required. */
+  workFilter?: 'lead_follow_up' | null;
+  /** Parent clears deep-link flag after create form opens. */
+  onCreateConsumed?: () => void;
+  /** Shell pull-to-refresh (MobileModePage). Bump to reload list screens. */
+  reloadToken?: number;
+  onReloadSettled?: (token: number) => void;
+  /** Header search panel (controlled by shell). */
+  searchOpen?: boolean;
+  onSearchOpenChange?: (open: boolean) => void;
+}) {
   const { t } = useLocale();
   const c = t.agent.leads;
+  const dash = t.agent.dashboard;
   const { theme } = useMobileTheme();
   const agentColor = tokens.colors.roles.agent;
   const [creating, setCreating] = useState(false);
+  const [activeWorkFilter, setActiveWorkFilter] = useState(workFilter);
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<AgentLead | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -25,12 +48,12 @@ export function AgentLeadsScreen() {
   const [locations, setLocations] = useState<string[]>([]);
   const [includeUnspecified, setIncludeUnspecified] = useState(false);
   const [query, setQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
   const [draft, setDraft] = useState({ query: '', province: '', locations: [] as string[], includeUnspecified: false });
   const hasFilters = !!(query.trim() || province);
+  const setSearchOpen = (open: boolean) => onSearchOpenChange?.(open);
   const toggleSearch = () => {
     if (!searchOpen) setDraft({ query, province, locations, includeUnspecified });
-    setSearchOpen((open) => !open);
+    setSearchOpen(!searchOpen);
   };
   const applySearch = () => {
     setQuery(draft.query.trim());
@@ -44,6 +67,25 @@ export function AgentLeadsScreen() {
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveWorkFilter(workFilter);
+  }, [workFilter]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    setDraft({ query, province, locations, includeUnspecified });
+    // Seed filter draft when header opens search — not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!initialCreate) return;
+    setCreating(true);
+    onCreateConsumed?.();
+    // Intentionally depend only on initialCreate — parent clears the flag via onCreateConsumed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- avoid re-open loops from unstable callback identity
+  }, [initialCreate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,14 +103,16 @@ export function AgentLeadsScreen() {
           if (!cancelled) setError(err instanceof Error ? err.message : String(err));
         })
         .finally(() => {
-          if (!cancelled) setLoading(false);
+          if (cancelled) return;
+          setLoading(false);
+          if (reloadToken) onReloadSettled?.(reloadToken);
         });
     }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, page, refresh, province, locations, includeUnspecified]);
+  }, [query, page, refresh, province, locations, includeUnspecified, reloadToken, onReloadSettled]);
 
   const budget = (lead: AgentLead) =>
     lead.budgetMin == null && lead.budgetMax == null
@@ -106,16 +150,20 @@ export function AgentLeadsScreen() {
 
   return (
     <View style={{ gap: 14 }}>
+      {activeWorkFilter === 'lead_follow_up' ? (
+        <View style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: agentColor }]}>
+          <Text style={{ flex: 1, color: theme.textHeading, fontSize: 13, lineHeight: 19 }}>
+            {dash.filterActive.replace('{label}', dash.leadsFollowUp)}
+          </Text>
+          <MobileButton variant="outline" onPress={() => setActiveWorkFilter(null)}>
+            {dash.clearFilter}
+          </MobileButton>
+        </View>
+      ) : null}
       <View style={styles.menu}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.heading, { color: theme.textHeading }]}>{c.listing}</Text>
           <Text style={{ color: theme.textSecondary }}>{c.count.replace('{count}', String(total))}</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel={c.searchFilters} accessibilityState={{ expanded: searchOpen }} onPress={toggleSearch}
-          style={({ pressed }) => [styles.searchButton, { borderColor: searchOpen || hasFilters ? agentColor : theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]}>
-          <MobileIcon name={searchOpen ? 'close' : 'search'} size={22} color={searchOpen || hasFilters ? agentColor : theme.textHeading} />
-          {hasFilters && !searchOpen && <View style={[styles.activeDot, { backgroundColor: agentColor }]} />}
-        </Pressable>
         <MobileButton onPress={() => setCreating(true)}>＋ {c.create}</MobileButton>
       </View>
 
@@ -140,9 +188,16 @@ export function AgentLeadsScreen() {
         }}>{c.clearFilters}</MobileButton>}
       </View>}
 
-      {loading ? (
+      {error && items.length > 0 && (
+        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]} accessibilityLiveRegion="polite">
+          <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
+          <Text style={{ color: theme.textSecondary }}>{error}</Text>
+          <MobileButton variant="outline" onPress={() => setRefresh((n) => n + 1)}>{c.retry}</MobileButton>
+        </View>
+      )}
+      {loading && !items.length ? (
         <ActivityIndicator color={agentColor} />
-      ) : error ? (
+      ) : error && !items.length ? (
         <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
           <Text style={{ color: theme.textSecondary }}>{error}</Text>
@@ -278,4 +333,13 @@ const styles = StyleSheet.create({
   detailLink: { fontFamily: tokens.typography.native.body, fontSize: 13, lineHeight: 20, fontWeight: '600' },
   modalHeader: { padding: 16, gap: 12, borderBottomWidth: 1, flexShrink: 0 },
   detailBanner: { marginHorizontal: 16, marginTop: 12, borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    minHeight: 44,
+  },
 });

@@ -10,6 +10,7 @@ Local database สำหรับ apply schema จาก `docs/new-project/`.
 docker compose up -d
 ./docs/new-project/docker/apply-schema.sh
 ./docs/new-project/docker/seed-dev-user.sh
+./docs/new-project/docker/seed-agent-demo.sh
 ```
 
 Connection (ตรงกับ root `.env.api`):
@@ -41,4 +42,6 @@ Schema อยู่ที่ `public` ตาม blueprint (ไม่ใช้ `N
 | [CHECKLIST.md](./CHECKLIST.md) | ขั้นตอนตรวจก่อน/หลัง apply |
 | [apply-schema.sh](./apply-schema.sh) | รัน DDL ตามลำดับ |
 | [seed-dev-user.sql](./seed-dev-user.sql) | Seed sample admin profile |
-| [seed-dev-user.sh](./seed-dev-user.sh) | รัน seed ผ่าน `psql` |
+| [seed-dev-user.sh](./seed-dev-user.sh) | รัน seed ผ่าน `psql` หรือ `docker exec` (fallback) |
+| [seed-agent-demo.sql](./seed-agent-demo.sql) | Seed **10** scout rooms + 6 leads สำหรับ agent demo |
+| [seed-agent-demo.sh](./seed-agent-demo.sh) | รัน agent demo seed (`psql` หรือ `docker exec`) |

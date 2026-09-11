@@ -35,11 +35,10 @@ const TAB_MATRIX: Record<ExtendedTabRole, MobileTabConfig[]> = {
   ],
   agent: [
     { key: 'dashboard', icon: 'grid' },
-    { key: 'listingRoom', icon: 'key' },
+    { key: 'listingRoom', icon: 'buildings' },
     { key: 'listingLead', icon: 'clipboard' },
-    SERVICES_TAB,
-    { key: 'calendar', icon: 'calendar' },
-    { key: 'contracts', icon: 'clipboard' },
+    { key: 'clients', icon: 'handshake' },
+    { key: 'more', icon: 'dots-vertical' },
   ],
   admin: [
     { key: 'dashboard', icon: 'grid' },

@@ -151,7 +151,10 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
   const copy = t.mobile.preload;
   const [phase, setPhase] = useState<'loading' | 'welcome'>('loading');
   const [progress, setProgress] = useState(0.18);
+  const [exiting, setExiting] = useState(false);
   const pulse = useSharedValue(1);
+  const exitOpacity = useSharedValue(1);
+  const exitScale = useSharedValue(1);
   const compact = height < 720 || width < 360;
 
   const primary = locale === 'en' ? copy.preparingEn : copy.preparing;
@@ -173,24 +176,51 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
   }, [ready]);
 
   useEffect(() => {
-    if (phase !== 'welcome') return;
+    if (phase !== 'welcome' || exiting) return;
+    pulse.value = 1;
     pulse.value = withRepeat(
       withTiming(0.35, { duration: 700, easing: Easing.inOut(Easing.quad) }),
       -1,
       true,
     );
-  }, [phase, pulse]);
+  }, [phase, exiting, pulse]);
 
   const welcomeStyle = useAnimatedStyle(() => ({
     opacity: pulse.value,
+  }));
+
+  const exitStyle = useAnimatedStyle(() => ({
+    opacity: exitOpacity.value,
+    transform: [{ scale: exitScale.value }],
   }));
 
   const handleFilled = useCallback(() => {
     setPhase('welcome');
   }, []);
 
+  const finishEnter = useCallback(() => {
+    onEnter?.();
+  }, [onEnter]);
+
+  const handleEnterPress = useCallback(() => {
+    if (phase !== 'welcome' || exiting) return;
+    setExiting(true);
+    pulse.value = withTiming(1, { duration: 80 });
+    exitOpacity.value = withTiming(0, {
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+    });
+    exitScale.value = withTiming(
+      0.96,
+      { duration: 320, easing: Easing.out(Easing.cubic) },
+      (finished) => {
+        if (finished) runOnJS(finishEnter)();
+      },
+    );
+  }, [phase, exiting, pulse, exitOpacity, exitScale, finishEnter]);
+
   const content = (
-    <>
+    <Animated.View style={[styles.exitLayer, exitStyle]}>
       <SoftBackdrop />
       <View style={styles.center} pointerEvents="none">
         <View style={[styles.iconCircle, compact && styles.iconCircleCompact]}>
@@ -238,14 +268,14 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
           </Animated.Text>
         </View>
       </View>
-    </>
+    </Animated.View>
   );
 
   return (
     <Pressable
       style={styles.root}
-      onPress={phase === 'welcome' ? onEnter : undefined}
-      disabled={phase !== 'welcome'}
+      onPress={phase === 'welcome' && !exiting ? handleEnterPress : undefined}
+      disabled={phase !== 'welcome' || exiting}
       accessibilityRole={phase === 'welcome' ? 'button' : undefined}
       accessibilityLabel={phase === 'welcome' ? copy.tapToEnter : primary}
       accessibilityLiveRegion="polite"
@@ -262,6 +292,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     zIndex: 100,
     elevation: 100,
+  },
+  exitLayer: {
+    ...StyleSheet.absoluteFillObject,
   },
   backdropImage: {
     ...StyleSheet.absoluteFillObject,

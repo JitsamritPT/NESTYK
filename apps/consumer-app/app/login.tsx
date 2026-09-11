@@ -28,6 +28,8 @@ import {
 } from "@nestyk/ui/native";
 import { useAuth } from "../lib/auth/AuthContext";
 import { DEV_AUTH_CONFIG } from "../lib/auth/dev-auth";
+import { requestGuestBrowse } from "../lib/auth/role-gate";
+import { APP_CONFIG } from "../lib/config";
 
 function GoogleMark() {
   return (
@@ -432,19 +434,24 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              onPress={() => router.replace("/")}
-              style={[styles.guestLink, compact && styles.guestLinkCompact]}
-              accessibilityRole="button"
-              activeOpacity={0.7}
-            >
-              <Text style={styles.guestLinkText}>{copy.continueAsGuest}</Text>
-              <MobileIcon
-                name="chevron-right"
-                size={16}
-                color={tokens.colors.primary}
-              />
-            </TouchableOpacity>
+            {APP_CONFIG.defaultRole === "guest" ? (
+              <TouchableOpacity
+                onPress={() => {
+                  requestGuestBrowse();
+                  router.replace("/");
+                }}
+                style={[styles.guestLink, compact && styles.guestLinkCompact]}
+                accessibilityRole="button"
+                activeOpacity={0.7}
+              >
+                <Text style={styles.guestLinkText}>{copy.continueAsGuest}</Text>
+                <MobileIcon
+                  name="chevron-right"
+                  size={16}
+                  color={tokens.colors.primary}
+                />
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>

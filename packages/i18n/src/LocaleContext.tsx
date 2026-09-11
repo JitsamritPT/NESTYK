@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { th } from './locales/th';
 import { en } from './locales/en';
 import { zh } from './locales/zh';
@@ -18,14 +18,25 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 export interface LocaleProviderProps {
   children: React.ReactNode;
   defaultLocale?: SupportedLocale;
+  /** Persist / sync when the user changes language. */
+  onLocaleChange?: (locale: SupportedLocale) => void;
 }
 
 export const LocaleProvider: React.FC<LocaleProviderProps> = ({
   children,
   defaultLocale = 'en',
+  onLocaleChange,
 }) => {
-  const [locale, setLocale] = useState<SupportedLocale>(defaultLocale);
+  const [locale, setLocaleState] = useState<SupportedLocale>(defaultLocale);
   const t = useMemo(() => localeMap[locale] || th, [locale]);
+
+  const setLocale = useCallback(
+    (next: SupportedLocale) => {
+      setLocaleState(next);
+      onLocaleChange?.(next);
+    },
+    [onLocaleChange],
+  );
 
   const value = useMemo(
     () => ({
@@ -33,7 +44,7 @@ export const LocaleProvider: React.FC<LocaleProviderProps> = ({
       setLocale,
       t,
     }),
-    [locale, t],
+    [locale, setLocale, t],
   );
 
   return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;

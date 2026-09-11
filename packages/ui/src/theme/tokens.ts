@@ -38,6 +38,21 @@ export const tokens = {
     accent: '#2563eb',
     info: '#2563eb',
 
+    /** Soft status surfaces (pills / icon wells) — prefer over flooding role colors */
+    subtle: {
+      successBg: '#dcfce7',
+      successFg: '#15803d',
+      warningBg: '#ffedd5',
+      warningFg: '#c2410c',
+      dangerBg: '#fee2e2',
+      dangerFg: '#dc2626',
+      infoBg: '#dbeafe',
+      infoFg: '#1d4ed8',
+      brandBg: '#fef3c7',
+      neutralBg: '#f1f5f9',
+      track: '#e2e8f0',
+    },
+
     // 🧭 Icon Colors (Allowed Palette)
     icon: {
       dark: '#211e1e',

@@ -12,6 +12,8 @@ export * from './components/MobileBottomTabBar';
 export * from './config/mobileTabMatrix';
 export * from './config/mobileDrawerMenuMatrix';
 export * from './components/MobileHeaderActions';
+export * from './components/MobileWorkspaceHeader';
+export * from './components/MobileSectionHeader';
 export * from './components/MobileNotificationsBody';
 export * from './components/MobileBottomSheet';
 export * from './components/MobileProfileAvatar';
