@@ -94,7 +94,11 @@ export function MobileAgentRoomBody({ room, mapsApiKey }: { room: AgentRoomDetai
       try { const url = new URL(document.mediaUrl); if (url.protocol === 'https:') void Linking.openURL(url.toString()); } catch { /* Invalid legacy links cannot be opened. */ }
     }}>{cr.documentKinds[document.kind]} {index + 1}</MobileButton>)}</>)}
     {section(copy.contacts, <>
-      {row(cr.sourcePrompt, room.listingSourceCode === 'owner' ? cr.sourceOwner : room.listingSourceCode === 'co_agent' ? cr.sourceCoAgent : null)}
+      {(room.listingSourceCode === 'owner' || room.listingSourceCode === 'co_agent') && (
+        <Text style={[styles.value, { color: theme.textHeading, textAlign: 'left' }]}>
+          {room.listingSourceCode === 'owner' ? cr.sourceOwner : cr.sourceCoAgent}
+        </Text>
+      )}
       {!room.contacts.length && <Text style={{ color: theme.textSecondary }}>{copy.notSpecified}</Text>}
       {room.contacts.map((contact) => <View key={contact.id} style={{ gap: 6, paddingVertical: 8 }}><Text selectable style={[styles.heading, { color: theme.textHeading }]}>{contact.name}</Text><Text selectable style={{ color: theme.textHeading }}>{contact.phone}</Text>{contact.email && <Text selectable style={{ color: theme.textSecondary }}>{contact.email}</Text>}{contact.note && <Text selectable style={{ color: theme.textSecondary }}>{contact.note}</Text>}</View>)}
     </>)}

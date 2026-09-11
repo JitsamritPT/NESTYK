@@ -2,6 +2,8 @@ import type { FacilityOption, NearbyPlace } from '@nestyk/types';
 import { RoomFacilitiesEditor } from './RoomFacilitiesEditor';
 import { RoomNearbyEditor, type NearbySearch } from './RoomNearbyEditor';
 import { RoomEditSectionList } from './RoomEditSectionList';
+import { RoomPhotoLightbox } from './RoomPhotoLightbox';
+import { RoomPhotoCompareModal } from './RoomPhotoCompareModal';
 import { relocateNearby, isCustomPlace } from '../nearby';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -119,7 +121,15 @@ export type CreateRoomWizardSubmitData = {
   longitude?: number;
 };
 
-export type RoomPhoto = { uri: string; name: string; mimeType: string; file?: Blob; mediaUrl?: string };
+export type RoomPhoto = {
+  uri: string;
+  name: string;
+  mimeType: string;
+  file?: Blob;
+  mediaUrl?: string;
+  /** Local or remote URI before AI enhance (for before/after). */
+  originalUri?: string;
+};
 
 export interface MobileCreateListingWizardBodyProps {
   initialData?: CreateRoomWizardSubmitData;
@@ -128,6 +138,7 @@ export interface MobileCreateListingWizardBodyProps {
   onSubmittingChange?: (busy: boolean) => void;
   pickPhotos?: (limit: number) => Promise<RoomPhoto[]>;
   uploadPhoto?: (photo: RoomPhoto) => Promise<string>;
+  enhancePhoto?: (photo: RoomPhoto) => Promise<RoomPhoto>;
   config: ListingEngineConfig;
   onSubmitListing?: (data: CreateRoomWizardSubmitData) => void | Promise<void>;
   searchPlaces?: (query: string) => Promise<PlaceSuggestion[]>;
@@ -180,6 +191,7 @@ export const MobileCreateListingWizardBody: React.FC<
   onSubmittingChange,
   pickPhotos,
   uploadPhoto,
+  enhancePhoto,
   onSubmitListing,
   searchPlaces,
   getPlaceDetails,
@@ -276,6 +288,9 @@ export const MobileCreateListingWizardBody: React.FC<
   const [photos, setPhotos] = useState<RoomPhoto[]>([]);
   const photoCount = photos.length;
   const [pickingPhotos, setPickingPhotos] = useState(false);
+  const [enhancingUri, setEnhancingUri] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ uri: string; beforeUri?: string } | null>(null);
+  const [compare, setCompare] = useState<{ sourceUri: string; beforeUri: string; after: RoomPhoto } | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const submitLock = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -959,11 +974,11 @@ export const MobileCreateListingWizardBody: React.FC<
       )}
       <View style={{ flex: 1 }}>
         {opts?.isLast ? (
-          <MobileButton onPress={handleSubmit} isLoading={submitting} disabled={submitting}>
+          <MobileButton onPress={handleSubmit} isLoading={submitting} disabled={submitting || !!enhancingUri}>
             {submitLabel ?? cr.submit}
           </MobileButton>
         ) : (
-          <MobileButton onPress={goNext} disabled={pickingPhotos}>{cr.next}</MobileButton>
+          <MobileButton onPress={goNext} disabled={pickingPhotos || !!enhancingUri}>{cr.next}</MobileButton>
         )}
       </View>
     </View>
@@ -1548,6 +1563,7 @@ export const MobileCreateListingWizardBody: React.FC<
                 {initialData?.visibility === 'published' && <Text style={styles.requiredMark}> *</Text>}
               </Text>
               <Text style={styles.hint}>{initialData?.visibility === 'published' ? cr.photosHint : cr.optionalPhotosHint}</Text>
+              {enhancePhoto ? <Text style={styles.hint}>{cr.enhancePhotoHint}</Text> : null}
               <Text style={[styles.photoCount, { color: themeColor }]}>
                 {interpolate(cr.photosCount, { count: photoCount })}
               </Text>
@@ -1556,18 +1572,72 @@ export const MobileCreateListingWizardBody: React.FC<
               ) : null}
               <View style={styles.photoGrid}>
                 {photos.map((photo, i) => (
-                  <View key={photo.uri} style={{ width: 100, gap: 4 }}>
-                    <Pressable disabled={submitting} accessibilityLabel={cr.setCover} onPress={() => setPhotos((current) => [photo, ...current.filter((item) => item.uri !== photo.uri)])}>
-                      <Image source={{ uri: photo.uri, cache: 'reload' }} style={{ width: 100, height: 100, borderRadius: 8 }} />
-                      <Text style={styles.hint}>{i === 0 ? cr.coverPhoto : cr.setCover}</Text>
+                  <View key={photo.uri} style={styles.photoCard}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={cr.viewPhoto}
+                      disabled={submitting || !!enhancingUri}
+                      onPress={() => setPreview({ uri: photo.uri, beforeUri: photo.originalUri })}
+                    >
+                      <Image source={{ uri: photo.uri, cache: 'reload' }} style={styles.photoThumb} />
+                      {photo.originalUri ? (
+                        <View style={[styles.aiBadge, { backgroundColor: themeColor }]}>
+                          <Text style={styles.aiBadgeText}>AI</Text>
+                        </View>
+                      ) : null}
                     </Pressable>
-                    <MobileButton variant="outline" disabled={submitting} onPress={() => setPhotos((current) => current.filter((item) => item.uri !== photo.uri))}>{cr.removePhoto}</MobileButton>
+                    {i === 0 ? (
+                      <Text style={styles.hint}>{cr.coverPhoto}</Text>
+                    ) : (
+                      <MobileButton
+                        variant="outline"
+                        disabled={submitting || !!enhancingUri}
+                        onPress={() => setPhotos((current) => [photo, ...current.filter((item) => item.uri !== photo.uri)])}
+                      >
+                        {cr.setCover}
+                      </MobileButton>
+                    )}
+                    {enhancePhoto ? (
+                      <MobileButton
+                        variant="outline"
+                        disabled={submitting || pickingPhotos || !!enhancingUri}
+                        isLoading={enhancingUri === photo.uri}
+                        onPress={async () => {
+                          if (!enhancePhoto || enhancingUri) return;
+                          setEnhancingUri(photo.uri);
+                          try {
+                            const enhanced = await enhancePhoto(photo);
+                            setCompare({
+                              sourceUri: photo.uri,
+                              beforeUri: photo.originalUri ?? photo.uri,
+                              after: {
+                                ...enhanced,
+                                originalUri: photo.originalUri ?? photo.uri,
+                              },
+                            });
+                          } catch (err) {
+                            Alert.alert(cr.enhancePhotoError, err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setEnhancingUri(null);
+                          }
+                        }}
+                      >
+                        {cr.enhancePhoto}
+                      </MobileButton>
+                    ) : null}
+                    <MobileButton
+                      variant="outline"
+                      disabled={submitting || !!enhancingUri}
+                      onPress={() => setPhotos((current) => current.filter((item) => item.uri !== photo.uri))}
+                    >
+                      {cr.removePhoto}
+                    </MobileButton>
                   </View>
                 ))}
               </View>
               <MobileButton
                 variant="outline"
-                disabled={submitting || pickingPhotos || photoCount >= 12 || !pickPhotos}
+                disabled={submitting || pickingPhotos || !!enhancingUri || photoCount >= 12 || !pickPhotos}
                 isLoading={pickingPhotos}
                 onPress={async () => {
                   if (!pickPhotos || pickingPhotos) return;
@@ -1585,6 +1655,32 @@ export const MobileCreateListingWizardBody: React.FC<
               >
                 {cr.addPhoto}
               </MobileButton>
+              <RoomPhotoLightbox
+                visible={preview != null}
+                uri={preview?.uri ?? ''}
+                beforeUri={preview?.beforeUri}
+                labels={{ before: cr.photoBefore, after: cr.photoAfter, close: cr.closePhotoPreview }}
+                onClose={() => setPreview(null)}
+              />
+              <RoomPhotoCompareModal
+                visible={compare != null}
+                beforeUri={compare?.beforeUri ?? ''}
+                afterUri={compare?.after.uri ?? ''}
+                labels={{
+                  title: cr.comparePhotoTitle,
+                  before: cr.photoBefore,
+                  after: cr.photoAfter,
+                  useEnhanced: cr.useEnhancedPhoto,
+                  keepOriginal: cr.keepOriginalPhoto,
+                }}
+                onKeepOriginal={() => setCompare(null)}
+                onUseEnhanced={() => {
+                  if (!compare) return;
+                  const { sourceUri, after } = compare;
+                  setPhotos((current) => current.map((item) => (item.uri === sourceUri ? after : item)));
+                  setCompare(null);
+                }}
+              />
             </>
           )}
 
@@ -2179,6 +2275,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  photoCard: {
+    width: 108,
+    gap: 4,
+  },
+  photoThumb: {
+    width: 108,
+    height: 108,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+  },
+  aiBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  aiBadgeText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   photoSlot: {
     width: 56,

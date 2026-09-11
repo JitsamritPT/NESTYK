@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { AgentRoomDetail, CreateRoomWizardSubmitData, MobileCreateListingWizardBody, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import { useLocale } from '@nestyk/i18n';
-import { pickRoomPhotos, uploadRoomPhoto } from '../lib/room-photos';
+import { pickRoomPhotos, uploadRoomPhoto, enhanceRoomPhoto } from '../lib/room-photos';
 import { fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities, updateAgentRoom } from '../lib/agent-listings-api';
 import { searchPlaces, getPlaceDetails, searchNearbyPlaces } from '../lib/places-api';
 
@@ -36,7 +36,7 @@ export function AgentRoomEditor({ room, onSaved, onBusy }: { room: AgentRoomDeta
   return <MobileCreateListingWizardBody
     config={defaultAgentListingConfig} initialData={initialData}
     title={t.agent.listings.editRoom} submitLabel={t.agent.listings.saveChanges}
-    onSubmittingChange={onBusy} pickPhotos={pickRoomPhotos} uploadPhoto={uploadRoomPhoto}
+    onSubmittingChange={onBusy} pickPhotos={pickRoomPhotos} uploadPhoto={uploadRoomPhoto} enhancePhoto={enhanceRoomPhoto}
     listContacts={fetchAgentContacts} listPropertyTypes={fetchAgentPropertyTypes}
     listContractTypes={fetchAgentContractTypes} listRoomTypes={fetchAgentRoomTypes} listFacilities={fetchAgentFacilities} mapsApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
     searchNearby={(lat, lng) => searchNearbyPlaces(lat, lng, locale)}

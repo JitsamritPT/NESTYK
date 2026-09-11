@@ -482,6 +482,16 @@ export interface TranslationSchema {
       removePhoto: string;
       setCover: string;
       coverPhoto: string;
+      enhancePhoto: string;
+      enhancePhotoHint: string;
+      enhancePhotoError: string;
+      photoBefore: string;
+      photoAfter: string;
+      comparePhotoTitle: string;
+      useEnhancedPhoto: string;
+      keepOriginalPhoto: string;
+      viewPhoto: string;
+      closePhotoPreview: string;
       uploadProgress: string;
       photoUnavailable: string;
       photosMinError: string;

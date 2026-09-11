@@ -41,20 +41,23 @@ export class RoomPhotoStorageService {
     return this.client.storage.from(this.bucket);
   }
 
-  async upload(agentId: number, file: { buffer: Buffer; size: number } | undefined, baseUrl: string) {
+  private async normalizeJpeg(file: { buffer: Buffer; size: number } | undefined): Promise<Buffer> {
     if (!file?.buffer?.length) throw new BadRequestException('Choose an image file');
     if (file.buffer.length > MAX_ROOM_PHOTO_BYTES) throw new BadRequestException('Photo must be 10 MB or smaller');
-    let image: Buffer;
     try {
       const input = sharp(file.buffer, { limitInputPixels: 40_000_000, failOn: 'warning' });
       const metadata = await input.metadata();
       if (!['jpeg', 'png', 'webp', 'heif', 'avif'].includes(metadata.format ?? '') || (metadata.pages ?? 1) > 1) throw new Error('Unsupported image');
       // Decode and re-encode: reject corrupt/non-image uploads, normalize orientation,
       // remove EXIF (including GPS), and bound the stored image dimensions.
-      image = await input.rotate().resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
-    } catch {
+      return input.rotate().resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
       throw new BadRequestException('Use a valid JPEG, PNG or WebP image (up to 40 megapixels)');
     }
+  }
+
+  private async storeJpeg(agentId: number, image: Buffer) {
     await this.ensureBucket();
     const name = `${randomUUID()}.jpg`;
     const storage = this.storage();
@@ -64,6 +67,80 @@ export class RoomPhotoStorageService {
     });
     if (error) throw new ServiceUnavailableException('Unable to upload room photo; please try again');
     return { mediaUrl: storage.getPublicUrl(objectPath).data.publicUrl };
+  }
+
+  async upload(agentId: number, file: { buffer: Buffer; size: number } | undefined, _baseUrl: string) {
+    const image = await this.normalizeJpeg(file);
+    return this.storeJpeg(agentId, image);
+  }
+
+  async enhance(agentId: number, file: { buffer: Buffer; size: number } | undefined, _baseUrl: string) {
+    const apiKey = process.env.CLAID_API_KEY?.trim().replace(/^['"]|['"]$/g, '');
+    if (!apiKey) throw new ServiceUnavailableException('AI photo enhance is not configured — set CLAID_API_KEY in .env.api and restart the API');
+
+    const image = await this.normalizeJpeg(file);
+    const claidBase = (process.env.CLAID_API_URL?.trim().replace(/^['"]|['"]$/g, '') || 'https://api.claid.ai').replace(/\/$/, '');
+
+    // Upload bytes directly to Claid — do not pass local Supabase URLs (Claid cannot reach 127.0.0.1).
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(image)], { type: 'image/jpeg' }), 'room.jpg');
+    // Claid validates `data` as a JSON string (not a file/blob part).
+    form.append(
+      'data',
+      JSON.stringify({
+        operations: {
+          adjustments: { hdr: 80, sharpness: 25 },
+          restorations: { decompress: 'auto', upscale: 'smart_enhance' },
+        },
+        output: { format: { type: 'jpeg', quality: 90 } },
+      }),
+    );
+
+    let editResponse: Response;
+    try {
+      editResponse = await fetch(`${claidBase}/v1/image/edit/upload`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: form,
+      });
+    } catch {
+      throw new ServiceUnavailableException('Unable to reach AI photo service; please try again');
+    }
+
+    const raw = await editResponse.text();
+    let payload: {
+      data?: { output?: { tmp_url?: string } };
+      error_message?: string;
+      message?: string;
+    } = {};
+    try { payload = raw ? JSON.parse(raw) : {}; } catch { /* keep empty */ }
+    const claidMessage = payload.error_message || payload.message;
+
+    if (editResponse.status === 401 || editResponse.status === 403) {
+      throw new ServiceUnavailableException(claidMessage || 'AI photo enhance key is invalid or missing image_editing permission');
+    }
+    if (editResponse.status === 402) {
+      throw new ServiceUnavailableException(claidMessage || 'AI photo enhance quota exceeded');
+    }
+    if (!editResponse.ok) {
+      throw new ServiceUnavailableException(claidMessage || 'AI photo enhance failed; please try again');
+    }
+
+    const tmpUrl = payload?.data?.output?.tmp_url;
+    if (!tmpUrl || typeof tmpUrl !== 'string') {
+      throw new ServiceUnavailableException('AI photo enhance returned no image');
+    }
+
+    let enhanced: Buffer;
+    try {
+      const imageResponse = await fetch(tmpUrl);
+      if (!imageResponse.ok) throw new Error('download failed');
+      enhanced = Buffer.from(await imageResponse.arrayBuffer());
+    } catch {
+      throw new ServiceUnavailableException('Unable to download enhanced photo; please try again');
+    }
+    if (!enhanced.length) throw new BadRequestException('Enhanced photo was empty');
+    return this.storeJpeg(agentId, enhanced);
   }
 
   async validateRoomPhotos(agentId: number, medias: Array<{ mediaUrl: string; mediaType?: string; category?: string }>, baseUrl: string) {
