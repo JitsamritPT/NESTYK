@@ -35,6 +35,22 @@ export interface AgentContract {
   notes: string | null;
   ownerSignedAt: string | null;
   tenantSignedAt: string | null;
+  agentSignedAt: string | null;
+  ownerSignatureUrl: string | null;
+  tenantSignatureUrl: string | null;
+  agentSignatureUrl: string | null;
+  reservationLetterUrl: string | null;
+  invoiceUrl: string | null;
+  receiptUrl: string | null;
+}
+export type AgentContractDocumentKind =
+  | "reservation_letter"
+  | "invoice"
+  | "receipt";
+export type AgentContractSignParty = "owner" | "tenant" | "agent";
+export interface SignAgentContract {
+  parties: AgentContractSignParty[];
+  signaturePng: string;
 }
 export interface ContractCandidate {
   leadId: number;

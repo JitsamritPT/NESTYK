@@ -4,14 +4,95 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { DataSource } from "typeorm";
-import type { AgentContract, CreateAgentContract } from "@nestyk/types";
+import type {
+  AgentContract,
+  AgentContractDocumentKind,
+  AgentContractSignParty,
+  CreateAgentContract,
+} from "@nestyk/types";
 import { LeaseContractEntity } from "../../entities/lease-contract.entity";
 import { LeadEntity } from "../../entities/lead.entity";
 import { TenantEntity } from "../../entities/tenant.entity";
 import { RentRoomEntity } from "../../entities/rent-room.entity";
 import { RoomTenancyEntity } from "../../entities/room-tenancy.entity";
+import {
+  CONTRACT_DOCUMENT_KINDS,
+  ContractDocumentStorageService,
+} from "./contract-document-storage.service";
+
+const DOCUMENT_COLUMNS: Record<
+  AgentContractDocumentKind,
+  "document_url" | "invoice_url" | "receipt_url"
+> = {
+  reservation_letter: "document_url",
+  invoice: "invoice_url",
+  receipt: "receipt_url",
+};
+export const CONTRACT_SIGN_PARTIES = [
+  "owner",
+  "tenant",
+  "agent",
+] as const satisfies readonly AgentContractSignParty[];
+const SIGN_COLUMNS: Record<
+  AgentContractSignParty,
+  {
+    at: "owner_signed_at" | "tenant_signed_at" | "agent_signed_at";
+    url: "owner_signature_url" | "tenant_signature_url" | "agent_signature_url";
+  }
+> = {
+  owner: { at: "owner_signed_at", url: "owner_signature_url" },
+  tenant: { at: "tenant_signed_at", url: "tenant_signature_url" },
+  agent: { at: "agent_signed_at", url: "agent_signature_url" },
+};
+const CLOSED_STATUSES = [
+  "cancelled",
+  "expired",
+  "terminated",
+  "active",
+  "awaiting_payment",
+  "awaiting_payment_verification",
+] as const;
+const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
+
+export function validateSign(input: unknown): {
+  parties: AgentContractSignParty[];
+  png: Buffer;
+} {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new BadRequestException("กรุณาระบุข้อมูลลายเซ็น");
+  const b = input as Record<string, unknown>;
+  if (!Array.isArray(b.parties) || !b.parties.length)
+    throw new BadRequestException("กรุณาเลือกฝ่ายที่ต้องการเซ็นแทน");
+  if (
+    b.parties.some(
+      (party) =>
+        !CONTRACT_SIGN_PARTIES.includes(party as AgentContractSignParty),
+    )
+  )
+    throw new BadRequestException("ฝ่ายที่ลงนามไม่ถูกต้อง");
+  const parties = [
+    ...new Set(b.parties as AgentContractSignParty[]),
+  ];
+  if (typeof b.signaturePng !== "string" || !b.signaturePng.trim())
+    throw new BadRequestException("กรุณาวาดลายเซ็นก่อนยืนยัน");
+  const raw = b.signaturePng.replace(/^data:image\/png;base64,/i, "");
+  let png: Buffer;
+  try {
+    png = Buffer.from(raw, "base64");
+  } catch {
+    throw new BadRequestException("ลายเซ็นไม่ถูกต้อง");
+  }
+  if (
+    png.length < 32 ||
+    png.length > MAX_SIGNATURE_BYTES ||
+    png.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a"
+  )
+    throw new BadRequestException("ลายเซ็นต้องเป็นไฟล์ PNG");
+  return { parties, png };
+}
 
 export function validateContract(
   input: unknown,
@@ -73,7 +154,10 @@ export function validateContract(
 
 @Injectable()
 export class AgentContractsService {
-  constructor(private readonly db: DataSource) {}
+  constructor(
+    private readonly db: DataSource,
+    private readonly documents?: ContractDocumentStorageService,
+  ) {}
   private query(agentId: number) {
     return this.db
       .getRepository(LeaseContractEntity)
@@ -84,7 +168,12 @@ export class AgentContractsService {
       .leftJoinAndSelect("c.tenant", "tenant")
       .where("c.created_by_user_id = :agentId", { agentId });
   }
-  private serialize(c: LeaseContractEntity): AgentContract {
+  private serialize(
+    c: LeaseContractEntity,
+    signed = new Map<string, string>(),
+  ): AgentContract {
+    const url = (path: string | null | undefined) =>
+      (path && signed.get(path)) || null;
     return {
       id: c.id,
       tenantId: c.tenant_id,
@@ -109,7 +198,28 @@ export class AgentContractsService {
       notes: c.notes,
       ownerSignedAt: c.owner_signed_at?.toISOString() || null,
       tenantSignedAt: c.tenant_signed_at?.toISOString() || null,
+      agentSignedAt: c.agent_signed_at?.toISOString() || null,
+      ownerSignatureUrl: url(c.owner_signature_url),
+      tenantSignatureUrl: url(c.tenant_signature_url),
+      agentSignatureUrl: url(c.agent_signature_url),
+      reservationLetterUrl: url(c.document_url),
+      invoiceUrl: url(c.invoice_url),
+      receiptUrl: url(c.receipt_url),
     };
+  }
+  private documentPaths(c: LeaseContractEntity) {
+    return [
+      c.document_url,
+      c.invoice_url,
+      c.receipt_url,
+      c.owner_signature_url,
+      c.tenant_signature_url,
+      c.agent_signature_url,
+    ];
+  }
+  private async signedFor(rows: LeaseContractEntity[]) {
+    if (!this.documents) return new Map<string, string>();
+    return this.documents.signPaths(rows.flatMap((row) => this.documentPaths(row)));
   }
   async types() {
     const rows = await this.db
@@ -127,14 +237,93 @@ export class AgentContractsService {
     }));
   }
   async list(agentId: number) {
-    return (await this.query(agentId).orderBy("c.id", "DESC").getMany()).map(
-      (c) => this.serialize(c),
-    );
+    const rows = await this.query(agentId).orderBy("c.id", "DESC").getMany();
+    const signed = await this.signedFor(rows);
+    return rows.map((c) => this.serialize(c, signed));
   }
   async view(agentId: number, id: number) {
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
-    return this.serialize(c);
+    return this.serialize(c, await this.signedFor([c]));
+  }
+  async uploadDocument(
+    agentId: number,
+    id: number,
+    kind: string,
+    file: { buffer: Buffer; size: number } | undefined,
+  ) {
+    if (
+      !CONTRACT_DOCUMENT_KINDS.includes(kind as AgentContractDocumentKind)
+    )
+      throw new BadRequestException("ชนิดเอกสารไม่ถูกต้อง");
+    const documentKind = kind as AgentContractDocumentKind;
+    const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    if (c.agreement_type?.form_kind !== "reservation")
+      throw new BadRequestException(
+        "อัปโหลดเอกสารได้เฉพาะหนังสือจองห้อง",
+      );
+    if (!this.documents)
+      throw new ServiceUnavailableException(
+        "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
+      );
+    const stored = await this.documents.upload(
+      agentId,
+      c.id,
+      documentKind,
+      file,
+    );
+    await this.db.getRepository(LeaseContractEntity).update(
+      { id: c.id, created_by_user_id: agentId },
+      { [DOCUMENT_COLUMNS[documentKind]]: stored.path },
+    );
+    return this.view(agentId, c.id);
+  }
+  async sign(agentId: number, id: number, input: unknown) {
+    const { parties, png } = validateSign(input);
+    const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    if (CLOSED_STATUSES.includes(c.status as (typeof CLOSED_STATUSES)[number]))
+      throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
+    const pending = parties.filter((party) => !c[SIGN_COLUMNS[party].at]);
+    if (!pending.length)
+      throw new BadRequestException("ฝ่ายที่เลือกลงนามแล้ว");
+    if (!this.documents)
+      throw new ServiceUnavailableException(
+        "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
+      );
+    const stored = await this.documents.uploadSignature(agentId, c.id, {
+      buffer: png,
+      size: png.length,
+    });
+    const now = new Date();
+    const patch: {
+      owner_signed_at?: Date;
+      tenant_signed_at?: Date;
+      agent_signed_at?: Date;
+      owner_signature_url?: string;
+      tenant_signature_url?: string;
+      agent_signature_url?: string;
+      status?: LeaseContractEntity["status"];
+    } = {};
+    for (const party of pending) {
+      patch[SIGN_COLUMNS[party].at] = now;
+      patch[SIGN_COLUMNS[party].url] = stored.path;
+    }
+    const ownerAt = patch.owner_signed_at ?? c.owner_signed_at;
+    const tenantAt = patch.tenant_signed_at ?? c.tenant_signed_at;
+    const agentAt = patch.agent_signed_at ?? c.agent_signed_at;
+    if (c.status === "draft" || c.status === "awaiting_signatures") {
+      patch.status =
+        ownerAt && tenantAt && agentAt
+          ? "awaiting_agent_review"
+          : "awaiting_signatures";
+    }
+    await this.db.getRepository(LeaseContractEntity).update(
+      { id: c.id, created_by_user_id: agentId },
+      patch,
+    );
+    return this.view(agentId, c.id);
   }
   async candidates(agentId: number) {
     const leads = await this.db

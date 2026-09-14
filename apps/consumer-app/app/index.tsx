@@ -124,7 +124,6 @@ export default function AppHomeScreen() {
   const [leadsSearchOpen, setLeadsSearchOpen] = useState(false);
   const [roomsSearchOpen, setRoomsSearchOpen] = useState(false);
   const [clientsSearchOpen, setClientsSearchOpen] = useState(false);
-  const [clientsQuery, setClientsQuery] = useState('');
   /** Where header/hardware back should return from secondary screens (e.g. create listing). */
   const [secondaryReturnTab, setSecondaryReturnTab] = useState<MobileAppTab | null>(null);
 
@@ -285,7 +284,6 @@ export default function AppHomeScreen() {
     setLeadsSearchOpen(false);
     setRoomsSearchOpen(false);
     setClientsSearchOpen(false);
-    setClientsQuery('');
   }, [activeTab]);
 
   const renderAgentHeader = () => {
@@ -695,25 +693,11 @@ export default function AppHomeScreen() {
               </MobileButton>
             </View>
           ) : null}
-          {clientsSearchOpen || clientsQuery.trim() ? (
-            <MobileInput
-              value={clientsQuery}
-              onChangeText={setClientsQuery}
-              placeholder={t.agent.leads.search}
-              autoFocus={clientsSearchOpen && !clientsQuery.trim()}
-              onBlur={() => {
-                if (!clientsQuery.trim()) setClientsSearchOpen(false);
-              }}
-            />
-          ) : null}
-          <View style={[styles.card, cardStyle]}>
-            <Text style={[styles.sectionDesc, secondaryText]}>{dash.clientsBody}</Text>
-            <View style={{ marginTop: 12 }}>
-              <MobileButton variant="outline" onPress={() => setActiveTab('contracts')}>
-                {dash.openContracts}
-              </MobileButton>
-            </View>
-          </View>
+          <AgentTenantsScreen
+            searchOpen={clientsSearchOpen}
+            onSearchOpenChange={setClientsSearchOpen}
+            workFilter={clientsWorkFilter}
+          />
         </View>
       );
     }
@@ -760,7 +744,15 @@ export default function AppHomeScreen() {
     }
 
     if (activeTab === 'contracts') {
-      return <View style={styles.bodyContainer}><AgentTenantsScreen /></View>;
+      return (
+        <View style={styles.bodyContainer}>
+          <View style={[styles.card, cardStyle]}>
+            <Text style={[styles.sectionDesc, secondaryText]}>
+              Draft · pending signature · active co-broke contracts (mock)
+            </Text>
+          </View>
+        </View>
+      );
     }
 
     if (activeTab === 'calendar') {

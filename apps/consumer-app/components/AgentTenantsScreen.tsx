@@ -65,8 +65,17 @@ const renewal = (t: AgentTenant) =>
     return days != null && days >= 0 && days <= 30;
   });
 
-export function AgentTenantsScreen() {
+export function AgentTenantsScreen({
+  searchOpen = false,
+  onSearchOpenChange,
+  workFilter = null,
+}: {
+  searchOpen?: boolean;
+  onSearchOpenChange?: (open: boolean) => void;
+  workFilter?: 'overdue_payment' | 'awaiting_signature' | 'renewal' | 'lead_follow_up' | null;
+} = {}) {
   const { theme } = useMobileTheme();
+  const headerSearch = onSearchOpenChange != null;
   const [items, setItems] = useState<AgentTenant[]>([]);
   const [selected, setSelected] = useState<AgentTenant | null>(null);
   const [initialContract, setInitialContract] = useState<AgentContract | null>(null);
@@ -90,6 +99,10 @@ export function AgentTenantsScreen() {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (workFilter === "awaiting_signature") setFilter("signing");
+    else if (workFilter === "renewal" || workFilter === "overdue_payment") setFilter("all");
+  }, [workFilter]);
   const refreshVersion = useRef(0);
   const panel = { backgroundColor: theme.surface, borderColor: theme.border };
   const title = { color: theme.textHeading };
@@ -371,13 +384,14 @@ export function AgentTenantsScreen() {
       </View>
     );
   }
-  const visible = items.filter(
-    (t) =>
-      (filter === "all" || stateOf(t) === filter) &&
-      `${t.name} ${t.phone} ${t.property} ${t.room || ""} ${t.contracts.map((c) => `${c.property} ${c.room || ""} ${c.contractNo}`).join(" ")}`
-        .toLowerCase()
-        .includes(query.trim().toLowerCase()),
-  );
+  const visible = items.filter((t) => {
+    if (filter !== "all" && stateOf(t) !== filter) return false;
+    if (workFilter === "renewal" && !renewal(t)) return false;
+    if (workFilter === "awaiting_signature" && stateOf(t) !== "signing") return false;
+    return `${t.name} ${t.phone} ${t.property} ${t.room || ""} ${t.contracts.map((c) => `${c.property} ${c.room || ""} ${c.contractNo}`).join(" ")}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase());
+  });
   return (
     <View style={s.root}>
       <Text style={[s.subtitle, title]}>ดูแลทุกสัญญาในที่เดียว</Text>
@@ -389,11 +403,21 @@ export function AgentTenantsScreen() {
         },
         true,
       )}
+      {(headerSearch ? searchOpen || !!query.trim() : true) ? (
       <MobileInput
         value={query}
         onChangeText={setQuery}
         placeholder="ค้นหาผู้เช่า โครงการ หรือเลขสัญญา"
+        autoFocus={headerSearch && searchOpen && !query.trim()}
+        onBlur={
+          headerSearch
+            ? () => {
+                if (!query.trim()) onSearchOpenChange?.(false);
+              }
+            : undefined
+        }
       />
+      ) : null}
       <View style={s.filters}>
         {(Object.keys(filters) as Filter[]).map((key) => (
           <Pressable

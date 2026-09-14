@@ -18,6 +18,9 @@ FILES=(
   "docs/new-project/agent/leads/migrations/20260910-lead-locations.sql"
   "docs/new-project/agent/leads/migrations/20260910-lead-map.sql"
   "docs/new-project/agent/contracts/schema.sql"
+  "docs/new-project/agent/contracts/migrations/20260914-agent-signed-at.sql"
+  "docs/new-project/agent/contracts/migrations/20260914-reservation-documents.sql"
+  "docs/new-project/agent/contracts/migrations/20260914-contract-signatures.sql"
 )
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then

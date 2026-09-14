@@ -102,7 +102,7 @@ PostgreSQL integration test. No sample rows are inserted into the live database.
 
 `master_agreement_types` is the document-type catalog, separate from the existing
 `master_contract_types` rental-duration catalog. Initial codes: `reservation`
-(สัญญาจองห้อง) and `lease` (สัญญาเช่า). `GET /agent/contracts/types` returns active
+(หนังสือจองห้อง) and `lease` (สัญญาเช่า). `GET /agent/contracts/types` returns active
 rows ordered by `sort_order` then ID; the picker loads this API with loading/error
 and retry states. `code` is a stable FK; labels, icons, sorting and activation may
 change independently. New categories can reuse `form_kind` reservation/lease;
@@ -114,9 +114,13 @@ Reservation drafts use `start_date`/`end_date` as booking date/expiry and store 
 in `reservation_fee`; monthly rent and deposit stay null. The lease flow stores
 rent/deposit. A person's reservation does not block that same person's subsequent
 lease; conflicting agreements for other tenants remain blocked. A reservation
-alone never makes the client status “ผู้เช่าแล้ว”. Signing remains future work.
+alone never makes the client status “ผู้เช่าแล้ว”. Agents can proxy-sign every
+party from the contract detail sheet.
 
 Migration: `node apps/api/scripts/apply-agreement-types.cjs` (repository root).
+Agent signatory: `node apps/api/scripts/apply-agent-signed-at.cjs`.
+Reservation documents: `node apps/api/scripts/apply-reservation-documents.cjs`.
+Proxy signatures: `node apps/api/scripts/apply-contract-signatures.cjs`.
 Use `--check` to execute then roll back; the migration is idempotent, transactional,
 uses configured `DB_SCHEMA`, and has lock/statement timeouts. The master has RLS
 and is accessed through the role-guarded server API, not direct client table reads.

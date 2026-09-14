@@ -2,6 +2,7 @@ import { AgentTenantsController } from './tenants/agent-tenants.controller';
 import { AgentTenantsService } from './tenants/agent-tenants.service';
 import { AgentContractsController } from './contracts/agent-contracts.controller';
 import { AgentContractsService } from './contracts/agent-contracts.service';
+import { ContractDocumentStorageService } from './contracts/contract-document-storage.service';
 import { LeadEntity } from '../entities/lead.entity';
 import { AgentLeadsService } from './leads/agent-leads.service';
 import { AgentLeadsController } from './leads/agent-leads.controller';
@@ -62,7 +63,7 @@ import { AgentPlacesService } from './places/agent-places.service';
     ]),
   ],
   controllers: [AgentTenantsController, AgentContractsController, AgentLeadsController, AgentRoomsController, AgentListingsController, AgentPlacesController],
-  providers: [AgentTenantsService, AgentContractsService, AgentLeadsService, RoomPhotoStorageService, AgentRoomsService, AgentListingsService, AgentPlacesService],
+  providers: [AgentTenantsService, AgentContractsService, ContractDocumentStorageService, AgentLeadsService, RoomPhotoStorageService, AgentRoomsService, AgentListingsService, AgentPlacesService],
   exports: [AgentRoomsService, AgentListingsService, AgentPlacesService],
 })
 export class AgentModule {}

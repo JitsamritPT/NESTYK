@@ -105,7 +105,7 @@ test('inactive or unknown master type is rejected before transaction', async () 
 test('type catalog uses active master rows and preserves display order', async () => {
   const service = new AgentContractsService({getRepository: () => ({find: async options => {
     assert.deepEqual(options.where, {is_active:true}); assert.deepEqual(options.order, {sort_order:'ASC',id:'ASC'});
-    return [{code:'reservation',name_th:'สัญญาจองห้อง',name_en:'Reservation',icon:'calendar',form_kind:'reservation'}];
+    return [{code:'reservation',name_th:'หนังสือจองห้อง',name_en:'Reservation',icon:'calendar',form_kind:'reservation'}];
   }})});
-  assert.equal((await service.types())[0].nameTh, 'สัญญาจองห้อง');
+  assert.equal((await service.types())[0].nameTh, 'หนังสือจองห้อง');
 });
