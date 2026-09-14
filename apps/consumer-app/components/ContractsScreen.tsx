@@ -7,11 +7,24 @@ import {
   StyleSheet,
   ActivityIndicator,
   Linking,
+  Modal,
 } from "react-native";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  initialWindowMetrics,
+} from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
-import { MobileBottomSheet, MobileButton, MobileIcon, MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
+import {
+  MobileBottomSheet,
+  MobileButton,
+  MobileIcon,
+  MobileInput,
+  tokens,
+  useMobileTheme,
+} from "@nestyk/ui/native";
 import { useLocale } from "@nestyk/i18n";
 import type {
   AgreementType,
@@ -29,6 +42,8 @@ import {
   createAgentContract,
   uploadAgentContractDocument,
   signAgentContract,
+  previewAgentReservation,
+  generateAgentReservation,
 } from "../lib/agent-contracts-api";
 import { ContractDocumentPreview } from "./ContractDocumentPreview";
 import {
@@ -74,28 +89,43 @@ export function ContractsScreen({
   tenant,
   initialContract,
   onChanged,
-}: { tenant?: AgentTenant; initialContract?: AgentContract | null; onChanged?: () => void } = {}) {
+}: {
+  tenant?: AgentTenant;
+  initialContract?: AgentContract | null;
+  onChanged?: () => void;
+} = {}) {
   const { theme } = useMobileTheme();
   const { t } = useLocale();
   const docs = t.agent.contracts;
   const [contracts, setContracts] = useState<AgentContract[]>([]);
   const [loadingList, setLoadingList] = useState(true);
-  const [listError, setListError] = useState('');
+  const [listError, setListError] = useState("");
   const [retry, setRetry] = useState(0);
   const listRequest = useRef(0);
   useEffect(() => {
     const request = ++listRequest.current;
-    setLoadingList(true); setListError('');
-    listAgentContracts().then(rows => {
-      if (request === listRequest.current) setContracts(rows.filter(row => !tenant || row.tenantId === tenant.id));
-    }).catch(e => {
-      if (request === listRequest.current) setListError(message(e));
-    }).finally(() => {
-      if (request === listRequest.current) setLoadingList(false);
-    });
-    return () => { listRequest.current++; };
+    setLoadingList(true);
+    setListError("");
+    listAgentContracts()
+      .then((rows) => {
+        if (request === listRequest.current)
+          setContracts(
+            rows.filter((row) => !tenant || row.tenantId === tenant.id),
+          );
+      })
+      .catch((e) => {
+        if (request === listRequest.current) setListError(message(e));
+      })
+      .finally(() => {
+        if (request === listRequest.current) setLoadingList(false);
+      });
+    return () => {
+      listRequest.current++;
+    };
   }, [tenant?.id, retry]);
-  const [selected, setSelected] = useState<AgentContract | null>(initialContract ?? null);
+  const [selected, setSelected] = useState<AgentContract | null>(
+    initialContract ?? null,
+  );
   const [agreementType, setAgreementType] = useState<AgreementType | null>(
     null,
   );
@@ -103,9 +133,14 @@ export function ContractsScreen({
   const [choosingType, setChoosingType] = useState(false);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [uploadingKind, setUploadingKind] = useState<AgentContractDocumentKind | null>(null);
-  const [pickKind, setPickKind] = useState<AgentContractDocumentKind | null>(null);
-  const [signParties, setSignParties] = useState<AgentContractSignParty[] | null>(null);
+  const [uploadingKind, setUploadingKind] =
+    useState<AgentContractDocumentKind | null>(null);
+  const [pickKind, setPickKind] = useState<AgentContractDocumentKind | null>(
+    null,
+  );
+  const [signParties, setSignParties] = useState<
+    AgentContractSignParty[] | null
+  >(null);
   const [viewSignature, setViewSignature] = useState<{
     label: string;
     url: string;
@@ -126,6 +161,7 @@ export function ContractsScreen({
   const [form, setForm] = useState({
     startDate: "",
     endDate: "",
+    moveInDate: "",
     monthlyRent: "",
     deposit: "",
     reservationFee: "",
@@ -196,7 +232,7 @@ export function ContractsScreen({
     setPreviewDoc({ name, url, kind });
   }
   function replaceFromPreview() {
-    if (!previewDoc) return;
+    if (!previewDoc || previewDoc.kind === "reservation_letter") return;
     const kind = previewDoc.kind;
     setPreviewDoc(null);
     setTimeout(() => setPickKind(kind), 280);
@@ -213,7 +249,7 @@ export function ContractsScreen({
     kind: AgentContractDocumentKind,
     source: "documents" | "photos",
   ) {
-    if (!selected || uploadingKind) return;
+    if (!selected || uploadingKind || kind === "reservation_letter") return;
     let picked: {
       uri: string;
       name: string;
@@ -263,7 +299,11 @@ export function ContractsScreen({
     setError("");
     setNotice("");
     try {
-      const latest = await uploadAgentContractDocument(selected.id, kind, picked);
+      const latest = await uploadAgentContractDocument(
+        selected.id,
+        kind,
+        picked,
+      );
       setSelected(latest);
       setContracts((current) =>
         current.map((item) => (item.id === latest.id ? latest : item)),
@@ -344,6 +384,41 @@ export function ContractsScreen({
     }, 320);
     return () => clearTimeout(timer);
   }, [signParties, signPadKey]);
+  const reservationRequest = useRef(false);
+  const [pdfAction, setPdfAction] = useState<"preview" | "generate" | null>(
+    null,
+  );
+  async function openReservation(generate: boolean) {
+    if (!selected || reservationRequest.current) return;
+    reservationRequest.current = true;
+    setBusy(true);
+    setPdfAction(generate ? "generate" : "preview");
+    setError("");
+    try {
+      const latest = await (
+        generate ? generateAgentReservation : previewAgentReservation
+      )(selected.id);
+      setSelected(latest);
+      setContracts((current) =>
+        current.map((item) => (item.id === latest.id ? latest : item)),
+      );
+      if (!latest.reservationLetterUrl)
+        throw new Error("ไม่สามารถเปิดเอกสารได้ กรุณาลองอีกครั้ง");
+      openDocumentPreview(
+        docs.reservationLetter,
+        latest.reservationLetterUrl,
+        "reservation_letter",
+      );
+      if (generate) setNotice("สร้างเอกสารพร้อมลายเซ็นครบ 3 ฝ่ายแล้ว");
+      onChanged?.();
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      reservationRequest.current = false;
+      setBusy(false);
+      setPdfAction(null);
+    }
+  }
   async function submitSignature(image: string) {
     if (!selected || !signParties?.length || signing.current) return;
     signing.current = true;
@@ -397,7 +472,7 @@ export function ContractsScreen({
     if (
       !leadId ||
       !form.startDate ||
-      !form.endDate ||
+      !(reservation ? form.moveInDate : form.endDate) ||
       (reservation
         ? !form.reservationFee.trim()
         : !form.monthlyRent.trim() || !form.deposit.trim())
@@ -412,7 +487,9 @@ export function ContractsScreen({
       const contract = await createAgentContract({
         leadId,
         startDate: form.startDate.trim(),
-        endDate: form.endDate.trim(),
+        ...(reservation
+          ? { moveInDate: form.moveInDate.trim() }
+          : { endDate: form.endDate.trim() }),
         agreementTypeCode: agreementType?.code,
         ...(reservation
           ? { reservationFee: Number(form.reservationFee) }
@@ -423,8 +500,12 @@ export function ContractsScreen({
         notes: form.notes,
       });
       listRequest.current++;
-      setLoadingList(false); setListError('');
-      setContracts(current => [contract, ...current.filter(item => item.id !== contract.id)]);
+      setLoadingList(false);
+      setListError("");
+      setContracts((current) => [
+        contract,
+        ...current.filter((item) => item.id !== contract.id),
+      ]);
       setCreating(false);
       setSelected(contract);
       setNotice("บันทึกฉบับร่างแล้ว");
@@ -433,6 +514,7 @@ export function ContractsScreen({
       setForm({
         startDate: "",
         endDate: "",
+        moveInDate: "",
         monthlyRent: "",
         deposit: "",
         reservationFee: "",
@@ -526,7 +608,7 @@ export function ContractsScreen({
             (reservation
               ? [
                   ["startDate", "วันที่จอง (ค.ศ.)", "2026-10-01"],
-                  ["endDate", "วันสิ้นสุดการจอง (ค.ศ.)", "2026-10-15"],
+                  ["moveInDate", "วันที่เข้าอยู่ (ค.ศ.)", "2026-10-15"],
                   ["reservationFee", "เงินจอง (บาท)", "5000"],
                   ["notes", "เงื่อนไขการจอง / หมายเหตุ", "รายละเอียดเพิ่มเติม"],
                 ]
@@ -611,7 +693,9 @@ export function ContractsScreen({
             </Text>
           )}
           <Text style={[s.body, muted]}>
-            {date(selected.startDate)} – {date(selected.endDate)}
+            {selected.formKind === "reservation"
+              ? `วันที่จอง ${date(selected.bookingDate)} · วันที่เข้าอยู่ ${date(selected.moveInDate)}`
+              : `${date(selected.startDate)} – ${date(selected.endDate)}`}
           </Text>
           {!!selected.notes && (
             <Text style={[s.body, muted]}>{selected.notes}</Text>
@@ -621,6 +705,40 @@ export function ContractsScreen({
           <View style={[s.card, card]}>
             <Text style={[s.subtitle, title]}>{docs.documents}</Text>
             {documentSlots(selected).map((slot) => {
+              if (slot.kind === "reservation_letter") {
+                const complete =
+                  selected.reservationLetterStatus === "ready_to_generate" ||
+                  selected.reservationLetterStatus === "ready";
+                const generated = selected.reservationLetterStatus === "ready";
+                return (
+                  <View key={slot.kind} style={{ gap: 8 }}>
+                    <MobileButton
+                      variant="outline"
+                      disabled={busy}
+                      isLoading={pdfAction === "preview"}
+                      onPress={() => void openReservation(false)}
+                    >
+                      ดูเอกสารจอง
+                    </MobileButton>
+                    {complete && !generated && (
+                      <MobileButton
+                        disabled={busy}
+                        isLoading={pdfAction === "generate"}
+                        onPress={() => void openReservation(true)}
+                      >
+                        สร้างเอกสาร
+                      </MobileButton>
+                    )}
+                    <Text style={[s.small, muted]}>
+                      {generated
+                        ? "เอกสารตัวอย่างพร้อมลายเซ็นครบ 3 ฝ่าย"
+                        : complete
+                          ? "ลงนามครบแล้ว กดสร้างเอกสารเพื่อแปะลายเซ็นลง PDF ตัวอย่าง"
+                          : "เอกสารตัวอย่างเปิดดูได้ก่อนลงนาม เมื่อเซ็นครบ 3 ฝ่ายจึงสร้างเอกสารพร้อมลายเซ็นได้"}
+                    </Text>
+                  </View>
+                );
+              }
               const hasFile = !!slot.url;
               return hasFile && slot.url ? (
                 <MobileButton
@@ -700,49 +818,70 @@ export function ContractsScreen({
             </MobileButton>
           ) : null}
         </View>
-        <MobileBottomSheet
+        <Modal
           visible={previewDoc != null}
-          onClose={() => setPreviewDoc(null)}
-          maxHeight="90%"
-          sheetStyle={s.sheetPanel}
+          onRequestClose={() => setPreviewDoc(null)}
+          animationType="slide"
+          presentationStyle="fullScreen"
         >
-          <Text style={[s.sheetTitle, title]}>
-            {previewDoc
-              ? docs.previewTitle.replace("{name}", previewDoc.name)
-              : docs.preview}
-          </Text>
-          {previewDoc ? (
-            <ContractDocumentPreview url={previewDoc.url} />
-          ) : null}
-          {previewDoc ? (
-            <View style={s.previewActions}>
-              <MobileButton
-                disabled={busy}
-                isLoading={uploadingKind === previewDoc.kind}
-                onPress={replaceFromPreview}
-              >
-                {docs.replace.replace("{name}", previewDoc.name)}
-              </MobileButton>
-              <MobileButton
-                variant="outline"
-                disabled={busy}
-                onPress={() => {
-                  void openDocumentExternally(previewDoc.url);
+          <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+            <SafeAreaView
+              style={{ flex: 1, backgroundColor: theme.background }}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: 16,
+                  gap: 12,
                 }}
               >
-                {docs.openExternally}
-              </MobileButton>
-            </View>
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            android_ripple={{ color: `${accent}22` }}
-            onPress={() => setPreviewDoc(null)}
-            style={({ pressed }) => [s.sheetCancel, { opacity: pressed ? 0.6 : 1 }]}
-          >
-            <Text style={[s.sheetCancelLabel, muted]}>{t.common.cancel}</Text>
-          </Pressable>
-        </MobileBottomSheet>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="ปิดเอกสาร"
+                  onPress={() => setPreviewDoc(null)}
+                  style={{ padding: 8 }}
+                >
+                  <Text style={title}>ปิด</Text>
+                </Pressable>
+                <Text style={[s.sheetTitle, title]}>
+                  {previewDoc
+                    ? docs.previewTitle.replace("{name}", previewDoc.name)
+                    : docs.preview}
+                </Text>
+              </View>
+              {previewDoc ? (
+                <ContractDocumentPreview
+                  key={previewDoc.url}
+                  url={previewDoc.url}
+                />
+              ) : null}
+              {previewDoc ? (
+                <View style={[s.previewActions, { padding: 12 }]}>
+                  {previewDoc.kind !== "reservation_letter" && (
+                    <MobileButton
+                      disabled={busy}
+                      isLoading={uploadingKind === previewDoc.kind}
+                      onPress={replaceFromPreview}
+                    >
+                      {docs.replace.replace("{name}", previewDoc.name)}
+                    </MobileButton>
+                  )}
+                  <MobileButton
+                    variant="outline"
+                    disabled={busy}
+                    onPress={() => {
+                      void openDocumentExternally(previewDoc.url);
+                    }}
+                  >
+                    {docs.openExternally}
+                  </MobileButton>
+                </View>
+              ) : null}
+            </SafeAreaView>
+          </SafeAreaProvider>
+        </Modal>
         <MobileBottomSheet
           visible={viewSignature != null}
           onClose={() => setViewSignature(null)}
@@ -771,7 +910,10 @@ export function ContractsScreen({
             accessibilityRole="button"
             android_ripple={{ color: `${accent}22` }}
             onPress={() => setViewSignature(null)}
-            style={({ pressed }) => [s.sheetCancel, { opacity: pressed ? 0.6 : 1 }]}
+            style={({ pressed }) => [
+              s.sheetCancel,
+              { opacity: pressed ? 0.6 : 1 },
+            ]}
           >
             <Text style={[s.sheetCancelLabel, muted]}>{t.common.cancel}</Text>
           </Pressable>
@@ -784,22 +926,20 @@ export function ContractsScreen({
         >
           <Text style={[s.sheetTitle, title]}>{docs.pickSourceTitle}</Text>
           <Text style={[s.sheetHint, muted]}>{docs.pickSourceHint}</Text>
-          {(
-            [
-              {
-                source: "documents" as const,
-                icon: "note" as const,
-                label: docs.pickFromDocuments,
-                hint: docs.pickFromDocumentsHint,
-              },
-              {
-                source: "photos" as const,
-                icon: "camera" as const,
-                label: docs.pickFromPhotos,
-                hint: docs.pickFromPhotosHint,
-              },
-            ]
-          ).map((option) => (
+          {[
+            {
+              source: "documents" as const,
+              icon: "note" as const,
+              label: docs.pickFromDocuments,
+              hint: docs.pickFromDocumentsHint,
+            },
+            {
+              source: "photos" as const,
+              icon: "camera" as const,
+              label: docs.pickFromPhotos,
+              hint: docs.pickFromPhotosHint,
+            },
+          ].map((option) => (
             <Pressable
               key={option.source}
               accessibilityRole="button"
@@ -815,7 +955,12 @@ export function ContractsScreen({
               ]}
             >
               <View style={[s.sourceIcon, { backgroundColor: `${accent}18` }]}>
-                <MobileIcon name={option.icon} size={22} color={accent} weight="bold" />
+                <MobileIcon
+                  name={option.icon}
+                  size={22}
+                  color={accent}
+                  weight="bold"
+                />
               </View>
               <View style={s.sourceCopy}>
                 <Text style={[s.sourceLabel, title]}>{option.label}</Text>
@@ -828,7 +973,10 @@ export function ContractsScreen({
             accessibilityRole="button"
             android_ripple={{ color: `${accent}22` }}
             onPress={() => setPickKind(null)}
-            style={({ pressed }) => [s.sheetCancel, { opacity: pressed ? 0.6 : 1 }]}
+            style={({ pressed }) => [
+              s.sheetCancel,
+              { opacity: pressed ? 0.6 : 1 },
+            ]}
           >
             <Text style={[s.sheetCancelLabel, muted]}>{t.common.cancel}</Text>
           </Pressable>
@@ -844,7 +992,10 @@ export function ContractsScreen({
           </Text>
           <Text style={[s.sheetHint, muted]}>{docs.signHint}</Text>
           {!!error && signParties ? (
-            <Text accessibilityRole="alert" style={[s.body, { color: "#C74747", marginBottom: 8 }]}>
+            <Text
+              accessibilityRole="alert"
+              style={[s.body, { color: "#C74747", marginBottom: 8 }]}
+            >
               {error}
             </Text>
           ) : null}
@@ -912,41 +1063,90 @@ export function ContractsScreen({
         )}
       </View>
       {errorView}
-      <Text style={[s.subtitle, title]}>สัญญาที่สร้างแล้ว{!loadingList && !listError ? ` (${contracts.length})` : ''}</Text>
+      <Text style={[s.subtitle, title]}>
+        สัญญาที่สร้างแล้ว
+        {!loadingList && !listError ? ` (${contracts.length})` : ""}
+      </Text>
       {(loadingList || busy) && <ActivityIndicator color={accent} />}
-      {!!listError && <View style={[s.card, card]}>
-        <Text accessibilityRole="alert" style={[s.body, muted]}>{listError}</Text>
-        {button('ลองโหลดอีกครั้ง', () => setRetry(value => value + 1))}
-      </View>}
-      {!loadingList && !listError && contracts.map(contract => <Pressable
-        key={contract.id}
-        accessibilityRole="button"
-        accessibilityLabel={`ดู${contract.agreementTypeName} ${contract.contractNo}`}
-        disabled={busy}
-        onPress={async () => {
-          setBusy(true); setError(''); setNotice('');
-          try {
-            const latest = await getAgentContract(contract.id);
-            setSelected(latest);
-            setContracts(current => current.map(item => item.id === latest.id ? latest : item));
-          } catch (e) { setError(message(e)); }
-          finally { setBusy(false); }
-        }}
-        style={({ pressed }) => [s.card, card, { opacity: pressed || busy ? 0.65 : 1 }]}
-      >
-        <View style={s.row}>
-          <Text style={[s.subtitle, title]}>{contract.agreementTypeName}</Text>
-          <Text style={[s.badge, { color: color(contract.status), backgroundColor: `${color(contract.status)}15` }]}>{labels[contract.status]}</Text>
+      {!!listError && (
+        <View style={[s.card, card]}>
+          <Text accessibilityRole="alert" style={[s.body, muted]}>
+            {listError}
+          </Text>
+          {button("ลองโหลดอีกครั้ง", () => setRetry((value) => value + 1))}
         </View>
-        <Text style={[s.small, muted]}>{contract.contractNo}</Text>
-        <Text style={[s.body, title]}>{contract.property}{contract.room ? ` · ห้อง ${contract.room}` : ''}</Text>
-        <Text style={[s.small, muted]}>{date(contract.startDate)} – {date(contract.endDate)}</Text>
-        <View style={s.row}>
-          <Text style={[s.body, title]}>{contract.formKind === 'reservation' ? `เงินจอง ${money(contract.reservationFee)}` : `${money(contract.monthlyRent)} / เดือน`}</Text>
-          <Text style={[s.small, { color: accent }]}>ดูสัญญา →</Text>
-        </View>
-      </Pressable>)}
-      {!loadingList && !listError && !contracts.length && <Text style={[s.body, muted]}>ยังไม่มีสัญญาที่สร้างไว้</Text>}
+      )}
+      {!loadingList &&
+        !listError &&
+        contracts.map((contract) => (
+          <Pressable
+            key={contract.id}
+            accessibilityRole="button"
+            accessibilityLabel={`ดู${contract.agreementTypeName} ${contract.contractNo}`}
+            disabled={busy}
+            onPress={async () => {
+              setBusy(true);
+              setError("");
+              setNotice("");
+              try {
+                const latest = await getAgentContract(contract.id);
+                setSelected(latest);
+                setContracts((current) =>
+                  current.map((item) =>
+                    item.id === latest.id ? latest : item,
+                  ),
+                );
+              } catch (e) {
+                setError(message(e));
+              } finally {
+                setBusy(false);
+              }
+            }}
+            style={({ pressed }) => [
+              s.card,
+              card,
+              { opacity: pressed || busy ? 0.65 : 1 },
+            ]}
+          >
+            <View style={s.row}>
+              <Text style={[s.subtitle, title]}>
+                {contract.agreementTypeName}
+              </Text>
+              <Text
+                style={[
+                  s.badge,
+                  {
+                    color: color(contract.status),
+                    backgroundColor: `${color(contract.status)}15`,
+                  },
+                ]}
+              >
+                {labels[contract.status]}
+              </Text>
+            </View>
+            <Text style={[s.small, muted]}>{contract.contractNo}</Text>
+            <Text style={[s.body, title]}>
+              {contract.property}
+              {contract.room ? ` · ห้อง ${contract.room}` : ""}
+            </Text>
+            <Text style={[s.small, muted]}>
+              {contract.formKind === "reservation"
+                ? `วันที่จอง ${date(contract.bookingDate)} · วันที่เข้าอยู่ ${date(contract.moveInDate)}`
+                : `${date(contract.startDate)} – ${date(contract.endDate)}`}
+            </Text>
+            <View style={s.row}>
+              <Text style={[s.body, title]}>
+                {contract.formKind === "reservation"
+                  ? `เงินจอง ${money(contract.reservationFee)}`
+                  : `${money(contract.monthlyRent)} / เดือน`}
+              </Text>
+              <Text style={[s.small, { color: accent }]}>ดูสัญญา →</Text>
+            </View>
+          </Pressable>
+        ))}
+      {!loadingList && !listError && !contracts.length && (
+        <Text style={[s.body, muted]}>ยังไม่มีสัญญาที่สร้างไว้</Text>
+      )}
     </View>
   );
 }

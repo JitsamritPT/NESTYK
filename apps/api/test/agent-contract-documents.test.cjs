@@ -6,6 +6,9 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
 const { ContractDocumentStorageService } = require('../src/agent/contracts/contract-document-storage.service.ts');
 const { AgentContractsService } = require('../src/agent/contracts/agent-contracts.service.ts');
 const { AgentContractsController } = require('../src/agent/contracts/agent-contracts.controller.ts');
+const { createReservationMock, stampReservationSignatures } = require('../src/agent/contracts/reservation-pdf.ts');
+const { PDFDocument, PDFName, PDFDict } = require('pdf-lib');
+const sharp = require('sharp');
 const { LeaseContractEntity } = require('../src/entities/lease-contract.entity.ts');
 const { AuthService } = require('../src/auth/auth.service.ts');
 const { Module } = require('@nestjs/common');
@@ -28,7 +31,8 @@ function reservationRow(overrides = {}) {
     reservation_fee: '5000.00',
     status: 'draft',
     start_date: '2026-10-01',
-    end_date: '2026-10-15',
+    end_date: null,
+    move_in_date: '2026-10-15',
     monthly_rent: null,
     deposit: null,
     notes: null,
@@ -75,8 +79,8 @@ test('contract document storage accepts pdf jpeg png and signs private paths', a
   process.env.SUPABASE_URL = 'https://example.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
   const { storage, objects } = storageDouble();
-  const uploaded = await storage.upload(7, 11, 'reservation_letter', { buffer: pdf, size: pdf.length });
-  assert.match(uploaded.path, /^7\/11\/reservation_letter\/.+\.pdf$/);
+  const uploaded = await storage.upload(7, 11, 'invoice', { buffer: pdf, size: pdf.length });
+  assert.match(uploaded.path, /^7\/11\/invoice\/.+\.pdf$/);
   assert.equal([...objects.values()][0].contentType, 'application/pdf');
   await storage.upload(7, 11, 'invoice', { buffer: jpeg, size: jpeg.length });
   await storage.upload(7, 11, 'receipt', { buffer: png, size: png.length });
@@ -113,11 +117,12 @@ test('uploadDocument is limited to reservation contracts and persists the storag
   qb.getOne = async () => lease;
   await assert.rejects(() => service.uploadDocument(7, 11, 'invoice', { buffer: pdf, size: pdf.length }), error => error.getStatus() === 400 && /หนังสือจองห้อง/.test(error.message));
   qb.getOne = async () => row;
-  const result = await service.uploadDocument(7, 11, 'reservation_letter', { buffer: pdf, size: pdf.length });
+  await assert.rejects(() => service.uploadDocument(7, 11, 'reservation_letter', { buffer: pdf, size: pdf.length }), error => error.getStatus() === 400);
+  const result = await service.uploadDocument(7, 11, 'invoice', { buffer: pdf, size: pdf.length });
   assert.equal(updates[0][0].id, 11);
-  assert.match(updates[0][1].document_url, /^7\/11\/reservation_letter\//);
-  assert.match(result.reservationLetterUrl, /^https:\/\/signed\.example\/7\/11\/reservation_letter\//);
-  assert.equal(result.invoiceUrl, null);
+  assert.match(updates[0][1].invoice_url, /^7\/11\/invoice\//);
+  assert.match(result.invoiceUrl, /^https:\/\/signed\.example\/7\/11\/invoice\//);
+  assert.equal(result.reservationLetterUrl, null);
 });
 
 test('HTTP document upload requires an agent and forwards the file', async (t) => {
@@ -129,6 +134,7 @@ test('HTTP document upload requires an agent and forwards the file', async (t) =
   Module({ controllers: [AgentContractsController], providers: [
     { provide: AgentContractsService, useValue: {
       list: async () => [],
+      reservationPdf: async (agentId, id, generate) => ({ id, agentId, generate }),
       candidates: async () => [],
       create: async () => ({}),
       uploadDocument: async (agentId, id, kind, file) => {
@@ -145,7 +151,7 @@ test('HTTP document upload requires an agent and forwards the file', async (t) =
   await app.listen(0, '127.0.0.1');
   t.after(() => app.close());
   const base = await app.getUrl();
-  const path = `${base}/agent/contracts/11/documents/reservation_letter`;
+  const path = `${base}/agent/contracts/11/documents/invoice`;
   const upload = (auth) => {
     const body = new FormData();
     body.append('file', new Blob([pdf], { type: 'application/pdf' }), 'booking.pdf');
@@ -157,6 +163,116 @@ test('HTTP document upload requires an agent and forwards the file', async (t) =
   assert.equal(ok.status, 200);
   assert.equal(received[0].agentId, 7);
   assert.equal(received[0].id, 11);
-  assert.equal(received[0].kind, 'reservation_letter');
+  assert.equal(received[0].kind, 'invoice');
   assert.equal(received[0].size, pdf.length);
+  for (const route of ['reservation-preview', 'generate-reservation']) {
+    const url = `${base}/agent/contracts/11/${route}`;
+    assert.equal((await fetch(url, { method: 'POST' })).status, 401);
+    assert.equal((await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer dev|8|test@example.invalid' } })).status, 403);
+    const response = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer dev|7|test@example.invalid' } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { id: 11, agentId: 7, generate: route === 'generate-reservation' });
+  }
+
+});
+
+
+test('signed reservation preview requires all signatures and a server generated PDF', async () => {
+  const service = new AgentContractsService({});
+  const path = '7/11/generated/reservation_letter/mock-v2/example.pdf';
+  const signed = new Map([[path, 'https://signed.example/generated.pdf'], ['7/11/reservation_letter/legacy.pdf', 'https://signed.example/legacy.pdf']]);
+  const row = reservationRow({ document_url: path });
+  assert.equal(service.serialize(row, signed).reservationLetterStatus, 'awaiting_signatures');
+  assert.equal(service.serialize(row, signed).reservationLetterUrl, null);
+  assert.ok(!service.documentPaths(row).includes(path));
+  for (const party of ['owner', 'tenant', 'agent']) {
+    row[`${party}_signed_at`] = new Date();
+    row[`${party}_signature_url`] = `7/11/signatures/${party}.png`;
+  }
+  assert.equal(service.serialize(row, signed).reservationLetterStatus, 'ready');
+  assert.equal(service.serialize(row, signed).reservationLetterUrl, 'https://signed.example/generated.pdf');
+  row.document_url = '7/11/reservation_letter/legacy.pdf';
+  assert.equal(service.serialize(row, signed).reservationLetterStatus, 'ready_to_generate');
+  assert.equal(service.serialize(row, signed).reservationLetterUrl, null);
+  assert.ok(!service.documentPaths(row).includes(row.document_url));
+  row.document_url = null;
+  assert.equal(service.serialize(row, signed).reservationLetterStatus, 'ready_to_generate');
+  row.tenant_signature_url = null;
+  assert.equal(service.serialize(row, signed).reservationLetterStatus, 'awaiting_signatures');
+});
+
+test('storage rejects reservation uploads even when called directly', async () => {
+  const { storage, objects } = storageDouble();
+  await assert.rejects(() => storage.upload(7, 11, 'reservation_letter', { buffer: pdf, size: pdf.length }), error => error.getStatus() === 400);
+  assert.equal(objects.size, 0);
+});
+
+
+async function signaturePng() {
+  return sharp(Buffer.from('<svg width="240" height="100"><path d="M20 65 Q50 0 65 55 T110 50 Q140 10 150 65 L210 40" fill="none" stroke="#203854" stroke-width="4"/></svg>')).png().toBuffer();
+}
+function pdfHarness(overrides = {}) {
+  const row = reservationRow(overrides);
+  const qb = {};
+  for (const key of ['leftJoinAndSelect', 'where', 'andWhere', 'orderBy']) qb[key] = () => qb;
+  qb.getOne = async () => row;
+  const { storage, objects, cloud } = storageDouble();
+  cloud.download = async path => ({ data: objects.has(path) ? new Blob([objects.get(path).buffer]) : null, error: objects.has(path) ? null : new Error('missing') });
+  cloud.remove = async paths => { paths.forEach(path => objects.delete(path)); return { error: null }; };
+  const repo = { createQueryBuilder: () => qb, update: async (where, patch) => { Object.assign(row, patch); return { affected: 1 }; } };
+  return { row, storage, objects, repo, service: new AgentContractsService({ getRepository: () => repo }, storage) };
+}
+test('mock preview works before signing, generation stamps three images and persists once', async () => {
+  const h = pdfHarness();
+  const preview = await h.service.reservationPdf(7, 11, false);
+  assert.equal(preview.reservationLetterStatus, 'awaiting_signatures');
+  assert.match(preview.reservationLetterUrl, /mock\/reservation_letter/);
+  const draftPath = h.row.document_url;
+  const base = h.objects.get(draftPath).buffer;
+  assert.equal((await PDFDocument.load(base)).getPageCount(), 1);
+  await assert.rejects(() => h.service.reservationPdf(7, 11, true), error => error.getStatus() === 400);
+  assert.equal(h.row.document_url, draftPath);
+  const png = await signaturePng();
+  for (const party of ['owner', 'tenant', 'agent']) {
+    h.row[`${party}_signed_at`] = new Date();
+    const path = `7/11/signatures/${party}.png`;
+    h.row[`${party}_signature_url`] = path;
+    h.objects.set(path, { buffer: png });
+  }
+  const result = await h.service.reservationPdf(7, 11, true);
+  assert.equal(result.reservationLetterStatus, 'ready');
+  assert.match(result.reservationLetterUrl, /generated\/reservation_letter/);
+  const pdf = await PDFDocument.load(h.objects.get(h.row.document_url).buffer);
+  const resources = pdf.getPages()[0].node.Resources().lookup(PDFName.of('XObject'), PDFDict);
+  assert.equal(resources.keys().length, 3);
+  const count = h.objects.size;
+  assert.equal((await h.service.reservationPdf(7, 11, true)).reservationLetterUrl, result.reservationLetterUrl);
+  assert.equal(h.objects.size, count);
+  assert.equal((await h.service.reservationPdf(7, 11, false)).reservationLetterUrl, result.reservationLetterUrl);
+});
+
+test('PDF writes reject inaccessible or non-reservation contracts and clean up failed commits', async () => {
+  const h = pdfHarness({ agreement_type: { form_kind: 'lease' } });
+  await assert.rejects(() => h.service.reservationPdf(7, 11, false), error => error.getStatus() === 400);
+  h.repo.createQueryBuilder().getOne = async () => null;
+  await assert.rejects(() => h.service.reservationPdf(7, 11, false), error => error.getStatus() === 404);
+  const failure = pdfHarness();
+  failure.repo.update = async () => ({ affected: 0 });
+  await assert.rejects(() => failure.service.reservationPdf(7, 11, false), error => error.getStatus() === 409);
+  assert.equal(failure.objects.size, 0);
+  assert.equal(failure.row.document_url, null);
+});
+
+test('invalid signature leaves the original preview unchanged', async () => {
+  const h = pdfHarness();
+  await h.service.reservationPdf(7, 11, false);
+  const original = h.row.document_url;
+  for (const party of ['owner', 'tenant', 'agent']) {
+    h.row[`${party}_signed_at`] = new Date();
+    const path = `7/11/signatures/${party}.png`;
+    h.row[`${party}_signature_url`] = path;
+    h.objects.set(path, { buffer: Buffer.from('invalid') });
+  }
+  await assert.rejects(() => h.service.reservationPdf(7, 11, true), error => error.getStatus() === 400);
+  assert.equal(h.row.document_url, original);
 });

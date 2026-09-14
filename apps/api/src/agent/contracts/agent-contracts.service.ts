@@ -6,7 +6,12 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { DataSource } from "typeorm";
+import { DataSource, IsNull } from "typeorm";
+import {
+  MOCK_RESERVATION_VERSION,
+  createReservationMock,
+  stampReservationSignatures,
+} from "./reservation-pdf";
 import type {
   AgentContract,
   AgentContractDocumentKind,
@@ -73,9 +78,7 @@ export function validateSign(input: unknown): {
     )
   )
     throw new BadRequestException("ฝ่ายที่ลงนามไม่ถูกต้อง");
-  const parties = [
-    ...new Set(b.parties as AgentContractSignParty[]),
-  ];
+  const parties = [...new Set(b.parties as AgentContractSignParty[])];
   if (typeof b.signaturePng !== "string" || !b.signaturePng.trim())
     throw new BadRequestException("กรุณาวาดลายเซ็นก่อนยืนยัน");
   const raw = b.signaturePng.replace(/^data:image\/png;base64,/i, "");
@@ -107,7 +110,10 @@ export function validateContract(
     Number(b.leadId) > 2147483647
   )
     throw new BadRequestException("กรุณาเลือกผู้เช่า");
-  for (const key of ["startDate", "endDate"]) {
+  for (const key of [
+    "startDate",
+    formKind === "reservation" ? "moveInDate" : "endDate",
+  ]) {
     const value = b[key];
     if (
       typeof value !== "string" ||
@@ -118,7 +124,9 @@ export function validateContract(
     )
       throw new BadRequestException("วันที่ต้องเป็น ค.ศ. ในรูปแบบ YYYY-MM-DD");
   }
-  if (String(b.endDate) <= String(b.startDate))
+  if (formKind === "reservation" && String(b.moveInDate) < String(b.startDate))
+    throw new BadRequestException("วันที่เข้าอยู่ต้องไม่ก่อนวันที่จอง");
+  if (formKind === "lease" && String(b.endDate) <= String(b.startDate))
     throw new BadRequestException("วันสิ้นสุดต้องอยู่หลังวันเริ่มสัญญา");
   for (const key of formKind === "reservation"
     ? ["reservationFee"]
@@ -141,7 +149,9 @@ export function validateContract(
   return {
     leadId: Number(b.leadId),
     startDate: String(b.startDate),
-    endDate: String(b.endDate),
+    ...(formKind === "reservation"
+      ? { moveInDate: String(b.moveInDate) }
+      : { endDate: String(b.endDate) }),
     ...(formKind === "reservation"
       ? { reservationFee: Number(b.reservationFee) }
       : { monthlyRent: Number(b.monthlyRent), deposit: Number(b.deposit) }),
@@ -168,6 +178,30 @@ export class AgentContractsService {
       .leftJoinAndSelect("c.tenant", "tenant")
       .where("c.created_by_user_id = :agentId", { agentId });
   }
+  private reservationDocument(c: LeaseContractEntity) {
+    if (c.agreement_type?.form_kind !== "reservation") return null;
+    const complete = CONTRACT_SIGN_PARTIES.every(
+      (party) => c[SIGN_COLUMNS[party].at] && c[SIGN_COLUMNS[party].url],
+    );
+    const root = `${c.created_by_user_id}/${c.id}/`;
+    const generated =
+      c.document_url?.startsWith(
+        `${root}generated/reservation_letter/${MOCK_RESERVATION_VERSION}/`,
+      ) && c.document_url.endsWith(".pdf");
+    const mock =
+      c.document_url?.startsWith(
+        `${root}mock/reservation_letter/${MOCK_RESERVATION_VERSION}/`,
+      ) && c.document_url.endsWith(".pdf");
+    return {
+      status: complete
+        ? generated
+          ? ("ready" as const)
+          : ("ready_to_generate" as const)
+        : ("awaiting_signatures" as const),
+      path: (generated && complete) || mock ? c.document_url : null,
+    };
+  }
+
   private serialize(
     c: LeaseContractEntity,
     signed = new Map<string, string>(),
@@ -192,7 +226,14 @@ export class AgentContractsService {
         c.reservation_fee == null ? null : Number(c.reservation_fee),
       status: c.status,
       startDate: c.start_date,
-      endDate: c.end_date,
+      endDate:
+        c.agreement_type?.form_kind === "reservation" ? null : c.end_date,
+      bookingDate:
+        c.agreement_type?.form_kind === "reservation" ? c.start_date : null,
+      moveInDate:
+        c.agreement_type?.form_kind === "reservation"
+          ? (c.move_in_date ?? null)
+          : null,
       monthlyRent: c.monthly_rent == null ? null : Number(c.monthly_rent),
       deposit: c.deposit == null ? null : Number(c.deposit),
       notes: c.notes,
@@ -202,14 +243,15 @@ export class AgentContractsService {
       ownerSignatureUrl: url(c.owner_signature_url),
       tenantSignatureUrl: url(c.tenant_signature_url),
       agentSignatureUrl: url(c.agent_signature_url),
-      reservationLetterUrl: url(c.document_url),
+      reservationLetterUrl: url(this.reservationDocument(c)?.path),
+      reservationLetterStatus: this.reservationDocument(c)?.status ?? null,
       invoiceUrl: url(c.invoice_url),
       receiptUrl: url(c.receipt_url),
     };
   }
   private documentPaths(c: LeaseContractEntity) {
     return [
-      c.document_url,
+      this.reservationDocument(c)?.path,
       c.invoice_url,
       c.receipt_url,
       c.owner_signature_url,
@@ -219,15 +261,15 @@ export class AgentContractsService {
   }
   private async signedFor(rows: LeaseContractEntity[]) {
     if (!this.documents) return new Map<string, string>();
-    return this.documents.signPaths(rows.flatMap((row) => this.documentPaths(row)));
+    return this.documents.signPaths(
+      rows.flatMap((row) => this.documentPaths(row)),
+    );
   }
   async types() {
-    const rows = await this.db
-      .getRepository(MasterAgreementTypeEntity)
-      .find({
-        where: { is_active: true },
-        order: { sort_order: "ASC", id: "ASC" },
-      });
+    const rows = await this.db.getRepository(MasterAgreementTypeEntity).find({
+      where: { is_active: true },
+      order: { sort_order: "ASC", id: "ASC" },
+    });
     return rows.map((row) => ({
       code: row.code,
       nameTh: row.name_th,
@@ -246,23 +288,80 @@ export class AgentContractsService {
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
     return this.serialize(c, await this.signedFor([c]));
   }
+  async reservationPdf(agentId: number, id: number, generate: boolean) {
+    const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    if (c.agreement_type?.form_kind !== "reservation")
+      throw new BadRequestException("รองรับเฉพาะหนังสือจองห้อง");
+    const state = this.reservationDocument(c)!;
+    if (generate && state.status === "awaiting_signatures")
+      throw new BadRequestException(
+        "กรุณาลงนามให้ครบทั้ง 3 ฝ่ายก่อนสร้างเอกสาร",
+      );
+    if (!this.documents)
+      throw new ServiceUnavailableException(
+        "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
+      );
+    if (state.status === "ready" || (!generate && state.path))
+      return this.view(agentId, id);
+    const base = state.path
+      ? await this.documents.download(state.path)
+      : await createReservationMock(this.serialize(c));
+    let pdf = base;
+    if (generate) {
+      const signatures = await Promise.all(
+        CONTRACT_SIGN_PARTIES.map(async (party) => {
+          const path = c[SIGN_COLUMNS[party].url]!;
+          if (!path.startsWith(`${agentId}/${id}/signatures/`))
+            throw new BadRequestException("ไฟล์ลายเซ็นไม่ตรงกับสัญญา");
+          return this.documents!.download(path);
+        }),
+      );
+      try {
+        pdf = await stampReservationSignatures(base, signatures);
+      } catch {
+        throw new BadRequestException(
+          "ไม่สามารถอ่านภาพลายเซ็นเพื่อสร้าง PDF ได้",
+        );
+      }
+    }
+    const stored = await this.documents.uploadReservationPdf(
+      agentId,
+      id,
+      pdf,
+      generate,
+    );
+    try {
+      // Compare-and-swap prevents a slow preview from replacing a generated PDF.
+      const result = await this.db.getRepository(LeaseContractEntity).update(
+        {
+          id,
+          created_by_user_id: agentId,
+          document_url: c.document_url ?? IsNull(),
+        },
+        { document_url: stored.path },
+      );
+      if (result.affected !== 1)
+        throw new ConflictException("เอกสารถูกเปลี่ยนแล้ว กรุณาลองอีกครั้ง");
+    } catch (error) {
+      await this.documents.remove(stored.path).catch(() => undefined);
+      throw error;
+    }
+    return this.view(agentId, id);
+  }
   async uploadDocument(
     agentId: number,
     id: number,
     kind: string,
     file: { buffer: Buffer; size: number } | undefined,
   ) {
-    if (
-      !CONTRACT_DOCUMENT_KINDS.includes(kind as AgentContractDocumentKind)
-    )
+    if (!CONTRACT_DOCUMENT_KINDS.some((allowed) => allowed === kind))
       throw new BadRequestException("ชนิดเอกสารไม่ถูกต้อง");
     const documentKind = kind as AgentContractDocumentKind;
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
     if (c.agreement_type?.form_kind !== "reservation")
-      throw new BadRequestException(
-        "อัปโหลดเอกสารได้เฉพาะหนังสือจองห้อง",
-      );
+      throw new BadRequestException("อัปโหลดเอกสารได้เฉพาะหนังสือจองห้อง");
     if (!this.documents)
       throw new ServiceUnavailableException(
         "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
@@ -273,10 +372,12 @@ export class AgentContractsService {
       documentKind,
       file,
     );
-    await this.db.getRepository(LeaseContractEntity).update(
-      { id: c.id, created_by_user_id: agentId },
-      { [DOCUMENT_COLUMNS[documentKind]]: stored.path },
-    );
+    await this.db
+      .getRepository(LeaseContractEntity)
+      .update(
+        { id: c.id, created_by_user_id: agentId },
+        { [DOCUMENT_COLUMNS[documentKind]]: stored.path },
+      );
     return this.view(agentId, c.id);
   }
   async sign(agentId: number, id: number, input: unknown) {
@@ -286,8 +387,7 @@ export class AgentContractsService {
     if (CLOSED_STATUSES.includes(c.status as (typeof CLOSED_STATUSES)[number]))
       throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
     const pending = parties.filter((party) => !c[SIGN_COLUMNS[party].at]);
-    if (!pending.length)
-      throw new BadRequestException("ฝ่ายที่เลือกลงนามแล้ว");
+    if (!pending.length) throw new BadRequestException("ฝ่ายที่เลือกลงนามแล้ว");
     if (!this.documents)
       throw new ServiceUnavailableException(
         "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
@@ -319,10 +419,9 @@ export class AgentContractsService {
           ? "awaiting_agent_review"
           : "awaiting_signatures";
     }
-    await this.db.getRepository(LeaseContractEntity).update(
-      { id: c.id, created_by_user_id: agentId },
-      patch,
-    );
+    await this.db
+      .getRepository(LeaseContractEntity)
+      .update({ id: c.id, created_by_user_id: agentId }, patch);
     return this.view(agentId, c.id);
   }
   async candidates(agentId: number) {
@@ -399,8 +498,12 @@ export class AgentContractsService {
           closed: ["cancelled", "expired", "terminated"],
         })
         .andWhere(
-          "c.start_date <= :end AND (c.end_date IS NULL OR c.end_date >= :start)",
-          { start: b.startDate, end: b.endDate },
+          "(CAST(:end AS date) IS NULL OR (CASE WHEN agreementType.form_kind = 'reservation' THEN COALESCE(c.move_in_date, c.start_date) ELSE c.start_date END) <= :end) AND (agreementType.form_kind = 'reservation' OR c.end_date IS NULL OR c.end_date >= :start)",
+          {
+            start:
+              type.form_kind === "reservation" ? b.moveInDate : b.startDate,
+            end: type.form_kind === "reservation" ? null : b.endDate,
+          },
         )
         .getCount();
       if (overlap)
@@ -427,7 +530,8 @@ export class AgentContractsService {
           owner_user_id: room.owner_id,
           created_by_user_id: agentId,
           start_date: b.startDate,
-          end_date: b.endDate,
+          end_date: type.form_kind === "reservation" ? null : b.endDate,
+          move_in_date: type.form_kind === "reservation" ? b.moveInDate : null,
           agreement_type_code: type.code,
           reservation_fee:
             b.reservationFee == null ? null : b.reservationFee.toFixed(2),

@@ -82,14 +82,16 @@ test('HTTP endpoints require authentication and agent role', async t => {
 });
 
 test('reservation validates booking fee independently from rent and deposit', () => {
-  const body = { leadId: 1, agreementTypeCode: 'reservation', startDate: '2026-10-01', endDate: '2026-10-15', reservationFee: 5000 };
+  const body = { leadId: 1, agreementTypeCode: 'reservation', startDate: '2026-10-01', moveInDate: '2026-10-15', reservationFee: 5000 };
   const result = validateContract(body, 'reservation');
   assert.equal(result.reservationFee, 5000); assert.equal(result.monthlyRent, undefined); assert.equal(result.deposit, undefined);
   for (const reservationFee of [undefined, -1, 1.111, Infinity, '5000']) assert.throws(() => validateContract({...body, reservationFee}, 'reservation'));
 });
 test('reservation drafts persist their master code and booking fee without monthly rent', async () => {
   const f = fixture();
-  const c = await f.service.create(7, { leadId: 1, agreementTypeCode: 'reservation', startDate: '2026-10-01', endDate: '2026-10-15', reservationFee: 5000 });
+  const c = await f.service.create(7, { leadId: 1, agreementTypeCode: 'reservation', startDate: '2026-10-01', moveInDate: '2026-10-15', reservationFee: 5000 });
+  assert.equal(c.end_date, null); assert.equal(c.move_in_date, '2026-10-15');
+  assert.ok(f.calls.some(call => call[2]?.start === '2026-10-15' && call[2]?.end === null));
   assert.equal(c.agreement_type_code, 'reservation'); assert.equal(c.reservation_fee, '5000.00'); assert.equal(c.monthly_rent, null); assert.equal(c.deposit, null);
   assert.ok(f.calls.some(call => call[2]?.isLease === false));
 });
@@ -108,4 +110,24 @@ test('type catalog uses active master rows and preserves display order', async (
     return [{code:'reservation',name_th:'หนังสือจองห้อง',name_en:'Reservation',icon:'calendar',form_kind:'reservation'}];
   }})});
   assert.equal((await service.types())[0].nameTh, 'หนังสือจองห้อง');
+});
+
+
+test('reservation has a booking date and move-in date, allows same day and rejects missing or earlier move-in', () => {
+  const base = { leadId: 1, startDate: '2026-10-01', moveInDate: '2026-10-01', reservationFee: 5000 };
+  const result = validateContract(base, 'reservation');
+  assert.equal(result.moveInDate, base.startDate);
+  assert.equal(result.endDate, undefined);
+  for (const moveInDate of [undefined, '2026-09-30', '2026-02-30', '15/10/2026']) {
+    assert.throws(() => validateContract({...base, moveInDate}, 'reservation'));
+  }
+  assert.equal(validateContract({...base, endDate: '2030-01-01'}, 'reservation').endDate, undefined);
+});
+
+test('reservation DTO never exposes an expiry date', () => {
+  const service = new AgentContractsService({});
+  const dto = service.serialize({ id: 1, agreement_type: { form_kind: 'reservation' }, start_date: '2026-10-01', move_in_date: '2026-10-15', end_date: null });
+  assert.equal(dto.bookingDate, '2026-10-01');
+  assert.equal(dto.moveInDate, '2026-10-15');
+  assert.equal(dto.endDate, null);
 });

@@ -1,4 +1,4 @@
-import { getAgentContract } from '../lib/agent-contracts-api';
+import { getAgentContract } from "../lib/agent-contracts-api";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -72,13 +72,20 @@ export function AgentTenantsScreen({
 }: {
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
-  workFilter?: 'overdue_payment' | 'awaiting_signature' | 'renewal' | 'lead_follow_up' | null;
+  workFilter?:
+    | "overdue_payment"
+    | "awaiting_signature"
+    | "renewal"
+    | "lead_follow_up"
+    | null;
 } = {}) {
   const { theme } = useMobileTheme();
   const headerSearch = onSearchOpenChange != null;
   const [items, setItems] = useState<AgentTenant[]>([]);
   const [selected, setSelected] = useState<AgentTenant | null>(null);
-  const [initialContract, setInitialContract] = useState<AgentContract | null>(null);
+  const [initialContract, setInitialContract] = useState<AgentContract | null>(
+    null,
+  );
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState<"overview" | "contracts">("overview");
   const [tabsWidth, setTabsWidth] = useState(0);
@@ -101,7 +108,8 @@ export function AgentTenantsScreen({
   const [notice, setNotice] = useState("");
   useEffect(() => {
     if (workFilter === "awaiting_signature") setFilter("signing");
-    else if (workFilter === "renewal" || workFilter === "overdue_payment") setFilter("all");
+    else if (workFilter === "renewal" || workFilter === "overdue_payment")
+      setFilter("all");
   }, [workFilter]);
   const refreshVersion = useRef(0);
   const panel = { backgroundColor: theme.surface, borderColor: theme.border };
@@ -263,13 +271,19 @@ export function AgentTenantsScreen({
             {selected.room ? ` · ห้อง ${selected.room}` : ""}
           </Text>
         </View>
-        <View onLayout={(event) => setTabsWidth(event.nativeEvent.layout.width)} style={[s.tabs, { borderColor: theme.border }]}>
+        <View
+          onLayout={(event) => setTabsWidth(event.nativeEvent.layout.width)}
+          style={[s.tabs, { borderColor: theme.border }]}
+        >
           {(["overview", "contracts"] as const).map((key) => (
             <Pressable
               key={key}
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === key }}
-              onPress={() => { setInitialContract(null); setTab(key); }}
+              onPress={() => {
+                setInitialContract(null);
+                setTab(key);
+              }}
               style={s.tab}
             >
               <Text style={[s.body, tab === key ? title : muted]}>
@@ -281,10 +295,20 @@ export function AgentTenantsScreen({
           ))}
           <Animated.View
             pointerEvents="none"
-            style={[s.tabIndicator, {
-              width: tabsWidth / 2,
-              transform: [{ translateX: tabPosition.interpolate({ inputRange: [0, 1], outputRange: [0, tabsWidth / 2] }) }],
-            }]}
+            style={[
+              s.tabIndicator,
+              {
+                width: tabsWidth / 2,
+                transform: [
+                  {
+                    translateX: tabPosition.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, tabsWidth / 2],
+                    }),
+                  },
+                ],
+              },
+            ]}
           />
         </View>
         {tab === "contracts" ? (
@@ -332,10 +356,9 @@ export function AgentTenantsScreen({
                     {current.room ? ` · ห้อง ${current.room}` : ""}
                   </Text>
                   <Text style={[s.body, muted]}>
-                    {date(current.startDate)} –{" "}
-                    {current.endDate
-                      ? date(current.endDate)
-                      : "ไม่ระบุวันสิ้นสุด"}
+                    {current.formKind === "reservation"
+                      ? `วันที่จอง ${date(current.bookingDate ?? current.startDate)} · วันที่เข้าอยู่ ${current.moveInDate ? date(current.moveInDate) : "ยังไม่ระบุ"}`
+                      : `${date(current.startDate)} – ${current.endDate ? date(current.endDate) : "ไม่ระบุวันสิ้นสุด"}`}
                   </Text>
                   <Text style={[s.body, title]}>
                     {current.formKind === "reservation" ? "เงินจอง" : "ค่าเช่า"}{" "}
@@ -362,15 +385,26 @@ export function AgentTenantsScreen({
               {button(
                 current ? "ดูสัญญา" : "ไปสร้างสัญญา",
                 async () => {
-                  if (!current) { setInitialContract(null); setTab("contracts"); return; }
-                  setOpening(true); setError("");
+                  if (!current) {
+                    setInitialContract(null);
+                    setTab("contracts");
+                    return;
+                  }
+                  setOpening(true);
+                  setError("");
                   try {
                     const contract = await getAgentContract(current.id);
                     setInitialContract(contract);
                     setTab("contracts");
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : "โหลดสัญญาไม่สำเร็จ กรุณาลองอีกครั้ง");
-                  } finally { setOpening(false); }
+                    setError(
+                      e instanceof Error
+                        ? e.message
+                        : "โหลดสัญญาไม่สำเร็จ กรุณาลองอีกครั้ง",
+                    );
+                  } finally {
+                    setOpening(false);
+                  }
                 },
                 true,
                 opening,
@@ -387,7 +421,8 @@ export function AgentTenantsScreen({
   const visible = items.filter((t) => {
     if (filter !== "all" && stateOf(t) !== filter) return false;
     if (workFilter === "renewal" && !renewal(t)) return false;
-    if (workFilter === "awaiting_signature" && stateOf(t) !== "signing") return false;
+    if (workFilter === "awaiting_signature" && stateOf(t) !== "signing")
+      return false;
     return `${t.name} ${t.phone} ${t.property} ${t.room || ""} ${t.contracts.map((c) => `${c.property} ${c.room || ""} ${c.contractNo}`).join(" ")}`
       .toLowerCase()
       .includes(query.trim().toLowerCase());
@@ -404,19 +439,19 @@ export function AgentTenantsScreen({
         true,
       )}
       {(headerSearch ? searchOpen || !!query.trim() : true) ? (
-      <MobileInput
-        value={query}
-        onChangeText={setQuery}
-        placeholder="ค้นหาผู้เช่า โครงการ หรือเลขสัญญา"
-        autoFocus={headerSearch && searchOpen && !query.trim()}
-        onBlur={
-          headerSearch
-            ? () => {
-                if (!query.trim()) onSearchOpenChange?.(false);
-              }
-            : undefined
-        }
-      />
+        <MobileInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="ค้นหาผู้เช่า โครงการ หรือเลขสัญญา"
+          autoFocus={headerSearch && searchOpen && !query.trim()}
+          onBlur={
+            headerSearch
+              ? () => {
+                  if (!query.trim()) onSearchOpenChange?.(false);
+                }
+              : undefined
+          }
+        />
       ) : null}
       <View style={s.filters}>
         {(Object.keys(filters) as Filter[]).map((key) => (
@@ -620,5 +655,12 @@ const s = StyleSheet.create({
   },
   tabs: { flexDirection: "row", borderBottomWidth: 1 },
   tab: { flex: 1, alignItems: "center", padding: 12, paddingBottom: 15 },
-  tabIndicator: { position: "absolute", left: 0, bottom: 0, height: 3, borderRadius: 2, backgroundColor: "#FFBF19" },
+  tabIndicator: {
+    position: "absolute",
+    left: 0,
+    bottom: 0,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#FFBF19",
+  },
 });

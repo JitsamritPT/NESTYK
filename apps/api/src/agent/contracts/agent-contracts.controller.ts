@@ -45,6 +45,22 @@ export class AgentContractsController {
   @Post() create(@CurrentUser() user: AuthRequestUser, @Body() body: unknown) {
     return this.contracts.create(user.id, body);
   }
+  @Post(":id/reservation-preview")
+  @HttpCode(HttpStatus.OK)
+  reservationPreview(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.contracts.reservationPdf(user.id, id, false);
+  }
+  @Post(":id/generate-reservation")
+  @HttpCode(HttpStatus.OK)
+  generateReservation(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.contracts.reservationPdf(user.id, id, true);
+  }
   @Post(":id/sign")
   @HttpCode(HttpStatus.OK)
   sign(

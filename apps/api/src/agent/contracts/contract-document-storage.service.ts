@@ -3,13 +3,13 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
+import { MOCK_RESERVATION_VERSION } from "./reservation-pdf";
 import { randomUUID } from "crypto";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { AgentContractDocumentKind } from "@nestyk/types";
 
 export const MAX_CONTRACT_DOCUMENT_BYTES = 10 * 1024 * 1024;
 export const CONTRACT_DOCUMENT_KINDS = [
-  "reservation_letter",
   "invoice",
   "receipt",
 ] as const satisfies readonly AgentContractDocumentKind[];
@@ -66,7 +66,10 @@ export class ContractDocumentStorageService {
   }
 
   private sniff(buffer: Buffer) {
-    if (buffer.length >= 5 && buffer.subarray(0, 5).toString("latin1") === "%PDF-")
+    if (
+      buffer.length >= 5 &&
+      buffer.subarray(0, 5).toString("latin1") === "%PDF-"
+    )
       return { ext: "pdf", mime: "application/pdf" };
     if (
       buffer.length >= 3 &&
@@ -77,9 +80,9 @@ export class ContractDocumentStorageService {
       return { ext: "jpg", mime: "image/jpeg" };
     if (
       buffer.length >= 8 &&
-      buffer.subarray(0, 8).equals(
-        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      )
+      buffer
+        .subarray(0, 8)
+        .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
     )
       return { ext: "png", mime: "image/png" };
     throw new BadRequestException("อัปโหลดได้เฉพาะไฟล์ PDF, JPEG หรือ PNG");
@@ -91,6 +94,12 @@ export class ContractDocumentStorageService {
     kind: AgentContractDocumentKind,
     file: { buffer: Buffer; size: number } | undefined,
   ) {
+    if (
+      !CONTRACT_DOCUMENT_KINDS.includes(
+        kind as (typeof CONTRACT_DOCUMENT_KINDS)[number],
+      )
+    )
+      throw new BadRequestException("ใบจองสร้างโดยระบบ ไม่รองรับการอัปโหลด");
     if (!file?.buffer?.length)
       throw new BadRequestException("กรุณาเลือกไฟล์เอกสาร");
     if (file.buffer.length > MAX_CONTRACT_DOCUMENT_BYTES)
@@ -135,6 +144,45 @@ export class ContractDocumentStorageService {
         "บันทึกลายเซ็นไม่สำเร็จ กรุณาลองอีกครั้ง",
       );
     return { path: objectPath };
+  }
+
+  async download(path: string): Promise<Buffer> {
+    const { data, error } = await this.storage().download(path);
+    if (error || !data)
+      throw new ServiceUnavailableException(
+        "ไม่สามารถอ่านไฟล์เอกสารหรือลายเซ็นได้",
+      );
+    return Buffer.from(await data.arrayBuffer());
+  }
+
+  async remove(path: string) {
+    const { error } = await this.storage().remove([path]);
+    if (error)
+      throw new ServiceUnavailableException("ไม่สามารถลบไฟล์ชั่วคราวได้");
+  }
+
+  async uploadReservationPdf(
+    agentId: number,
+    contractId: number,
+    pdf: Buffer,
+    generated: boolean,
+  ) {
+    if (
+      this.sniff(pdf).mime !== "application/pdf" ||
+      pdf.length > MAX_CONTRACT_DOCUMENT_BYTES
+    )
+      throw new BadRequestException("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกิน 10 MB");
+    await this.ensureBucket();
+    const path = `${agentId}/${contractId}/${generated ? "generated" : "mock"}/reservation_letter/${MOCK_RESERVATION_VERSION}/${randomUUID()}.pdf`;
+    const { error } = await this.storage().upload(path, pdf, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "สร้างเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path };
   }
 
   async signPaths(paths: Array<string | null | undefined>) {

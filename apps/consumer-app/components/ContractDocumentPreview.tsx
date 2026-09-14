@@ -1,61 +1,79 @@
-import React from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { Image } from "expo-image";
 import { WebView } from "react-native-webview";
-import { tokens } from "@nestyk/ui/native";
-
-export function isPdfDocumentUrl(url: string) {
-  return url.split("?")[0].toLowerCase().endsWith(".pdf");
-}
+import { isPdfDocumentUrl, pdfViewerHtml } from "../lib/pdf-viewer/html";
+export { isPdfDocumentUrl } from "../lib/pdf-viewer/html";
 
 export function ContractDocumentPreview({ url }: { url: string }) {
-  if (isPdfDocumentUrl(url)) {
-    return (
-      <View style={styles.box}>
+  const html = useMemo(
+    () => (isPdfDocumentUrl(url) ? pdfViewerHtml(url) : null),
+    [url],
+  );
+  const [retry, setRetry] = useState(0);
+  return (
+    <View style={styles.box}>
+      {html ? (
         <WebView
-          source={{ uri: url }}
-          style={styles.webview}
-          nestedScrollEnabled
-          androidLayerType="software"
+          key={`${url}-${retry}`}
+          source={{ html }}
+          originWhitelist={["*"]}
+          onShouldStartLoadWithRequest={(request) =>
+            request.url === "about:blank" ||
+            request.url.startsWith("about:blank#")
+          }
+          setSupportMultipleWindows={false}
+          javaScriptCanOpenWindowsAutomatically={false}
+          style={styles.viewer}
           startInLoadingState
+          onMessage={() => {}}
           renderLoading={() => (
-            <View style={styles.loader}>
-              <ActivityIndicator color={tokens.colors.primary} />
+            <View style={styles.overlay}>
+              <ActivityIndicator />
+            </View>
+          )}
+          renderError={() => (
+            <View style={styles.overlay}>
+              <Text>ไม่สามารถเปิดเอกสารได้</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setRetry((value) => value + 1)}
+              >
+                <Text>ลองอีกครั้ง</Text>
+              </Pressable>
             </View>
           )}
         />
-      </View>
-    );
-  }
-  return (
-    <View style={styles.box}>
-      <Image source={{ uri: url }} style={styles.image} contentFit="contain" />
+      ) : (
+        <Image
+          source={{ uri: url }}
+          style={styles.image}
+          contentFit="contain"
+        />
+      )}
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   box: {
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-    borderRadius: 16,
+    flex: 1,
+    minHeight: 240,
+    backgroundColor: "#EEF2F5",
     overflow: "hidden",
-    backgroundColor: "#F8FAFC",
-    marginBottom: 8,
   },
-  webview: {
-    width: "100%",
-    height: 480,
-    backgroundColor: "#F8FAFC",
-  },
-  image: {
-    width: "100%",
-    height: 480,
-  },
-  loader: {
+  viewer: { flex: 1, backgroundColor: "#EEF2F5" },
+  image: { width: "100%", height: "100%" },
+  overlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F8FAFC",
+    gap: 16,
+    backgroundColor: "#EEF2F5",
   },
 });

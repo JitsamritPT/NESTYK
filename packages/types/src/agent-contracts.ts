@@ -30,6 +30,8 @@ export interface AgentContract {
   status: AgentContractStatus;
   startDate: string;
   endDate: string | null;
+  bookingDate: string | null;
+  moveInDate: string | null;
   monthlyRent: number | null;
   deposit: number | null;
   notes: string | null;
@@ -40,13 +42,13 @@ export interface AgentContract {
   tenantSignatureUrl: string | null;
   agentSignatureUrl: string | null;
   reservationLetterUrl: string | null;
+  reservationLetterStatus:
+    "awaiting_signatures" | "ready_to_generate" | "ready" | null;
   invoiceUrl: string | null;
   receiptUrl: string | null;
 }
 export type AgentContractDocumentKind =
-  | "reservation_letter"
-  | "invoice"
-  | "receipt";
+  "reservation_letter" | "invoice" | "receipt";
 export type AgentContractSignParty = "owner" | "tenant" | "agent";
 export interface SignAgentContract {
   parties: AgentContractSignParty[];
@@ -61,7 +63,8 @@ export interface ContractCandidate {
 export interface CreateAgentContract {
   leadId: number;
   startDate: string;
-  endDate: string;
+  endDate?: string;
+  moveInDate?: string;
   monthlyRent?: number;
   deposit?: number;
   reservationFee?: number;
