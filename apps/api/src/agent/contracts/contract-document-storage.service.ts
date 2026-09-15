@@ -10,6 +10,7 @@ import type { AgentContractDocumentKind } from "@nestyk/types";
 
 export const MAX_CONTRACT_DOCUMENT_BYTES = 10 * 1024 * 1024;
 export const CONTRACT_DOCUMENT_KINDS = [
+  "lease_agreement",
   "invoice",
   "receipt",
 ] as const satisfies readonly AgentContractDocumentKind[];
@@ -31,7 +32,12 @@ export class ContractDocumentStorageService {
         throw new ServiceUnavailableException(
           "ไม่สามารถตรวจสอบที่เก็บเอกสารสัญญาได้",
         );
-      if (data?.some((bucket) => bucket.name === this.bucket)) return;
+      const existing = data?.find((bucket) => bucket.name === this.bucket);
+      if (existing?.public)
+        throw new ServiceUnavailableException(
+          "ที่เก็บเอกสารต้องเป็น private เท่านั้น",
+        );
+      if (existing) return;
       const { error: createError } = await storage.createBucket(this.bucket, {
         public: false,
         fileSizeLimit: MAX_CONTRACT_DOCUMENT_BYTES,
@@ -118,6 +124,30 @@ export class ContractDocumentStorageService {
         "อัปโหลดเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
       );
     return { path: objectPath };
+  }
+
+  async uploadAttachment(
+    agentId: number,
+    contractId: number,
+    file: { buffer: Buffer; size: number } | undefined,
+  ) {
+    if (!file?.buffer?.length)
+      throw new BadRequestException("กรุณาเลือกไฟล์เอกสาร");
+    if (file.buffer.length > MAX_CONTRACT_DOCUMENT_BYTES)
+      throw new BadRequestException("ไฟล์ต้องไม่เกิน 10 MB");
+    const detected = this.sniff(file.buffer);
+    await this.ensureBucket();
+    const path = `${agentId}/${contractId}/attachments/${randomUUID()}.${detected.ext}`;
+    const { error } = await this.storage().upload(path, file.buffer, {
+      contentType: detected.mime,
+      upsert: false,
+      cacheControl: "0",
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "อัปโหลดเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path, mimeType: detected.mime, size: file.buffer.length };
   }
 
   async uploadSignature(

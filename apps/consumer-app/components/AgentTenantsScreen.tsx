@@ -10,7 +10,11 @@ import {
   View,
 } from "react-native";
 import { MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
-import type { AgentContract, AgentTenant } from "@nestyk/types";
+import type {
+  AgentContract,
+  AgentContractStatus,
+  AgentTenant,
+} from "@nestyk/types";
 import { getAgentTenant, listAgentTenants } from "../lib/agent-tenants-api";
 import { TenantForm } from "./TenantForm";
 import { ContractsScreen } from "./ContractsScreen";
@@ -64,6 +68,27 @@ const renewal = (t: AgentTenant) =>
     const days = daysLeft(c);
     return days != null && days >= 0 && days <= 30;
   });
+const contractLabels: Record<AgentContractStatus, string> = {
+  draft: "ฉบับร่าง",
+  awaiting_signatures: "รอลงนาม",
+  awaiting_agent_review: "รอตรวจสัญญา",
+  awaiting_payment: "รอชำระเงิน",
+  awaiting_payment_verification: "รอตรวจชำระเงิน",
+  active: "มีผลแล้ว",
+  cancelled: "ยกเลิก",
+  expired: "หมดอายุ",
+  terminated: "สิ้นสุดสัญญา",
+};
+const contractStatusColor = (status: AgentContractStatus) =>
+  status === "active"
+    ? "#278268"
+    : status.startsWith("awaiting")
+      ? "#BB7914"
+      : "#788193";
+const money = (value: number | null, suffix = "") =>
+  value == null
+    ? "ยังไม่ระบุ"
+    : `฿${value.toLocaleString("th-TH", { maximumFractionDigits: 2 })}${suffix}`;
 
 export function AgentTenantsScreen({
   searchOpen = false,
@@ -209,6 +234,21 @@ export function AgentTenantsScreen({
       );
     }
   }
+  async function openContract(contract: AgentContract) {
+    if (opening) return;
+    setOpening(true);
+    setError("");
+    try {
+      setInitialContract(await getAgentContract(contract.id));
+      setTab("contracts");
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "โหลดสัญญาไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    } finally {
+      setOpening(false);
+    }
+  }
   if (creating)
     return (
       <TenantForm
@@ -227,11 +267,110 @@ export function AgentTenantsScreen({
       />
     );
   if (selected) {
-    const current =
-      selected.contracts.find((c) => c.status === "active") ||
-      selected.contracts.find(
-        (c) => c.status === "draft" || c.status.startsWith("awaiting"),
-      );
+    const reservationContracts = [...selected.contracts]
+      .filter((c) => c.formKind === "reservation")
+      .sort((a, b) => b.id - a.id);
+    const leaseContracts = [...selected.contracts]
+      .filter((c) => c.formKind === "lease")
+      .sort((a, b) => b.id - a.id);
+    const renderDocumentCard = (
+      cardTitle: string,
+      items: AgentContract[],
+      emptyText: string,
+      createLabel: string,
+    ) => (
+      <View style={[s.card, panel]}>
+        <View style={s.row}>
+          <Text style={[s.subtitle, title]}>{cardTitle}</Text>
+          {items.length > 0 && (
+            <Text style={[s.small, muted]}>{items.length} ฉบับ</Text>
+          )}
+        </View>
+        {items.length === 0 ? (
+          <>
+            <Text style={[s.body, muted]}>{emptyText}</Text>
+            {button(
+              createLabel,
+              () => {
+                setInitialContract(null);
+                setTab("contracts");
+              },
+              true,
+              opening,
+            )}
+          </>
+        ) : (
+          items.map((contract, index) => {
+            const remaining = daysLeft(contract);
+            return (
+              <View
+                key={contract.id}
+                style={[
+                  s.contractItem,
+                  index > 0 && {
+                    borderTopWidth: 1,
+                    borderColor: theme.border,
+                  },
+                ]}
+              >
+                <View style={s.row}>
+                  <Text style={[s.body, title]}>
+                    {contract.agreementTypeName}
+                  </Text>
+                  <Text
+                    style={[
+                      s.badge,
+                      {
+                        color: contractStatusColor(contract.status),
+                        backgroundColor: `${contractStatusColor(contract.status)}15`,
+                      },
+                    ]}
+                  >
+                    {contractLabels[contract.status]}
+                  </Text>
+                </View>
+                <Text style={[s.small, muted]}>
+                  เลขที่สัญญา {contract.contractNo}
+                </Text>
+                <Text style={[s.body, title]}>
+                  {contract.property}
+                  {contract.room ? ` · ห้อง ${contract.room}` : ""}
+                </Text>
+                <Text style={[s.body, muted]}>
+                  {contract.formKind === "reservation"
+                    ? `วันที่จอง ${date(contract.bookingDate ?? contract.startDate)} · วันที่เข้าอยู่ ${contract.moveInDate ? date(contract.moveInDate) : "ยังไม่ระบุ"}`
+                    : `${date(contract.startDate)} – ${contract.endDate ? date(contract.endDate) : "ไม่ระบุวันสิ้นสุด"}`}
+                </Text>
+                <Text style={[s.body, title]}>
+                  {contract.formKind === "reservation" ? "เงินจอง" : "ค่าเช่า"}{" "}
+                  {money(
+                    contract.formKind === "reservation"
+                      ? contract.reservationFee
+                      : contract.monthlyRent,
+                    contract.formKind === "reservation" ? "" : " / เดือน",
+                  )}
+                </Text>
+                {remaining != null && remaining <= 30 && (
+                  <Text style={[s.small, { color: "#B57506" }]}>
+                    {remaining < 0
+                      ? "เลยวันสิ้นสุดตามสัญญา กรุณาตรวจสอบสถานะ"
+                      : `ครบกำหนดใน ${remaining} วัน`}
+                  </Text>
+                )}
+                {button(
+                  "ดูสัญญา",
+                  () => {
+                    void openContract(contract);
+                  },
+                  true,
+                  opening,
+                )}
+              </View>
+            );
+          })
+        )}
+      </View>
+    );
     return (
       <View style={s.root}>
         {button("← ผู้เช่าทั้งหมด", () => {
@@ -340,78 +479,20 @@ export function AgentTenantsScreen({
                 </View>
               ))}
             </View>
-            <View style={[s.card, panel]}>
-              <View style={s.row}>
-                <Text style={[s.subtitle, title]}>
-                  {current ? current.agreementTypeName : "พร้อมสร้างสัญญา"}
-                </Text>
-                {current && (
-                  <Text style={[s.small, muted]}>{current.contractNo}</Text>
-                )}
-              </View>
-              {current ? (
-                <>
-                  <Text style={[s.body, title]}>
-                    {current.property}
-                    {current.room ? ` · ห้อง ${current.room}` : ""}
-                  </Text>
-                  <Text style={[s.body, muted]}>
-                    {current.formKind === "reservation"
-                      ? `วันที่จอง ${date(current.bookingDate ?? current.startDate)} · วันที่เข้าอยู่ ${current.moveInDate ? date(current.moveInDate) : "ยังไม่ระบุ"}`
-                      : `${date(current.startDate)} – ${current.endDate ? date(current.endDate) : "ไม่ระบุวันสิ้นสุด"}`}
-                  </Text>
-                  <Text style={[s.body, title]}>
-                    {current.formKind === "reservation" ? "เงินจอง" : "ค่าเช่า"}{" "}
-                    {(current.formKind === "reservation"
-                      ? current.reservationFee
-                      : current.monthlyRent) == null
-                      ? "ยังไม่ระบุ"
-                      : `฿${(current.formKind === "reservation" ? current.reservationFee! : current.monthlyRent!).toLocaleString("th-TH")}${current.formKind === "reservation" ? "" : " / เดือน"}`}
-                  </Text>
-                  {daysLeft(current) != null && daysLeft(current)! <= 30 && (
-                    <Text style={[s.small, { color: "#B57506" }]}>
-                      {daysLeft(current)! < 0
-                        ? "เลยวันสิ้นสุดตามสัญญา กรุณาตรวจสอบสถานะ"
-                        : `ครบกำหนดใน ${daysLeft(current)} วัน`}
-                    </Text>
-                  )}
-                </>
-              ) : (
-                <Text style={[s.body, muted]}>
-                  ข้อมูลผู้เช่าพร้อมแล้ว เริ่มกำหนดระยะเวลาเช่า ค่าเช่า
-                  และเงินประกันได้เลย
-                </Text>
-              )}
-              {button(
-                current ? "ดูสัญญา" : "ไปสร้างสัญญา",
-                async () => {
-                  if (!current) {
-                    setInitialContract(null);
-                    setTab("contracts");
-                    return;
-                  }
-                  setOpening(true);
-                  setError("");
-                  try {
-                    const contract = await getAgentContract(current.id);
-                    setInitialContract(contract);
-                    setTab("contracts");
-                  } catch (e) {
-                    setError(
-                      e instanceof Error
-                        ? e.message
-                        : "โหลดสัญญาไม่สำเร็จ กรุณาลองอีกครั้ง",
-                    );
-                  } finally {
-                    setOpening(false);
-                  }
-                },
-                true,
-                opening,
-              )}
-            </View>
+            {renderDocumentCard(
+              "หนังสือจองห้อง",
+              reservationContracts,
+              "ยังไม่มีหนังสือจองห้อง เริ่มจองห้องให้ลูกค้าได้เลย",
+              "สร้างหนังสือจอง",
+            )}
+            {renderDocumentCard(
+              "สัญญาเช่า",
+              leaseContracts,
+              "ยังไม่มีสัญญาเช่า กำหนดระยะเวลาเช่าและค่าเช่าได้เลย",
+              "สร้างสัญญาเช่า",
+            )}
             <Text style={[s.small, muted, { textAlign: "center" }]}>
-              ทุกสัญญาของผู้เช่าคนนี้จะอยู่ในแท็บสัญญา
+              จัดการเอกสารเพิ่มเติมได้ในแท็บสัญญา
             </Text>
           </>
         )}
@@ -598,6 +679,7 @@ const s = StyleSheet.create({
     lineHeight: 20,
   },
   card: { borderWidth: 1, borderRadius: 17, padding: 16, gap: 15 },
+  contractItem: { gap: 8, paddingTop: 12 },
   person: { flexDirection: "row", alignItems: "center", gap: 12 },
   grow: { flex: 1, gap: 4, minWidth: 0 },
   row: {

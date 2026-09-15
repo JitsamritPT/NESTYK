@@ -1,12 +1,20 @@
+import { AgreementAttachmentsService } from "./agreement-attachments.service";
+import { PropertyEntity } from "../../entities/property.entity";
+import { AgreementTemplateEntity } from "../../entities/agreement-template.entity";
+import { PropertyOwnerEntity } from "../../entities/property-owner.entity";
+import { UserEntity } from "../../entities/user.entity";
+import { validateAgreementData } from "./agreement-data";
 import { MasterAgreementTypeEntity } from "../../entities/master-agreement-type.entity";
 import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Optional,
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { DataSource, IsNull } from "typeorm";
+import { createHash, randomBytes } from "crypto";
+import { DataSource, EntityManager, IsNull } from "typeorm";
 import {
   MOCK_RESERVATION_VERSION,
   createReservationMock,
@@ -18,6 +26,7 @@ import type {
   AgentContractSignParty,
   CreateAgentContract,
 } from "@nestyk/types";
+import { AgreementSignInviteEntity } from "../../entities/agreement-sign-invite.entity";
 import { LeaseContractEntity } from "../../entities/lease-contract.entity";
 import { LeadEntity } from "../../entities/lead.entity";
 import { TenantEntity } from "../../entities/tenant.entity";
@@ -28,11 +37,15 @@ import {
   ContractDocumentStorageService,
 } from "./contract-document-storage.service";
 
+const SIGN_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SHAREABLE_SIGN_PARTIES = ["owner", "tenant"] as const;
+
 const DOCUMENT_COLUMNS: Record<
   AgentContractDocumentKind,
   "document_url" | "invoice_url" | "receipt_url"
 > = {
   reservation_letter: "document_url",
+  lease_agreement: "document_url",
   invoice: "invoice_url",
   receipt: "receipt_url",
 };
@@ -61,6 +74,55 @@ const CLOSED_STATUSES = [
   "awaiting_payment_verification",
 ] as const;
 const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
+const CONTRACT_NO_PATTERN = /^(RS|LS)(\d{4})(\d{5})$/;
+
+export function contractNoPrefix(formKind: "reservation" | "lease") {
+  return formKind === "reservation" ? "RS" : "LS";
+}
+
+export function contractYear(date = new Date()) {
+  return Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+    }).format(date),
+  );
+}
+
+export function formatContractNo(
+  prefix: "RS" | "LS",
+  year: number,
+  seq: number,
+) {
+  if (!Number.isInteger(seq) || seq < 1 || seq > 99999)
+    throw new ConflictException("เลขที่สัญญาเต็มสำหรับปีนี้แล้ว");
+  return `${prefix}${year}${String(seq).padStart(5, "0")}`;
+}
+
+export function parseContractSeq(contractNo: string | null | undefined) {
+  const match = contractNo?.match(CONTRACT_NO_PATTERN);
+  return match ? Number(match[3]) : null;
+}
+
+export async function nextContractNo(
+  manager: EntityManager,
+  formKind: "reservation" | "lease",
+  at = new Date(),
+) {
+  const prefix = contractNoPrefix(formKind);
+  const year = contractYear(at);
+  const lockKey = (prefix === "RS" ? 700_000_000 : 800_000_000) + year;
+  await manager.query("SELECT pg_advisory_xact_lock($1)", [lockKey]);
+  const rows = (await manager.query(
+    `SELECT contract_no FROM lease_contracts
+     WHERE contract_no LIKE $1
+     ORDER BY contract_no DESC
+     LIMIT 1`,
+    [`${prefix}${year}%`],
+  )) as Array<{ contract_no: string }>;
+  const lastSeq = parseContractSeq(rows[0]?.contract_no) ?? 0;
+  return formatContractNo(prefix, year, lastSeq + 1);
+}
 
 export function validateSign(input: unknown): {
   parties: AgentContractSignParty[];
@@ -70,7 +132,7 @@ export function validateSign(input: unknown): {
     throw new BadRequestException("กรุณาระบุข้อมูลลายเซ็น");
   const b = input as Record<string, unknown>;
   if (!Array.isArray(b.parties) || !b.parties.length)
-    throw new BadRequestException("กรุณาเลือกฝ่ายที่ต้องการเซ็นแทน");
+    throw new BadRequestException("กรุณาเลือกฝ่ายที่ต้องการลงนาม");
   if (
     b.parties.some(
       (party) =>
@@ -167,6 +229,7 @@ export class AgentContractsService {
   constructor(
     private readonly db: DataSource,
     private readonly documents?: ContractDocumentStorageService,
+    @Optional() private readonly attachments?: AgreementAttachmentsService,
   ) {}
   private query(agentId: number) {
     return this.db
@@ -175,11 +238,15 @@ export class AgentContractsService {
       .leftJoinAndSelect("c.rent_room", "room")
       .leftJoinAndSelect("room.property", "property")
       .leftJoinAndSelect("c.agreement_type", "agreementType")
+      .leftJoinAndSelect("c.template", "template")
       .leftJoinAndSelect("c.tenant", "tenant")
       .where("c.created_by_user_id = :agentId", { agentId });
   }
   private reservationDocument(c: LeaseContractEntity) {
-    if (c.agreement_type?.form_kind !== "reservation") return null;
+    if (
+      (c.template?.form_kind ?? c.agreement_type?.form_kind) !== "reservation"
+    )
+      return null;
     const complete = CONTRACT_SIGN_PARTIES.every(
       (party) => c[SIGN_COLUMNS[party].at] && c[SIGN_COLUMNS[party].url],
     );
@@ -213,25 +280,41 @@ export class AgentContractsService {
       tenantId: c.tenant_id,
       leadId: c.lead_id,
       contractNo: c.contract_no || `EC-${c.id}`,
+      templateId: c.template_id ?? null,
+      templateVersion: c.template?.version ?? null,
+      agreementKind: c.agreement_kind ?? "new",
+      previousAgreementId: c.previous_agreement_id ?? null,
+      rootAgreementId: c.root_agreement_id ?? c.id,
+      data: c.data ?? {},
       property:
+        (c.party_snapshot?.property as string) ||
         c.rent_room?.property?.name ||
         c.rent_room?.listing_title ||
         "ไม่ระบุโครงการ",
-      room: c.rent_room?.room_id || null,
-      tenant: c.tenant?.name || "ไม่ระบุผู้เช่า",
+      room: (c.party_snapshot?.room as string) || c.rent_room?.room_id || null,
+      tenant:
+        (c.party_snapshot?.tenantName as string) ||
+        c.tenant?.name ||
+        "ไม่ระบุผู้เช่า",
       agreementTypeCode: c.agreement_type_code || "lease",
-      agreementTypeName: c.agreement_type?.name_th || "สัญญาเช่า",
-      formKind: c.agreement_type?.form_kind || "lease",
+      agreementTypeName:
+        c.template?.name || c.agreement_type?.name_th || "สัญญาเช่า",
+      formKind:
+        (c.template?.form_kind ?? c.agreement_type?.form_kind) || "lease",
       reservationFee:
         c.reservation_fee == null ? null : Number(c.reservation_fee),
       status: c.status,
       startDate: c.start_date,
       endDate:
-        c.agreement_type?.form_kind === "reservation" ? null : c.end_date,
+        (c.template?.form_kind ?? c.agreement_type?.form_kind) === "reservation"
+          ? null
+          : c.end_date,
       bookingDate:
-        c.agreement_type?.form_kind === "reservation" ? c.start_date : null,
+        (c.template?.form_kind ?? c.agreement_type?.form_kind) === "reservation"
+          ? c.start_date
+          : null,
       moveInDate:
-        c.agreement_type?.form_kind === "reservation"
+        (c.template?.form_kind ?? c.agreement_type?.form_kind) === "reservation"
           ? (c.move_in_date ?? null)
           : null,
       monthlyRent: c.monthly_rent == null ? null : Number(c.monthly_rent),
@@ -245,6 +328,10 @@ export class AgentContractsService {
       agentSignatureUrl: url(c.agent_signature_url),
       reservationLetterUrl: url(this.reservationDocument(c)?.path),
       reservationLetterStatus: this.reservationDocument(c)?.status ?? null,
+      leaseDocumentUrl:
+        (c.template?.form_kind ?? c.agreement_type?.form_kind) === "lease"
+          ? url(c.document_url)
+          : null,
       invoiceUrl: url(c.invoice_url),
       receiptUrl: url(c.receipt_url),
     };
@@ -252,6 +339,9 @@ export class AgentContractsService {
   private documentPaths(c: LeaseContractEntity) {
     return [
       this.reservationDocument(c)?.path,
+      (c.template?.form_kind ?? c.agreement_type?.form_kind) === "lease"
+        ? c.document_url
+        : null,
       c.invoice_url,
       c.receipt_url,
       c.owner_signature_url,
@@ -278,6 +368,34 @@ export class AgentContractsService {
       formKind: row.form_kind,
     }));
   }
+  async templates(code: string) {
+    const type = await this.db
+      .getRepository(MasterAgreementTypeEntity)
+      .findOneBy({ code, is_active: true });
+    if (!type) throw new NotFoundException("ไม่พบประเภทสัญญา");
+    const rows = await this.db.getRepository(AgreementTemplateEntity).find({
+      where: { agreement_type_code: code, is_active: true },
+      order: { version: "DESC" },
+    });
+    return rows.map((t) => ({
+      id: t.id,
+      agreementTypeCode: t.agreement_type_code,
+      version: t.version,
+      name: t.name,
+      formKind: t.form_kind,
+      dataSchema: t.data_schema,
+    }));
+  }
+  async history(agentId: number, id: number) {
+    const current = await this.view(agentId, id);
+    const rows = await this.query(agentId)
+      .andWhere("(c.root_agreement_id = :root OR c.id = :root)", {
+        root: current.rootAgreementId,
+      })
+      .orderBy("c.id", "ASC")
+      .getMany();
+    return rows.map((c) => this.serialize(c));
+  }
   async list(agentId: number) {
     const rows = await this.query(agentId).orderBy("c.id", "DESC").getMany();
     const signed = await this.signedFor(rows);
@@ -291,8 +409,15 @@ export class AgentContractsService {
   async reservationPdf(agentId: number, id: number, generate: boolean) {
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
-    if (c.agreement_type?.form_kind !== "reservation")
+    if (
+      (c.template?.form_kind ?? c.agreement_type?.form_kind) !== "reservation"
+    )
       throw new BadRequestException("รองรับเฉพาะหนังสือจองห้อง");
+    if (
+      c.template &&
+      c.template.document_template_key !== "reservation/mock-v2"
+    )
+      throw new BadRequestException("แม่แบบนี้ยังไม่รองรับการสร้างเอกสารจอง");
     const state = this.reservationDocument(c)!;
     if (generate && state.status === "awaiting_signatures")
       throw new BadRequestException(
@@ -360,8 +485,14 @@ export class AgentContractsService {
     const documentKind = kind as AgentContractDocumentKind;
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
-    if (c.agreement_type?.form_kind !== "reservation")
+    const formKind =
+      c.template?.form_kind ?? c.agreement_type?.form_kind ?? "lease";
+    if (documentKind === "lease_agreement") {
+      if (formKind !== "lease")
+        throw new BadRequestException("อัปโหลดสัญญาเช่าได้เฉพาะสัญญาเช่า");
+    } else if (formKind !== "reservation") {
       throw new BadRequestException("อัปโหลดเอกสารได้เฉพาะหนังสือจองห้อง");
+    }
     if (!this.documents)
       throw new ServiceUnavailableException(
         "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
@@ -386,6 +517,7 @@ export class AgentContractsService {
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
     if (CLOSED_STATUSES.includes(c.status as (typeof CLOSED_STATUSES)[number]))
       throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
+    if (this.attachments) await this.attachments.assertReady(c);
     const pending = parties.filter((party) => !c[SIGN_COLUMNS[party].at]);
     if (!pending.length) throw new BadRequestException("ฝ่ายที่เลือกลงนามแล้ว");
     if (!this.documents)
@@ -419,10 +551,202 @@ export class AgentContractsService {
           ? "awaiting_agent_review"
           : "awaiting_signatures";
     }
-    await this.db
-      .getRepository(LeaseContractEntity)
-      .update({ id: c.id, created_by_user_id: agentId }, patch);
+    try {
+      await this.db
+        .getRepository(LeaseContractEntity)
+        .update({ id: c.id, created_by_user_id: agentId }, patch);
+    } catch (error) {
+      await this.documents.remove(stored.path).catch(() => undefined);
+      if ((error as { code?: string }).code === "23514")
+        throw new BadRequestException(
+          "กรุณาแนบเอกสารที่จำเป็นให้ครบก่อนลงนาม",
+        );
+      throw error;
+    }
     return this.view(agentId, c.id);
+  }
+  private publicWebBase() {
+    return (
+      process.env.PUBLIC_WEB_URL ||
+      process.env.NEXT_PUBLIC_WEB_URL ||
+      process.env.WEB_URL ||
+      "http://localhost:3000"
+    ).replace(/\/$/, "");
+  }
+  private hashInviteToken(token: string) {
+    return createHash("sha256").update(token).digest("hex");
+  }
+  private async loadInvite(token: string) {
+    if (!token || token.length < 20 || token.length > 128)
+      throw new NotFoundException("ไม่พบลิงก์ลงนาม");
+    const invite = await this.db
+      .getRepository(AgreementSignInviteEntity)
+      .findOne({ where: { token_hash: this.hashInviteToken(token) } });
+    if (!invite || invite.revoked_at)
+      throw new NotFoundException("ไม่พบลิงก์ลงนาม");
+    if (invite.used_at)
+      throw new BadRequestException("ลิงก์นี้ใช้ลงนามแล้ว");
+    if (invite.expires_at.getTime() < Date.now())
+      throw new BadRequestException("ลิงก์ลงนามหมดอายุแล้ว");
+    const c = await this.db
+      .getRepository(LeaseContractEntity)
+      .createQueryBuilder("c")
+      .leftJoinAndSelect("c.rent_room", "room")
+      .leftJoinAndSelect("room.property", "property")
+      .leftJoinAndSelect("c.agreement_type", "agreementType")
+      .leftJoinAndSelect("c.template", "template")
+      .leftJoinAndSelect("c.tenant", "tenant")
+      .where("c.id = :id", { id: invite.agreement_id })
+      .getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    return { invite, c };
+  }
+  async createSignInvite(agentId: number, id: number, input: unknown) {
+    const party =
+      input &&
+      typeof input === "object" &&
+      !Array.isArray(input) &&
+      typeof (input as { party?: unknown }).party === "string"
+        ? (input as { party: string }).party
+        : "";
+    if (!SHAREABLE_SIGN_PARTIES.includes(party as "owner" | "tenant"))
+      throw new BadRequestException("แชร์ลิงก์ได้เฉพาะผู้เช่าหรือผู้ให้เช่า");
+    const shareParty = party as "owner" | "tenant";
+    const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    if (CLOSED_STATUSES.includes(c.status as (typeof CLOSED_STATUSES)[number]))
+      throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
+    if (c[SIGN_COLUMNS[shareParty].at])
+      throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
+    if (this.attachments) await this.attachments.assertReady(c);
+    const token = randomBytes(32).toString("base64url");
+    const expiresAt = new Date(Date.now() + SIGN_INVITE_TTL_MS);
+    await this.db.transaction(async (manager) => {
+      await manager
+        .createQueryBuilder()
+        .update(AgreementSignInviteEntity)
+        .set({ revoked_at: new Date() })
+        .where("agreement_id = :id", { id: c.id })
+        .andWhere("party = :party", { party: shareParty })
+        .andWhere("used_at IS NULL")
+        .andWhere("revoked_at IS NULL")
+        .execute();
+      await manager.getRepository(AgreementSignInviteEntity).save(
+        manager.getRepository(AgreementSignInviteEntity).create({
+          agreement_id: c.id,
+          party: shareParty,
+          token_hash: this.hashInviteToken(token),
+          expires_at: expiresAt,
+          used_at: null,
+          revoked_at: null,
+          created_by_user_id: agentId,
+        }),
+      );
+    });
+    return {
+      party: shareParty,
+      url: `${this.publicWebBase()}/sign/${token}`,
+      expiresAt: expiresAt.toISOString(),
+    };
+  }
+  async publicSignPreview(token: string) {
+    const { invite, c } = await this.loadInvite(token);
+    const alreadySigned = !!c[SIGN_COLUMNS[invite.party].at];
+    return {
+      party: invite.party,
+      partyLabel: invite.party === "owner" ? "ผู้ให้เช่า" : "ผู้เช่า",
+      contractNo: c.contract_no,
+      property:
+        c.rent_room?.property?.name ||
+        c.rent_room?.listing_title ||
+        "ไม่ระบุโครงการ",
+      room: c.rent_room?.room_id ?? null,
+      tenant: c.tenant?.name ?? "",
+      agreementTypeName: c.agreement_type?.name_th ?? c.agreement_type_code,
+      alreadySigned,
+      expiresAt: invite.expires_at.toISOString(),
+    };
+  }
+  async publicSign(token: string, input: unknown) {
+    const { invite, c } = await this.loadInvite(token);
+    if (CLOSED_STATUSES.includes(c.status as (typeof CLOSED_STATUSES)[number]))
+      throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
+    if (c[SIGN_COLUMNS[invite.party].at])
+      throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
+    if (this.attachments) await this.attachments.assertReady(c);
+    const { png } = validateSign({
+      parties: [invite.party],
+      signaturePng:
+        input &&
+        typeof input === "object" &&
+        !Array.isArray(input) &&
+        typeof (input as { signaturePng?: unknown }).signaturePng === "string"
+          ? (input as { signaturePng: string }).signaturePng
+          : "",
+    });
+    if (!this.documents)
+      throw new ServiceUnavailableException(
+        "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
+      );
+    const stored = await this.documents.uploadSignature(
+      c.created_by_user_id,
+      c.id,
+      { buffer: png, size: png.length },
+    );
+    const now = new Date();
+    const patch: {
+      owner_signed_at?: Date;
+      tenant_signed_at?: Date;
+      owner_signature_url?: string;
+      tenant_signature_url?: string;
+      status?: LeaseContractEntity["status"];
+    } = {
+      [SIGN_COLUMNS[invite.party].at]: now,
+      [SIGN_COLUMNS[invite.party].url]: stored.path,
+    };
+    const ownerAt =
+      invite.party === "owner" ? now : c.owner_signed_at;
+    const tenantAt =
+      invite.party === "tenant" ? now : c.tenant_signed_at;
+    const agentAt = c.agent_signed_at;
+    if (c.status === "draft" || c.status === "awaiting_signatures") {
+      patch.status =
+        ownerAt && tenantAt && agentAt
+          ? "awaiting_agent_review"
+          : "awaiting_signatures";
+    }
+    try {
+      await this.db.transaction(async (manager) => {
+        const locked = await manager.findOne(AgreementSignInviteEntity, {
+          where: { id: invite.id },
+          lock: { mode: "pessimistic_write" },
+        });
+        if (!locked || locked.revoked_at || locked.used_at)
+          throw new ConflictException("ลิงก์นี้ใช้ไม่ได้แล้ว");
+        if (locked.expires_at.getTime() < Date.now())
+          throw new BadRequestException("ลิงก์ลงนามหมดอายุแล้ว");
+        const current = await manager.findOneBy(LeaseContractEntity, {
+          id: c.id,
+        });
+        if (!current) throw new NotFoundException("ไม่พบสัญญา");
+        if (current[SIGN_COLUMNS[invite.party].at])
+          throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
+        await manager.update(LeaseContractEntity, { id: c.id }, patch);
+        await manager.update(
+          AgreementSignInviteEntity,
+          { id: invite.id },
+          { used_at: now },
+        );
+      });
+    } catch (error) {
+      await this.documents.remove(stored.path).catch(() => undefined);
+      if ((error as { code?: string }).code === "23514")
+        throw new BadRequestException(
+          "กรุณาแนบเอกสารที่จำเป็นให้ครบก่อนลงนาม",
+        );
+      throw error;
+    }
+    return { ok: true as const, party: invite.party };
   }
   async candidates(agentId: number) {
     const leads = await this.db
@@ -451,6 +775,8 @@ export class AgentContractsService {
     }));
   }
   async create(agentId: number, input: unknown) {
+    if (!input || typeof input !== "object" || Array.isArray(input))
+      throw new BadRequestException("กรุณาระบุข้อมูลสัญญา");
     const code =
       input && typeof input === "object"
         ? ((input as Record<string, unknown>).agreementTypeCode ?? "lease")
@@ -462,7 +788,35 @@ export class AgentContractsService {
       .findOneBy({ code, is_active: true });
     if (!type || !["lease", "reservation"].includes(type.form_kind))
       throw new BadRequestException("ประเภทสัญญานี้ยังไม่เปิดใช้งาน");
-    const b = validateContract(input, type.form_kind);
+    const raw = input as Record<string, unknown>;
+    for (const key of ["templateId", "previousAgreementId"]) {
+      if (
+        raw[key] != null &&
+        (!Number.isSafeInteger(raw[key]) ||
+          Number(raw[key]) < 1 ||
+          Number(raw[key]) > 2147483647)
+      )
+        throw new BadRequestException("รหัสแม่แบบหรือสัญญาอ้างอิงไม่ถูกต้อง");
+    }
+    const template = await this.db
+      .getRepository(AgreementTemplateEntity)
+      .findOne({
+        where: {
+          agreement_type_code: code,
+          is_active: true,
+          ...(raw.templateId != null ? { id: Number(raw.templateId) } : {}),
+        },
+        order: { version: "DESC" },
+      });
+    if (!template || template.form_kind !== type.form_kind)
+      throw new BadRequestException("ไม่พบแม่แบบสัญญาที่เปิดใช้งาน");
+    const b = validateContract(input, template.form_kind);
+    const data = validateAgreementData(
+      template.data_schema,
+      raw.data,
+      b,
+      template.form_kind,
+    );
     const id = await this.db.transaction(async (manager) => {
       const lead = await manager.findOne(LeadEntity, {
         where: { id: b.leadId, created_by_user_id: agentId },
@@ -484,21 +838,60 @@ export class AgentContractsService {
       });
       if (!tenant || !room)
         throw new NotFoundException("ไม่พบผู้เช่าหรือห้องที่คุณมีสิทธิ์จัดการ");
+      let previous: LeaseContractEntity | null = null;
+      if (raw.previousAgreementId != null) {
+        previous = await manager.findOne(LeaseContractEntity, {
+          where: {
+            id: Number(raw.previousAgreementId),
+            created_by_user_id: agentId,
+          },
+          lock: { mode: "pessimistic_write" },
+        });
+        if (!previous)
+          throw new NotFoundException("ไม่พบสัญญาที่ต้องการต่ออายุ");
+        const previousTemplate = await manager.findOneBy(
+          AgreementTemplateEntity,
+          { id: previous.template_id },
+        );
+        if (
+          template.form_kind !== "lease" ||
+          previousTemplate?.form_kind !== "lease" ||
+          !["active", "expired"].includes(previous.status) ||
+          previous.tenant_id !== tenant.id ||
+          previous.rent_room_id !== room.id ||
+          previous.lead_id !== lead.id ||
+          !previous.end_date ||
+          b.startDate <= previous.end_date
+        )
+          throw new BadRequestException(
+            "ต่ออายุได้เฉพาะสัญญาเช่าที่ใช้งานหรือหมดอายุ ผู้เช่าและห้องเดิม และเริ่มหลังวันสิ้นสุดเดิม",
+          );
+        const successor = await manager
+          .getRepository(LeaseContractEntity)
+          .createQueryBuilder("c")
+          .where("c.previous_agreement_id = :previousId", {
+            previousId: previous.id,
+          })
+          .andWhere("c.status <> 'cancelled'")
+          .getCount();
+        if (successor) throw new ConflictException("สัญญานี้มีฉบับต่ออายุแล้ว");
+      }
       const overlap = await manager
         .getRepository(LeaseContractEntity)
         .createQueryBuilder("c")
         .leftJoin("c.agreement_type", "agreementType")
+        .leftJoin("c.template", "contractTemplate")
         .where("c.rent_room_id = :roomId", { roomId: room.id })
         // A tenant's own reservation must not block their subsequent lease.
         .andWhere(
-          "NOT (agreementType.form_kind = 'reservation' AND c.tenant_id = :tenantId AND :isLease = TRUE)",
+          "NOT (COALESCE(contractTemplate.form_kind, agreementType.form_kind) = 'reservation' AND c.tenant_id = :tenantId AND :isLease = TRUE)",
           { tenantId: tenant.id, isLease: type.form_kind === "lease" },
         )
         .andWhere("c.status NOT IN (:...closed)", {
           closed: ["cancelled", "expired", "terminated"],
         })
         .andWhere(
-          "(CAST(:end AS date) IS NULL OR (CASE WHEN agreementType.form_kind = 'reservation' THEN COALESCE(c.move_in_date, c.start_date) ELSE c.start_date END) <= :end) AND (agreementType.form_kind = 'reservation' OR c.end_date IS NULL OR c.end_date >= :start)",
+          "(CAST(:end AS date) IS NULL OR (CASE WHEN COALESCE(contractTemplate.form_kind, agreementType.form_kind) = 'reservation' THEN COALESCE(c.move_in_date, c.start_date) ELSE c.start_date END) <= :end) AND (COALESCE(contractTemplate.form_kind, agreementType.form_kind) = 'reservation' OR c.end_date IS NULL OR c.end_date >= :start)",
           {
             start:
               type.form_kind === "reservation" ? b.moveInDate : b.startDate,
@@ -519,9 +912,47 @@ export class AgentContractsService {
           status: "prospect",
         }),
       );
+      const owner = room.property_owner_id
+        ? await manager.findOneBy(PropertyOwnerEntity, {
+            id: room.property_owner_id,
+            created_by_user_id: agentId,
+          })
+        : null;
+      const ownerUser = room.owner_id
+        ? await manager.findOneBy(UserEntity, { id: room.owner_id })
+        : null;
+      const property = await manager.findOneBy(PropertyEntity, {
+        id: room.properties_id,
+      });
+      const agent = await manager.findOneBy(UserEntity, { id: agentId });
+      const contractNo = await nextContractNo(manager, type.form_kind);
       const contract = await manager.save(
         LeaseContractEntity,
         manager.create(LeaseContractEntity, {
+          contract_no: contractNo,
+          template_id: template.id,
+          data,
+          party_snapshot: {
+            tenantName: tenant.name,
+            tenantPhone: tenant.phone,
+            tenantEmail: tenant.email,
+            ownerName:
+              owner?.name ??
+              (ownerUser
+                ? `${ownerUser.first_name} ${ownerUser.last_name}`.trim()
+                : null),
+            ownerPhone: owner?.phone ?? ownerUser?.phone ?? null,
+            agentName: agent
+              ? `${agent.first_name} ${agent.last_name}`.trim()
+              : null,
+            room: room.room_id,
+            property: property?.name ?? room.listing_title,
+          },
+          agreement_kind: previous ? "renewal" : "new",
+          previous_agreement_id: previous?.id ?? null,
+          root_agreement_id: previous
+            ? (previous.root_agreement_id ?? previous.id)
+            : null,
           lead_id: lead.id,
           tenant_id: tenant.id,
           rent_room_id: room.id,
@@ -541,6 +972,12 @@ export class AgentContractsService {
           status: "draft",
         }),
       );
+      if (!previous)
+        await manager.update(
+          LeaseContractEntity,
+          { id: contract.id },
+          { root_agreement_id: contract.id },
+        );
       return contract.id;
     });
     return this.view(agentId, id);

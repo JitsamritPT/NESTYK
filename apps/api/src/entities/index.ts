@@ -1,3 +1,8 @@
+import { MasterDocumentTypeEntity, AgreementDocumentRequirementEntity, AgreementDocumentEntity } from "./agreement-document.entity";
+import { AgreementTemplateEntity } from "./agreement-template.entity";
+export * from "./agreement-template.entity";
+export * from "./agreement-sign-invite.entity";
+import { AgreementSignInviteEntity } from "./agreement-sign-invite.entity";
 import { MasterAgreementTypeEntity } from './master-agreement-type.entity';
 export * from './base.entity';
 export * from './user.entity';
@@ -56,6 +61,9 @@ import { LeaseContractEntity } from './lease-contract.entity';
 
 /** All blueprint tables (docs/new-project) — public schema via DATABASE_URL */
 export const ALL_ENTITIES = [
+  MasterDocumentTypeEntity, AgreementDocumentRequirementEntity, AgreementDocumentEntity,
+  AgreementTemplateEntity,
+  AgreementSignInviteEntity,
   MasterAgreementTypeEntity,
   UserEntity,
   MasterRoleEntity,

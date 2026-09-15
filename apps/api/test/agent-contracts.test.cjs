@@ -3,8 +3,12 @@ const assert = require('node:assert/strict');
 const ts = require('typescript');
 require('reflect-metadata');
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(require('node:fs').readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true }, fileName: filename }).outputText, filename);
-const { AgentContractsService, validateContract } = require('../src/agent/contracts/agent-contracts.service.ts');
+const { AgentContractsService, validateContract, formatContractNo, parseContractSeq, contractNoPrefix, contractYear } = require('../src/agent/contracts/agent-contracts.service.ts');
 const { AgentContractsController } = require('../src/agent/contracts/agent-contracts.controller.ts');
+const { AgreementTemplateEntity } = require('../src/entities/agreement-template.entity.ts');
+const { LeaseContractEntity } = require('../src/entities/lease-contract.entity.ts');
+const { TenantEntity } = require('../src/entities/tenant.entity.ts');
+const { validateAgreementData } = require('../src/agent/contracts/agreement-data.ts');
 const { LeadEntity } = require('../src/entities/lead.entity.ts');
 const { RentRoomEntity } = require('../src/entities/rent-room.entity.ts');
 const { RoomTenancyEntity } = require('../src/entities/room-tenancy.entity.ts');
@@ -18,31 +22,48 @@ test('validates actual calendar dates, financial precision and required fields',
   for (const patch of [{ leadId: 0 }, { leadId: '1' }, { startDate: '2026-02-30' }, { startDate: '01/10/2026' }, { endDate: '2026-10-01' }, { monthlyRent: 0 }, { monthlyRent: 1.111 }, { deposit: -1 }, { deposit: Infinity }, { notes: 7 }]) assert.throws(() => validateContract({ ...valid, ...patch }));
   assert.equal(validateContract({ ...valid, startDate: '2024-02-29', deposit: 0 }).deposit, 0);
 });
-function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false } = {}) {
+test('formats standard contract numbers for reservation and lease', () => {
+  assert.equal(contractNoPrefix('reservation'), 'RS');
+  assert.equal(contractNoPrefix('lease'), 'LS');
+  assert.equal(formatContractNo('LS', 2026, 1), 'LS202600001');
+  assert.equal(formatContractNo('RS', 2026, 42), 'RS202600042');
+  assert.equal(parseContractSeq('LS202600007'), 7);
+  assert.equal(parseContractSeq('EC-11'), null);
+  assert.equal(typeof contractYear(), 'number');
+});
+function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0 } = {}) {
   const saved = []; const calls = []; let rolledBack = false;
   const qb = {};
   for (const key of ['leftJoin', 'where', 'andWhere']) qb[key] = (...args) => { calls.push([key, ...args]); return qb; };
-  qb.getCount = async () => overlap;
+  qb.getCount = async () => calls.at(-1)?.[1] === "c.status <> 'cancelled'" ? successor : overlap;
   const manager = {
     findOne: async (entity, options) => {
       calls.push(['findOne', entity.name, options]);
       assert.equal(options.where.created_by_user_id, 7);
       assert.equal(options.lock.mode, 'pessimistic_write');
+      if (entity === LeaseContractEntity) return previous;
       if (entity === LeadEntity) return { id: 1, status, tenant_id: 2, rent_room_id: 3 };
       if (entity === RentRoomEntity) return foreignRoom ? null : { id: 3, property_owner_id: 4, owner_id: 5 };
     },
-    findOneBy: async (_, options) => { assert.deepEqual(options, { id: 2, lead_id: 1, created_by_user_id: 7 }); return { id: 2 }; },
+    findOneBy: async (entity, options) => { if (entity === AgreementTemplateEntity) return { form_kind: previous?.form_kind ?? 'lease' }; if (entity !== TenantEntity) return null; assert.deepEqual(options, { id: 2, lead_id: 1, created_by_user_id: 7 }); return { id: 2, name: 'Original tenant' }; },
+    update: async (_, where, patch) => Object.assign(saved.find(row => row.id === where.id), patch),
     getRepository: () => ({ createQueryBuilder: () => qb }),
+    query: async (sql) => {
+      if (String(sql).includes('pg_advisory_xact_lock')) return [];
+      if (String(sql).includes('contract_no')) return [];
+      return [];
+    },
     create: (_, data) => data,
     save: async (entity, data) => { if (failSave && entity !== RoomTenancyEntity) throw Error('database failure'); const row = { id: saved.length + 10, ...data }; saved.push(row); return row; },
   };
-  const service = new AgentContractsService({ getRepository: () => ({ findOneBy: async ({code}) => ({ code, form_kind: code === 'reservation' ? 'reservation' : 'lease' }) }), transaction: async fn => { try { return await fn(manager); } catch (e) { saved.length = 0; rolledBack = true; throw e; } } });
+  const service = new AgentContractsService({ getRepository: () => ({ findOneBy: async ({code}) => ({ code, form_kind: code === 'reservation' ? 'reservation' : 'lease' }), findOne: async ({where}) => ({id: 1, version: 1, form_kind: where.agreement_type_code === 'reservation' ? 'reservation' : 'lease', data_schema: {type:'object'}}) }), transaction: async fn => { try { return await fn(manager); } catch (e) { saved.length = 0; rolledBack = true; throw e; } } });
   service.view = async (agentId, id) => { assert.equal(agentId, 7); return saved.find(c => c.id === id); };
   return { service, saved, calls, rolledBack: () => rolledBack };
 }
 test('creates tenancy and draft using server-owned identity and locked room', async () => {
   const f = fixture(); const c = await f.service.create(7, { ...valid, status: 'active', created_by_user_id: 99, tenantId: 99 });
   assert.equal(c.status, 'draft'); assert.equal(c.created_by_user_id, 7); assert.equal(c.tenant_id, 2); assert.equal(c.room_tenancy_id, 10); assert.equal(c.monthly_rent, '15000.00');
+  assert.match(c.contract_no, /^LS\d{4}\d{5}$/);
   assert.equal(f.saved[0].status, 'prospect');
   assert.ok(f.calls.some(c => c[0] === 'andWhere' && c[1].includes('c.end_date >= :start')));
 });
@@ -91,6 +112,7 @@ test('reservation drafts persist their master code and booking fee without month
   const f = fixture();
   const c = await f.service.create(7, { leadId: 1, agreementTypeCode: 'reservation', startDate: '2026-10-01', moveInDate: '2026-10-15', reservationFee: 5000 });
   assert.equal(c.end_date, null); assert.equal(c.move_in_date, '2026-10-15');
+  assert.match(c.contract_no, /^RS\d{4}\d{5}$/);
   assert.ok(f.calls.some(call => call[2]?.start === '2026-10-15' && call[2]?.end === null));
   assert.equal(c.agreement_type_code, 'reservation'); assert.equal(c.reservation_fee, '5000.00'); assert.equal(c.monthly_rent, null); assert.equal(c.deposit, null);
   assert.ok(f.calls.some(call => call[2]?.isLease === false));
@@ -130,4 +152,58 @@ test('reservation DTO never exposes an expiry date', () => {
   assert.equal(dto.bookingDate, '2026-10-01');
   assert.equal(dto.moveInDate, '2026-10-15');
   assert.equal(dto.endDate, null);
+});
+
+const original = { id: 20, template_id: 1, tenant_id: 2, rent_room_id: 3, lead_id: 1, status: 'active', end_date: '2026-09-30', root_agreement_id: 20 };
+test('renewal is a fresh draft linked to predecessor and root, with independent terms and no signatures', async () => {
+  const f = fixture({ previous: original });
+  const c = await f.service.create(7, {...valid, previousAgreementId: 20});
+  assert.equal(c.agreement_kind, 'renewal'); assert.equal(c.previous_agreement_id, 20); assert.equal(c.root_agreement_id, 20);
+  assert.equal(c.status, 'draft'); assert.equal(c.owner_signed_at, undefined);
+  assert.equal(c.template_id, 1); assert.equal(c.data.monthlyRent, 15000);
+  assert.equal(c.party_snapshot.tenantName, 'Original tenant');
+  assert.equal(original.status, 'active');
+});
+test('second renewal retains original root', async () => {
+  const f = fixture({ previous: {...original, id: 21} });
+  const c = await f.service.create(7, {...valid, previousAgreementId: 21});
+  assert.equal(c.previous_agreement_id, 21); assert.equal(c.root_agreement_id, 20);
+});
+test('renewal rejects missing/foreign originals, mismatched parties, invalid dates, reservation and duplicate successors', async () => {
+  for (const previous of [null, {...original, tenant_id: 99}, {...original, rent_room_id: 99}, {...original, lead_id: 99}, {...original, status:'draft'}, {...original, end_date:null}, {...original, end_date:valid.startDate}, {...original, form_kind:'reservation'}]) {
+    const f = fixture({ previous });
+    await assert.rejects(() => f.service.create(7, {...valid, previousAgreementId:20})); assert.equal(f.saved.length, 0);
+  }
+  const f = fixture({previous: original, successor: 1});
+  await assert.rejects(() => f.service.create(7, {...valid, previousAgreementId:20}), e => e.getStatus() === 409);
+});
+test('template data validates required custom fields and prevents overriding operational terms', () => {
+  const schema = {type:'object', required:['guarantor'], properties:{guarantor:{type:'string',minLength:1}, monthlyRent:{type:'number',minimum:1}}};
+  assert.throws(() => validateAgreementData(schema, {}, valid, 'lease'));
+  assert.throws(() => validateAgreementData(schema, {guarantor:3}, valid, 'lease'));
+  const data = validateAgreementData(schema, {guarantor:'A', monthlyRent:1}, valid, 'lease');
+  assert.equal(data.monthlyRent,15000); assert.equal(data.guarantor,'A');
+});
+test('root contract points to itself and DTO uses frozen tenant identity and template label', async () => {
+  const f = fixture(); const c = await f.service.create(7, valid);
+  assert.equal(c.root_agreement_id, c.id);
+  const dto = f.service.serialize({...c, template:{version:1,name:'Lease v1',form_kind:'lease'}, tenant:{name:'Changed'}});
+  assert.equal(dto.tenant,'Original tenant'); assert.equal(dto.agreementTypeName,'Lease v1');
+});
+
+test('template catalog filters active versions and orders newest first', async () => {
+  const service = new AgentContractsService({getRepository: entity => entity === AgreementTemplateEntity
+    ? {find: async options => {assert.deepEqual(options.where,{agreement_type_code:'lease',is_active:true}); assert.deepEqual(options.order,{version:'DESC'});return [{id:2,agreement_type_code:'lease',version:2,name:'Lease v2',form_kind:'lease',data_schema:{type:'object'}}];}}
+    : {findOneBy: async () => ({code:'lease'})}});
+  assert.equal((await service.templates('lease'))[0].version,2);
+});
+test('invalid template and predecessor IDs are rejected', async () => {
+  for (const patch of [{templateId:0},{templateId:'1'},{previousAgreementId:-1},{previousAgreementId:1.1}]) {
+    const f = fixture(); await assert.rejects(()=>f.service.create(7,{...valid,...patch}),e=>e.getStatus()===400); assert.equal(f.saved.length,0);
+  }
+});
+
+test('create rejects non-object bodies before loading a template', async () => {
+  const f = fixture();
+  for (const input of [null, undefined, [], 'lease', 1]) await assert.rejects(()=>f.service.create(7,input), e=>e.getStatus()===400);
 });

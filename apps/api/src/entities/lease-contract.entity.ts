@@ -1,3 +1,4 @@
+import { AgreementTemplateEntity } from "./agreement-template.entity";
 import { MasterAgreementTypeEntity } from "./master-agreement-type.entity";
 import { Entity, Column, ManyToOne, JoinColumn } from "typeorm";
 import { SerialTimestampEntity } from "./base.entity";
@@ -21,6 +22,26 @@ export type LeaseContractStatus =
 
 @Entity({ name: "lease_contracts" })
 export class LeaseContractEntity extends SerialTimestampEntity {
+  @Column({ type: "int" }) template_id: number;
+  @ManyToOne(() => AgreementTemplateEntity, { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "template_id" })
+  template: AgreementTemplateEntity;
+  @Column({ type: "jsonb", default: {} }) data: Record<string, unknown>;
+  @Column({ type: "jsonb", default: {} }) party_snapshot: Record<
+    string,
+    unknown
+  >;
+  @Column({ type: "varchar", length: 16, default: "new" }) agreement_kind:
+    "new" | "renewal";
+  @Column({ type: "int", nullable: true }) previous_agreement_id: number | null;
+  @Column({ type: "int", nullable: true }) root_agreement_id: number | null;
+  @ManyToOne(() => LeaseContractEntity, { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "previous_agreement_id" })
+  previous_agreement: LeaseContractEntity | null;
+  @ManyToOne(() => LeaseContractEntity, { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "root_agreement_id" })
+  root_agreement: LeaseContractEntity | null;
+
   @Column({ type: "varchar", length: 64, default: "lease" })
   agreement_type_code: string;
 

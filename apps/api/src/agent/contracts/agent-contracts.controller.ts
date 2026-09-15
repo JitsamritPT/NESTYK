@@ -30,6 +30,15 @@ export class AgentContractsController {
   @Get("types") types() {
     return this.contracts.types();
   }
+  @Get("types/:code/templates") templates(@Param("code") code: string) {
+    return this.contracts.templates(code);
+  }
+  @Get(":id/history") history(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.contracts.history(user.id, id);
+  }
   @Get("candidates") candidates(@CurrentUser() user: AuthRequestUser) {
     return this.contracts.candidates(user.id);
   }
@@ -69,6 +78,15 @@ export class AgentContractsController {
     @Body() body: unknown,
   ) {
     return this.contracts.sign(user.id, id, body);
+  }
+  @Post(":id/sign-invites")
+  @HttpCode(HttpStatus.OK)
+  createSignInvite(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: unknown,
+  ) {
+    return this.contracts.createSignInvite(user.id, id, body);
   }
   @Post(":id/documents/:kind")
   @HttpCode(HttpStatus.OK)

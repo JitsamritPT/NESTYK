@@ -90,14 +90,20 @@ test('contract document storage accepts pdf jpeg png and signs private paths', a
   await assert.rejects(() => storage.upload(7, 11, 'invoice', undefined), error => error.getStatus() === 400);
 });
 
-test('uploadDocument is limited to reservation contracts and persists the storage path', async () => {
+test('uploadDocument supports reservation invoice and lease agreement uploads', async () => {
   const { storage } = storageDouble();
   process.env.SUPABASE_URL = 'https://example.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
-  const row = reservationRow();
+  const reservation = reservationRow();
+  const lease = reservationRow({
+    agreement_type_code: 'lease',
+    agreement_type: { name_th: 'สัญญาเช่า', form_kind: 'lease' },
+    document_url: null,
+  });
+  let current = reservation;
   const qb = {};
   for (const key of ['leftJoinAndSelect', 'where', 'andWhere', 'orderBy']) qb[key] = () => qb;
-  qb.getOne = async () => row;
+  qb.getOne = async () => current;
   const updates = [];
   const db = {
     getRepository: (entity) => {
@@ -106,21 +112,25 @@ test('uploadDocument is limited to reservation contracts and persists the storag
         createQueryBuilder: () => qb,
         update: async (where, patch) => {
           updates.push([where, patch]);
-          Object.assign(row, patch);
+          Object.assign(current, patch);
         },
       };
     },
   };
   const service = new AgentContractsService(db, storage);
   await assert.rejects(() => service.uploadDocument(7, 11, 'unknown', { buffer: pdf, size: pdf.length }), error => error.getStatus() === 400);
-  const lease = reservationRow({ agreement_type: { name_th: 'สัญญาเช่า', form_kind: 'lease' } });
-  qb.getOne = async () => lease;
+  current = lease;
   await assert.rejects(() => service.uploadDocument(7, 11, 'invoice', { buffer: pdf, size: pdf.length }), error => error.getStatus() === 400 && /หนังสือจองห้อง/.test(error.message));
-  qb.getOne = async () => row;
+  const leaseResult = await service.uploadDocument(7, 11, 'lease_agreement', { buffer: pdf, size: pdf.length });
+  assert.match(updates[0][1].document_url, /^7\/11\/lease_agreement\//);
+  assert.match(leaseResult.leaseDocumentUrl, /^https:\/\/signed\.example\/7\/11\/lease_agreement\//);
+  assert.equal(leaseResult.reservationLetterUrl, null);
+  current = reservation;
+  await assert.rejects(() => service.uploadDocument(7, 11, 'lease_agreement', { buffer: pdf, size: pdf.length }), error => error.getStatus() === 400 && /สัญญาเช่า/.test(error.message));
   await assert.rejects(() => service.uploadDocument(7, 11, 'reservation_letter', { buffer: pdf, size: pdf.length }), error => error.getStatus() === 400);
   const result = await service.uploadDocument(7, 11, 'invoice', { buffer: pdf, size: pdf.length });
-  assert.equal(updates[0][0].id, 11);
-  assert.match(updates[0][1].invoice_url, /^7\/11\/invoice\//);
+  assert.equal(updates[1][0].id, 11);
+  assert.match(updates[1][1].invoice_url, /^7\/11\/invoice\//);
   assert.match(result.invoiceUrl, /^https:\/\/signed\.example\/7\/11\/invoice\//);
   assert.equal(result.reservationLetterUrl, null);
 });

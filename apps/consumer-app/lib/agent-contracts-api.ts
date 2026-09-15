@@ -41,6 +41,14 @@ export async function signAgentContract(
   return apiPost(`/agent/contracts/${id}/sign`, input);
 }
 
+export async function createContractSignInvite(
+  id: number,
+  party: "owner" | "tenant",
+): Promise<import("@nestyk/types").ContractSignInvite> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/sign-invites`, { party });
+}
+
 export async function uploadAgentContractDocument(
   id: number,
   kind: AgentContractDocumentKind,
@@ -85,4 +93,99 @@ export async function generateAgentReservation(
 ): Promise<AgentContract> {
   await ensureAgentSession();
   return apiPost(`/agent/contracts/${id}/generate-reservation`, {});
+}
+
+export async function listAgreementTemplates(
+  code: string,
+): Promise<import("@nestyk/types").AgreementTemplate[]> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/types/${encodeURIComponent(code)}/templates`);
+}
+export async function getAgreementHistory(
+  id: number,
+): Promise<AgentContract[]> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/${id}/history`);
+}
+
+export async function listAgreementAttachments(
+  id: number,
+): Promise<import("@nestyk/types").AgreementAttachmentChecklist> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/${id}/attachments`);
+}
+export async function openAgreementAttachment(
+  id: number,
+  documentId: number,
+): Promise<{ url: string }> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/${id}/attachments/${documentId}/url`);
+}
+export async function removeAgreementAttachment(
+  id: number,
+  documentId: number,
+): Promise<import("@nestyk/types").AgreementAttachmentChecklist> {
+  await ensureAgentSession();
+  return apiRequest(`/agent/contracts/${id}/attachments/${documentId}`, { method: "DELETE" });
+}
+export async function reviewAgreementAttachment(
+  id: number,
+  documentId: number,
+  status: "accepted" | "rejected",
+  note?: string,
+): Promise<import("@nestyk/types").AgreementAttachmentChecklist> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/attachments/${documentId}/review`, {
+    status,
+    note,
+  });
+}
+export async function reuseAgreementAttachment(
+  id: number,
+  sourceDocumentId: number,
+): Promise<import("@nestyk/types").AgreementAttachmentChecklist> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/attachments/reuse`, {
+    sourceDocumentId,
+    confirmedCurrent: true,
+  });
+}
+export async function uploadAgreementAttachment(
+  id: number,
+  input: {
+    subject: string;
+    documentTypeCode: string;
+    supersedesDocumentId?: number;
+  },
+  file: { uri: string; name: string; mimeType: string; file?: File },
+): Promise<import("@nestyk/types").AgreementAttachmentChecklist> {
+  await ensureAgentSession();
+  const form = new FormData();
+  form.append("subject", input.subject);
+  form.append("documentTypeCode", input.documentTypeCode);
+  if (input.supersedesDocumentId)
+    form.append("supersedesDocumentId", String(input.supersedesDocumentId));
+  if (Platform.OS === "web")
+    form.append(
+      "file",
+      file.file ?? (await (await fetch(file.uri)).blob()),
+      file.name,
+    );
+  else
+    form.append("file", {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType,
+    } as unknown as Blob);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    return await apiRequest(`/agent/contracts/${id}/attachments`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }

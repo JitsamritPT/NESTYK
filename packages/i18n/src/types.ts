@@ -346,6 +346,9 @@ export interface TranslationSchema {
       upload: string;
       replace: string;
       reservationLetter: string;
+      leaseDocuments: string;
+      leaseAgreement: string;
+      leaseDocumentHint: string;
       invoice: string;
       receipt: string;
       uploadSuccess: string;
@@ -364,9 +367,11 @@ export interface TranslationSchema {
       agent: string;
       unsigned: string;
       signFor: string;
-      signForAll: string;
+      shareSign: string;
+      shareSignMessage: string;
+      shareSignSuccess: string;
+      shareSignError: string;
       signTitle: string;
-      signTitleAll: string;
       signHint: string;
       clearSignature: string;
       confirmSignature: string;

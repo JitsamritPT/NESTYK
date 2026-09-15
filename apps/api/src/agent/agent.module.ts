@@ -1,6 +1,9 @@
+import { AgreementAttachmentsService } from './contracts/agreement-attachments.service';
+import { AgreementAttachmentsController } from './contracts/agreement-attachments.controller';
 import { AgentTenantsController } from './tenants/agent-tenants.controller';
 import { AgentTenantsService } from './tenants/agent-tenants.service';
 import { AgentContractsController } from './contracts/agent-contracts.controller';
+import { PublicContractSignController } from './contracts/public-contract-sign.controller';
 import { AgentContractsService } from './contracts/agent-contracts.service';
 import { ContractDocumentStorageService } from './contracts/contract-document-storage.service';
 import { LeadEntity } from '../entities/lead.entity';
@@ -62,8 +65,8 @@ import { AgentPlacesService } from './places/agent-places.service';
       RentRoomDocumentEntity,
     ]),
   ],
-  controllers: [AgentTenantsController, AgentContractsController, AgentLeadsController, AgentRoomsController, AgentListingsController, AgentPlacesController],
-  providers: [AgentTenantsService, AgentContractsService, ContractDocumentStorageService, AgentLeadsService, RoomPhotoStorageService, AgentRoomsService, AgentListingsService, AgentPlacesService],
+  controllers: [AgreementAttachmentsController, AgentTenantsController, AgentContractsController, PublicContractSignController, AgentLeadsController, AgentRoomsController, AgentListingsController, AgentPlacesController],
+  providers: [AgreementAttachmentsService, AgentTenantsService, AgentContractsService, ContractDocumentStorageService, AgentLeadsService, RoomPhotoStorageService, AgentRoomsService, AgentListingsService, AgentPlacesService],
   exports: [AgentRoomsService, AgentListingsService, AgentPlacesService],
 })
 export class AgentModule {}
