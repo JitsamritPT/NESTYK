@@ -1,7 +1,7 @@
 import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { AppIconName } from '@nestyk/ui/native';
-import { MobileIcon, getCardElevation, tokens } from '@nestyk/ui/native';
+import { MobileIcon, tokens } from '@nestyk/ui/native';
 
 export type RoomEditSectionStatus = 'complete' | 'incomplete' | 'empty';
 
@@ -17,80 +17,75 @@ export type RoomEditSection = {
 
 export interface RoomEditSectionListProps {
   sections: RoomEditSection[];
-  themeColor: string;
+  themeColor?: string;
   summaryLabel: string;
   summaryTone: 'success' | 'warning';
+  /** 0–1 progress for required sections. */
+  progress?: number;
   disabled?: boolean;
   onSelect: (step: number) => void;
 }
 
-function nativeElevation(level: 1 | 2 | 3) {
-  const { boxShadow: _webOnly, ...rest } = getCardElevation(level);
-  return rest;
-}
-
-const STATUS_COLOR: Record<RoomEditSectionStatus, string> = {
-  complete: tokens.colors.success,
-  incomplete: tokens.colors.warning,
-  empty: tokens.colors.textSecondary,
-};
-
-const STATUS_ICON: Record<RoomEditSectionStatus, AppIconName> = {
-  complete: 'check',
-  incomplete: 'warning',
-  empty: 'chevron-right',
-};
+const ICON_BG = '#F1F5F9';
+const ICON_FG = '#64748B';
+const BRAND = tokens.colors.brand[500];
 
 export const RoomEditSectionList: React.FC<RoomEditSectionListProps> = ({
   sections,
-  themeColor,
   summaryLabel,
   summaryTone,
+  progress,
   disabled,
   onSelect,
 }) => {
-  const summaryColor = summaryTone === 'success' ? tokens.colors.success : tokens.colors.warning;
+  const fill = Math.max(0, Math.min(1, progress ?? (summaryTone === 'success' ? 1 : 0.35)));
+
   return (
     <View style={styles.wrap}>
-      <View style={[styles.summary, { borderColor: `${summaryColor}55`, backgroundColor: `${summaryColor}12` }]}>
-        <MobileIcon name={summaryTone === 'success' ? 'check' : 'warning'} size={20} color={summaryColor} weight="fill" />
-        <Text style={[styles.summaryText, { color: summaryColor }]}>{summaryLabel}</Text>
+      <View style={styles.progressBlock}>
+        <Text style={styles.progressLabel}>{summaryLabel}</Text>
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${Math.round(fill * 100)}%`, backgroundColor: BRAND },
+            ]}
+          />
+        </View>
       </View>
 
-      <View style={[styles.card, nativeElevation(1)]}>
-        {sections.map((section, index) => {
-          const statusColor = STATUS_COLOR[section.status];
-          return (
-            <Pressable
-              key={section.step}
-              accessibilityRole="button"
-              accessibilityLabel={`${section.label}. ${section.statusLabel}`}
-              disabled={disabled}
-              onPress={() => onSelect(section.step)}
-              android_ripple={{ color: `${themeColor}22` }}
-              style={({ pressed }) => [
-                styles.row,
-                index < sections.length - 1 && styles.rowDivider,
-                pressed && Platform.OS === 'ios' ? { opacity: 0.7 } : null,
-              ]}
-            >
-              <View style={[styles.iconWrap, { backgroundColor: `${themeColor}14` }]}>
-                <MobileIcon name={section.icon} size={20} color={themeColor} />
+      <View style={styles.list}>
+        {sections.map((section) => (
+          <Pressable
+            key={section.step}
+            accessibilityRole="button"
+            accessibilityLabel={`${section.label}. ${section.statusLabel}`}
+            disabled={disabled}
+            onPress={() => onSelect(section.step)}
+            android_ripple={{ color: `${BRAND}22` }}
+            style={({ pressed }) => [
+              styles.card,
+              pressed && Platform.OS === 'ios' ? { opacity: 0.72 } : null,
+            ]}
+          >
+            <View style={styles.iconWrap}>
+              <MobileIcon name={section.icon} size={20} color={ICON_FG} />
+            </View>
+            <View style={styles.rowBody}>
+              <Text style={styles.rowTitle}>{section.label}</Text>
+              <Text style={styles.rowHint} numberOfLines={1}>
+                {section.status === 'complete' ? section.hint : section.statusLabel}
+              </Text>
+            </View>
+            {section.status === 'complete' ? (
+              <View style={styles.completeBadge} accessibilityRole="image">
+                <MobileIcon name="check" size={12} color={tokens.colors.white} weight="bold" />
               </View>
-              <View style={styles.rowBody}>
-                <Text style={styles.rowTitle}>{section.label}</Text>
-                <Text style={styles.rowHint} numberOfLines={1}>{section.hint}</Text>
-                <View style={styles.statusRow}>
-                  {section.status !== 'empty' && (
-                    <MobileIcon name={STATUS_ICON[section.status]} size={14} color={statusColor} weight="fill" />
-                  )}
-                  <Text style={[styles.statusText, { color: statusColor }]}>{section.statusLabel}</Text>
-                </View>
-              </View>
-              <MobileIcon name="chevron-right" size={18} tone="muted" />
-            </Pressable>
-          );
-        })}
+            ) : (
+              <MobileIcon name="chevron-right" size={18} color={tokens.colors.divider} />
+            )}
+          </Pressable>
+        ))}
       </View>
     </View>
   );
@@ -98,42 +93,42 @@ export const RoomEditSectionList: React.FC<RoomEditSectionListProps> = ({
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: 12,
+    gap: 16,
   },
-  summary: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  progressBlock: {
     gap: 8,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
-  summaryText: {
-    flex: 1,
+  progressLabel: {
     fontFamily: tokens.typography.native.body,
     fontSize: 13,
     lineHeight: 20,
-    fontWeight: '600',
+    fontWeight: '500',
+    color: tokens.colors.textSecondary,
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
+  progressTrack: {
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: '#EEF2F6',
     overflow: 'hidden',
   },
-  row: {
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  list: {
+    gap: 10,
+  },
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    minHeight: 64,
-  },
-  rowDivider: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: tokens.colors.border,
+    paddingVertical: 14,
+    minHeight: 72,
+    backgroundColor: tokens.colors.white,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
   },
   iconWrap: {
     width: 40,
@@ -141,9 +136,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: ICON_BG,
   },
   rowBody: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
   rowTitle: {
@@ -155,20 +152,16 @@ const styles = StyleSheet.create({
   },
   rowHint: {
     fontFamily: tokens.typography.native.body,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 20,
     color: tokens.colors.textSecondary,
   },
-  statusRow: {
-    flexDirection: 'row',
+  completeBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  statusText: {
-    fontFamily: tokens.typography.native.body,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '600',
+    justifyContent: 'center',
+    backgroundColor: tokens.colors.success,
   },
 });

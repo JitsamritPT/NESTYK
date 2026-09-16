@@ -9,12 +9,12 @@ import {
   ImageSourcePropType,
   Pressable,
 } from 'react-native';
-import Svg, { Path, Defs, LinearGradient, Stop } from 'react-native-svg';
 import Animated, {
   Easing,
-  useAnimatedProps,
+  cancelAnimation,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withRepeat,
   withTiming,
   runOnJS,
@@ -22,100 +22,73 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocale } from '@nestyk/i18n';
 import { MobileNestykLogo } from './MobileNestykLogo';
+import { MobileSmileProgress } from './MobileSmileProgress';
 import { tokens } from '../theme/tokens';
 import preloadBackground from '../../assets/backgrounds/preload-background.png';
 
-const AnimatedPath = Animated.createAnimatedComponent(Path);
-
 const BRAND = tokens.colors.brand[500];
 const INK = tokens.colors.primary;
-const TRACK = '#E5E7EB';
+const IDLE_DURATION = 2200;
+const GLOW_DURATION = 2400;
+const RING_DURATION = 3600;
+const RING_STAGGER = 1400;
+const RING_COUNT = 2;
 
-/** Smile arc — viewBox 240×90, width matches wordmark scale. */
-const SMILE_D = 'M 28 32 Q 120 98 212 32';
-const SMILE_LENGTH = 248;
-const SMILE_WIDTH = 236;
-const SMILE_HEIGHT = 90;
+function SoftGlowRing({
+  diameter,
+  delayMs,
+  active,
+}: {
+  diameter: number;
+  delayMs: number;
+  active: boolean;
+}) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    if (!active) {
+      cancelAnimation(progress);
+      progress.value = 0;
+      return;
+    }
+    progress.value = 0;
+    progress.value = withDelay(
+      delayMs,
+      withRepeat(
+        withTiming(1, { duration: RING_DURATION, easing: Easing.out(Easing.quad) }),
+        -1,
+        false,
+      ),
+    );
+  }, [active, delayMs, progress]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.34 * (1 - progress.value),
+    transform: [{ scale: 1 + progress.value * 0.6 }],
+  }));
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.softRing,
+        {
+          width: diameter,
+          height: diameter,
+          borderRadius: diameter / 2,
+          borderColor: BRAND,
+        },
+        style,
+      ]}
+    />
+  );
+}
 
 export interface MobilePreloadScreenProps {
   /** Bootstrap finished (auth + min delay). */
   ready?: boolean;
   /** User taps to dismiss preload and enter the app. */
   onEnter?: () => void;
-}
-
-function SmileProgress({
-  progress,
-  onFilled,
-}: {
-  progress: number;
-  onFilled?: () => void;
-}) {
-  const dash = useSharedValue(0.12);
-  const filledRef = React.useRef(false);
-
-  useEffect(() => {
-    const target = Math.max(0.04, Math.min(1, progress));
-    dash.value = withTiming(
-      target,
-      { duration: target >= 0.99 ? 420 : 700, easing: Easing.out(Easing.cubic) },
-      (finished) => {
-        if (finished && target >= 0.99 && onFilled && !filledRef.current) {
-          filledRef.current = true;
-          runOnJS(onFilled)();
-        }
-      },
-    );
-  }, [progress, dash, onFilled]);
-
-  const animatedProps = useAnimatedProps(() => {
-    const len = SMILE_LENGTH * dash.value;
-    return {
-      strokeDasharray: `${len} ${SMILE_LENGTH}`,
-      strokeDashoffset: 0,
-    };
-  });
-
-  return (
-    <View
-      style={styles.smileWrap}
-      accessibilityRole="progressbar"
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
-    >
-      <Svg width={SMILE_WIDTH} height={SMILE_HEIGHT} viewBox="0 0 240 90">
-        <Defs>
-          <LinearGradient id="smileGlow" x1="0" y1="0" x2="1" y2="0">
-            <Stop offset="0" stopColor={BRAND} stopOpacity="0.1" />
-            <Stop offset="0.5" stopColor={BRAND} stopOpacity="0.4" />
-            <Stop offset="1" stopColor={BRAND} stopOpacity="0.1" />
-          </LinearGradient>
-        </Defs>
-        <Path
-          d={SMILE_D}
-          stroke={TRACK}
-          strokeWidth={11}
-          strokeLinecap="round"
-          fill="none"
-        />
-        <Path
-          d={SMILE_D}
-          stroke="url(#smileGlow)"
-          strokeWidth={18}
-          strokeLinecap="round"
-          fill="none"
-          opacity={0.5}
-        />
-        <AnimatedPath
-          d={SMILE_D}
-          stroke={BRAND}
-          strokeWidth={11}
-          strokeLinecap="round"
-          fill="none"
-          animatedProps={animatedProps}
-        />
-      </Svg>
-    </View>
-  );
 }
 
 function SoftBackdrop() {
@@ -155,7 +128,12 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
   const pulse = useSharedValue(1);
   const exitOpacity = useSharedValue(1);
   const exitScale = useSharedValue(1);
+  const idle = useSharedValue(1);
+  const glow = useSharedValue(0.55);
   const compact = height < 720 || width < 360;
+  const iconSize = compact ? 112 : 132;
+  const logoSize = compact ? 108 : 128;
+  const iconActive = !exiting;
 
   const primary = locale === 'en' ? copy.preparingEn : copy.preparing;
   const secondary = locale === 'en' ? copy.preparing : copy.preparingEn;
@@ -185,6 +163,28 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
     );
   }, [phase, exiting, pulse]);
 
+  useEffect(() => {
+    if (!iconActive) {
+      cancelAnimation(idle);
+      cancelAnimation(glow);
+      idle.value = withTiming(1, { duration: 160 });
+      glow.value = withTiming(0.4, { duration: 160 });
+      return;
+    }
+    idle.value = 1;
+    idle.value = withRepeat(
+      withTiming(1.045, { duration: IDLE_DURATION, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true,
+    );
+    glow.value = 0.55;
+    glow.value = withRepeat(
+      withTiming(1, { duration: GLOW_DURATION, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true,
+    );
+  }, [iconActive, idle, glow]);
+
   const welcomeStyle = useAnimatedStyle(() => ({
     opacity: pulse.value,
   }));
@@ -192,6 +192,15 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
   const exitStyle = useAnimatedStyle(() => ({
     opacity: exitOpacity.value,
     transform: [{ scale: exitScale.value }],
+  }));
+
+  const iconIdleStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: idle.value }],
+  }));
+
+  const glowHaloStyle = useAnimatedStyle(() => ({
+    opacity: 0.1 + glow.value * 0.14,
+    transform: [{ scale: 0.92 + glow.value * 0.14 }],
   }));
 
   const handleFilled = useCallback(() => {
@@ -223,8 +232,48 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
     <Animated.View style={[styles.exitLayer, exitStyle]}>
       <SoftBackdrop />
       <View style={styles.center} pointerEvents="none">
-        <View style={[styles.iconCircle, compact && styles.iconCircleCompact]}>
-          <MobileNestykLogo variant="mark" height={compact ? 108 : 128} />
+        <View
+          style={[
+            styles.iconStage,
+            {
+              width: Math.round(iconSize * 1.7),
+              height: Math.round(iconSize * 1.7),
+            },
+          ]}
+        >
+          {Array.from({ length: RING_COUNT }, (_, index) => (
+            <SoftGlowRing
+              key={index}
+              diameter={iconSize}
+              delayMs={index * RING_STAGGER}
+              active={iconActive}
+            />
+          ))}
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.glowHalo,
+              {
+                width: Math.round(iconSize * 1.35),
+                height: Math.round(iconSize * 1.35),
+                borderRadius: Math.round(iconSize * 1.35) / 2,
+              },
+              glowHaloStyle,
+            ]}
+          />
+          <Animated.View
+            style={[
+              styles.iconCircle,
+              {
+                width: iconSize,
+                height: iconSize,
+                borderRadius: iconSize / 2,
+              },
+              iconIdleStyle,
+            ]}
+          >
+            <MobileNestykLogo variant="mark" height={logoSize} />
+          </Animated.View>
         </View>
         <MobileNestykLogo
           variant="wordmark"
@@ -232,7 +281,6 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
           style={[styles.wordmark, compact && styles.wordmarkCompact]}
         />
 
-        {/* Fixed-height message slot — sized for large welcome; loading uses same box */}
         <View style={[styles.messageSlot, compact && styles.messageSlotCompact]}>
           <Text
             style={
@@ -254,9 +302,15 @@ export const MobilePreloadScreen: React.FC<MobilePreloadScreenProps> = ({
           </Text>
         </View>
 
-        <SmileProgress progress={progress} onFilled={ready ? handleFilled : undefined} />
+        <View style={styles.smileWrap}>
+          <MobileSmileProgress
+            progress={progress}
+            size="lg"
+            gradientId="preloadSmileGlow"
+            onFilled={ready ? handleFilled : undefined}
+          />
+        </View>
 
-        {/* Fixed-height hint slot — pushed lower */}
         <View style={[styles.hintSlot, compact && styles.hintSlotCompact]}>
           <Animated.Text
             style={[
@@ -307,39 +361,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 28,
   },
-  /** Yellow circle mark — matches original brand preload. */
-  iconCircle: {
-    width: 132,
-    height: 132,
-    borderRadius: 66,
-    backgroundColor: BRAND,
+  iconStage: {
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
+  },
+  softRing: {
+    position: 'absolute',
+    borderWidth: 2,
+    backgroundColor: 'transparent',
+  },
+  glowHalo: {
+    position: 'absolute',
+    backgroundColor: BRAND,
     ...Platform.select({
       ios: {
         shadowColor: BRAND,
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.38,
-        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.55,
+        shadowRadius: 28,
       },
       android: {
-        elevation: 10,
+        elevation: 8,
       },
       default: {},
     }),
   },
-  iconCircleCompact: {
-    width: 112,
-    height: 112,
-    borderRadius: 56,
+  iconCircle: {
+    backgroundColor: BRAND,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    zIndex: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: BRAND,
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.42,
+        shadowRadius: 22,
+      },
+      android: {
+        elevation: 12,
+      },
+      default: {},
+    }),
   },
   wordmark: {
-    marginTop: 22,
+    marginTop: 10,
     marginBottom: 32,
   },
   wordmarkCompact: {
-    marginTop: 18,
+    marginTop: 6,
     marginBottom: 24,
   },
   primary: {
@@ -374,7 +445,6 @@ const styles = StyleSheet.create({
   messageSlot: {
     alignItems: 'center',
     justifyContent: 'flex-start',
-    // Tall enough for large welcome + reserved secondary line (no layout jump)
     minHeight: 39 + 6 + 21,
     marginBottom: 28,
     width: '100%',

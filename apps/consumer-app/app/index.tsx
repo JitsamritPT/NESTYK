@@ -36,7 +36,7 @@ import {
 import { MobileServiceCatalogBody } from '@nestyk/feature-services';
 import { createAgentScoutRoom, fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities } from '../lib/agent-listings-api';
 import { pickRoomPhotos, uploadRoomPhoto, enhanceRoomPhoto } from '../lib/room-photos';
-import { searchPlaces, getPlaceDetails, searchNearbyPlaces } from '../lib/places-api';
+import { searchPlaces, getPlaceDetails, searchNearbyPlaces, reverseMapLocation } from '../lib/places-api';
 import { useAuth } from '../lib/auth/AuthContext';
 import { APP_CONFIG } from '../lib/config';
 import {
@@ -122,10 +122,11 @@ export default function AppHomeScreen() {
   const [leadsReloadToken, setLeadsReloadToken] = useState(0);
   const [roomsReloadToken, setRoomsReloadToken] = useState(0);
   const [leadsSearchOpen, setLeadsSearchOpen] = useState(false);
-  const [roomsSearchOpen, setRoomsSearchOpen] = useState(false);
   const [clientsSearchOpen, setClientsSearchOpen] = useState(false);
   /** Where header/hardware back should return from secondary screens (e.g. create listing). */
   const [secondaryReturnTab, setSecondaryReturnTab] = useState<MobileAppTab | null>(null);
+  const createListingBackRef = useRef<(() => boolean) | null>(null);
+  const [createListingHeaderTitle, setCreateListingHeaderTitle] = useState('');
 
   const unreadCount = [...notifications, ...messages].filter((n) => n.unread).length;
 
@@ -206,13 +207,24 @@ export default function AppHomeScreen() {
   }, [activeRole, secondaryReturnTab]);
 
   useEffect(() => {
-    if (activeTab !== 'createListing') return;
+    if (activeTab !== 'createListing') {
+      setCreateListingHeaderTitle('');
+      return;
+    }
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Prefer wizard stepwise back; only exit the tab when wizard returns false.
+      if (createListingBackRef.current?.()) return true;
       goBackFromSecondary();
       return true;
     });
     return () => sub.remove();
   }, [activeTab, goBackFromSecondary]);
+
+  // handleCreateListingBack used by shell header — same stepwise behavior
+  const handleCreateListingBack = useCallback(() => {
+    if (createListingBackRef.current?.()) return;
+    goBackFromSecondary();
+  }, [goBackFromSecondary]);
 
   const handleRoleChange = (role: UserRole) => {
     if (roleRequiresAuth(role) && !isAuthenticated) {
@@ -282,7 +294,6 @@ export default function AppHomeScreen() {
 
   useEffect(() => {
     setLeadsSearchOpen(false);
-    setRoomsSearchOpen(false);
     setClientsSearchOpen(false);
   }, [activeTab]);
 
@@ -307,35 +318,40 @@ export default function AppHomeScreen() {
       const isSecondary = activeTab === 'createListing';
       const showSearch =
         !isSecondary &&
-        (activeTab === 'listingRoom' ||
-          activeTab === 'listingLead' ||
-          activeTab === 'clients');
+        (activeTab === 'listingLead' || activeTab === 'clients');
       const searchActive =
         (activeTab === 'listingLead' && leadsSearchOpen) ||
-        (activeTab === 'listingRoom' && roomsSearchOpen) ||
         (activeTab === 'clients' && clientsSearchOpen);
 
       return (
         <MobileSectionHeader
-          title={getScreenTitle(activeTab, t)}
+          title={
+            isSecondary
+              ? createListingHeaderTitle || t.agent.listings.addRoom
+              : getScreenTitle(activeTab, t)
+          }
           workspaceLabel={isSecondary ? undefined : workspace}
           accentColor={accent}
           leading={isSecondary ? 'back' : 'menu'}
           onMenuPress={openMenu}
-          onBackPress={isSecondary ? goBackFromSecondary : undefined}
+          onBackPress={isSecondary ? handleCreateListingBack : undefined}
+          onAddPress={
+            !isSecondary && activeTab === 'listingRoom' ? openCreateListing : undefined
+          }
+          addVariant={activeTab === 'listingRoom' ? 'room' : undefined}
+          addAccessibilityLabel={
+            activeTab === 'listingRoom' ? t.agent.listings.addRoom : undefined
+          }
           searchActive={searchActive}
           searchAccessibilityLabel={
             activeTab === 'listingLead'
               ? t.agent.leads.searchFilters
-              : activeTab === 'listingRoom'
-                ? t.agent.listings.search
-                : t.agent.dashboard.clientsTitle
+              : t.agent.dashboard.clientsTitle
           }
           onSearchPress={
             showSearch
               ? () => {
                   if (activeTab === 'listingLead') setLeadsSearchOpen((v) => !v);
-                  else if (activeTab === 'listingRoom') setRoomsSearchOpen((v) => !v);
                   else setClientsSearchOpen((v) => !v);
                 }
               : undefined
@@ -804,8 +820,6 @@ export default function AppHomeScreen() {
             onCreate={openCreateListing}
             reloadToken={roomsReloadToken}
             onReloadSettled={finishPageRefresh}
-            searchOpen={roomsSearchOpen}
-            onSearchOpenChange={setRoomsSearchOpen}
           />
         </View>
       );
@@ -816,11 +830,14 @@ export default function AppHomeScreen() {
         <View style={[styles.bodyContainer, styles.wizardBody]}>
           <MobileCreateListingWizardBody
             config={defaultAgentListingConfig}
+            backHandlerRef={createListingBackRef}
+            onHeaderTitleChange={setCreateListingHeaderTitle}
             pickPhotos={pickRoomPhotos}
             uploadPhoto={uploadRoomPhoto}
             enhancePhoto={enhanceRoomPhoto}
             searchPlaces={handleSearchPlaces}
             getPlaceDetails={handleGetPlaceDetails}
+            reverseGeocode={(lat, lng) => reverseMapLocation(lat, lng)}
             listContacts={handleListContacts}
             listPropertyTypes={handleListPropertyTypes}
             listContractTypes={handleListContractTypes}
@@ -918,7 +935,7 @@ export default function AppHomeScreen() {
           )
         }
         bottomBar={
-          <MobileBottomTabBar
+          activeTab === 'createListing' ? null : <MobileBottomTabBar
             activeRole={activeRole}
             activeTab={activeTab}
             onTabPress={handleTabPress}

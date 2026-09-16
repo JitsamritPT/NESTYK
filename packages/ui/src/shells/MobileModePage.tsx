@@ -91,7 +91,7 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
             <Text style={[styles.screenTitle, { color: theme.screenTitle }]}>{screenTitle}</Text>
           ) : null}
         </View>
-        <View style={[styles.body, { backgroundColor: theme.background }]}>
+        <View style={[styles.body, { backgroundColor: theme.background, paddingBottom: bottomBar ? 0 : insets.bottom }]}>
           <View style={styles.bodyFill}>{children}</View>
         </View>
         {bottomBar ? (

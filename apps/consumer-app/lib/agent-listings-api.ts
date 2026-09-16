@@ -25,9 +25,14 @@ export type AgentListingCard = {
     name: string;
     phone: string;
   } | null;
-  prices: Array<{ contractTypeId?: number; contractTypeCode: string; price: number }>;
+  prices: Array<{ contractTypeId?: number; contractTypeCode: string; price: number; advanceRentMonths?: number; depositMonths?: number }>;
   coverMediaUrl: string | null;
+  bedroomCount?: string | null;
+  roomSizeSqm?: string | null;
+  updatedAt?: string | null;
 };
+
+export type AgentListingsSort = 'updated_desc' | 'updated_asc' | 'price_asc' | 'price_desc';
 
 export type AgentListingsResponse = {
   items: AgentListingCard[];
@@ -40,16 +45,27 @@ export type CreateRoomResponse = {
   id: number;
   propertyId: number;
   contactId: number;
+  contactIds?: number[];
   listingSourceCode: 'co_agent' | 'owner';
   isScoutRoom: true;
   visibility: 'private' | 'published';
 };
 
-export async function fetchMyAgentListings(query: { page?: number; q?: string; visibility?: string } = {}): Promise<AgentListingsResponse> {
+export async function fetchMyAgentListings(query: {
+  page?: number;
+  q?: string;
+  visibility?: string;
+  roomStatus?: string;
+  listingSource?: string;
+  sort?: AgentListingsSort;
+} = {}): Promise<AgentListingsResponse> {
   await ensureAgentSession();
   const params = new URLSearchParams({ page: String(query.page ?? 1), limit: '20' });
   if (query.q) params.set('q', query.q);
   if (query.visibility) params.set('visibility', query.visibility);
+  if (query.roomStatus) params.set('roomStatus', query.roomStatus);
+  if (query.listingSource) params.set('listingSource', query.listingSource);
+  if (query.sort) params.set('sort', query.sort);
   return apiGet<AgentListingsResponse>(`/agent/listings?${params}`);
 }
 

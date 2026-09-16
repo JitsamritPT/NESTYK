@@ -14,6 +14,7 @@
 | `docs/NESTYK/architecture-multi-app.md` | `docs/architecture-multi-app.md` | สถาปัตยกรรม 5 Apps, Role Permissions, Services Matrix, CI Specs |
 | `docs/NESTYK/tokens.ts` | `packages/ui/src/theme/tokens.ts`<br>`apps/mobile/lib/theme/tokens.ts` | Design Tokens หลัก (Corporate, Semantic, Roles, Typography) |
 | `docs/NESTYK/colors.json` | `packages/config/theme/colors.json`<br>`tailwind.config.js` (Import) | Color Palette แบบ JSON สำหรับ Tailwind CSS และ Config อื่นๆ |
+| `docs/NESTYK/brand-assets.md` | `docs/NESTYK/brand-assets.md` | คู่มือ Logo/Icon จาก `packages/ui/assets/nestyk/` + การใช้ Component กลาง |
 
 ---
 

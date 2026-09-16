@@ -23,6 +23,9 @@ export class AgentListingsController {
     @Query('limit') limit?: string,
     @Query('q') q?: string,
     @Query('visibility') visibility?: string,
+    @Query('roomStatus') roomStatus?: string,
+    @Query('listingSource') listingSource?: string,
+    @Query('sort') sort?: string,
   ) {
     if (!user?.id) {
       throw new UnauthorizedException('Call POST /auth/sync first');
@@ -32,6 +35,9 @@ export class AgentListingsController {
       limit: limit ? Number(limit) : undefined,
       q,
       visibility,
+      roomStatus,
+      listingSource,
+      sort,
     });
   }
 }

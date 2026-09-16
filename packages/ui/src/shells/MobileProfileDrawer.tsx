@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocale } from '@nestyk/i18n';
 import { UserRole } from '@nestyk/types';
 import { MobileIcon } from '../icons/MobileIcon';
+import { SelectionCheck } from '../components/SelectionCheck';
 import { AppIconName } from '../icons/types';
 import { tokens } from '../theme/tokens';
 import { getCardElevation } from '../theme/elevation';
@@ -400,7 +401,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
               </TouchableOpacity>
               <View style={styles.heroLogoWrap} pointerEvents="none">
                 <MobileNestykLogo
-                  variant={isGuestHeader ? 'wordmark' : 'wordmarkOnDark'}
+                  variant={isGuestHeader ? 'wordmarkOnYellow' : 'wordmarkOnDark'}
                   height={30}
                 />
               </View>
@@ -653,14 +654,7 @@ export const MobileProfileDrawer: React.FC<MobileProfileDrawerProps> = ({
                       <Text style={[styles.roleOptionTitle, { color: theme.textHeading }]}>{t.roles[role.key]}</Text>
                       <Text style={[styles.profileSub, { color: theme.textSecondary }]}>{t.mobile.profile.roleDescriptions[role.key]}</Text>
                     </View>
-                    {isActive && (
-                      <MobileIcon
-                        name="check"
-                        size={24}
-                        color={isDark ? theme.textHeading : tokens.colors.primary}
-                        weight="fill"
-                      />
-                    )}
+                    {isActive && <SelectionCheck selected variant="row" size="md" />}
                   </TouchableOpacity>
                 </View>
               );

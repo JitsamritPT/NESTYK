@@ -14,7 +14,9 @@
       "default": "./src/native.ts"
     },
     "./assets/logo/*": "./assets/logo/*",
-    "./assets/logo/IconApp/*": "./assets/logo/IconApp/*"
+    "./assets/logo/IconApp/*": "./assets/logo/IconApp/*",
+    "./assets/nestyk/svg/*": "./assets/nestyk/svg/*",
+    "./assets/nestyk/png/*": "./assets/nestyk/png/*"
   },
   "scripts": {
     "build": "tsc",

@@ -60,6 +60,26 @@ test('editing a missing/foreign room never writes', async () => {
   assert.equal(saved.length, 0);
 });
 
+test('lease conditions are persisted independently in price metadata', async () => {
+  const { service, saved } = setup();
+  await service.createScoutRoom({ id: 7 }, { ...body, prices: [
+    { contractTypeId: 1, price: 18000, advanceRentMonths: 0, depositMonths: 3 },
+  ] }, 'http://localhost:4000', 9);
+  const room = saved.find((row) => row.constructor.name === 'RentRoomEntity');
+  assert.equal(room.prices[0].advanceRentMonths, 0);
+  assert.equal(room.prices[0].depositMonths, 3);
+});
+
+test('invalid lease-specific months are rejected before writes', async () => {
+  for (const value of [-1, 1.5, 13, '2']) {
+    const { service, saved } = setup();
+    await assert.rejects(service.createScoutRoom({ id: 7 }, { ...body, prices: [
+      { contractTypeId: 1, price: 18000, advanceRentMonths: value },
+    ] }, 'http://localhost:4000', 9), /integer between 0 and 12/);
+    assert.equal(saved.length, 0);
+  }
+});
+
 test('editing replaces optional details, facilities and documents, including explicit removal', async () => {
   const { service, saved, removed } = setup();
   await service.createScoutRoom({ id: 7 }, { ...body, listingDescription: 'Bright corner room', availableFromDate: '2028-02-29', nearbyOther: 'BTS 500 m', customFacilities: ['Desk'], facilities: [], documents: [{ kind: 'ownership', mediaUrl: 'https://example.com/ownership.pdf' }] }, 'http://localhost:4000', 9);

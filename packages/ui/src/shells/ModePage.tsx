@@ -60,7 +60,7 @@ export const ModePage: React.FC<ModePageProps> = ({
             </h1>
           ) : (
             <NestykLogo
-              variant={role === 'guest' ? 'wordmark' : 'mark'}
+              variant={role === 'guest' ? 'wordmarkOnYellow' : 'markOnDark'}
               height={role === 'guest' ? 24 : 32}
             />
           )}

@@ -1,13 +1,53 @@
 /// <reference path="./png.d.ts" />
 
-import brandIcon from '../../assets/logo/icon.png';
-import brandLogo from '../../assets/logo/Logo.png';
-import brandLogoWhite from '../../assets/logo/logo-white.png';
-
 /**
  * Shared NESTYK brand image sources (Metro / Next transpilePackages).
- * Files live in packages/ui/assets/logo/
+ * Canonical files: packages/ui/assets/nestyk/
+ * Usage guide: docs/NESTYK/brand-assets.md
  */
-export { brandIcon, brandLogo, brandLogoWhite };
 
-export type NestykLogoVariant = 'mark' | 'wordmark' | 'wordmarkOnDark';
+// —— Icon (mark) ——
+import brandIcon from '../../assets/nestyk/png/icon-nestyk-standard.png';
+import brandIconWhite from '../../assets/nestyk/png/icon-nestyk-white.png';
+import brandIconBlack from '../../assets/nestyk/png/icon-nestyk-black.png';
+import brandIconSecondary from '../../assets/nestyk/png/icon-nestyk-secondary.png';
+
+// —— Logo (wordmark) ——
+import brandLogo from '../../assets/nestyk/png/logo-nestyk-standard.png';
+import brandLogoWhite from '../../assets/nestyk/png/logo-nestyk-white.png';
+import brandLogoBlack from '../../assets/nestyk/png/logo-nestyk-black.png';
+import brandLogoGrey from '../../assets/nestyk/png/logo-nestyk-grey.png';
+import brandLogoGreyReverse from '../../assets/nestyk/png/logo-nestyk-grey-reverse.png';
+import brandLogoOnYellow from '../../assets/nestyk/png/logo-nestyk-onYellow.png';
+import brandLogoOnBlack from '../../assets/nestyk/png/logo-nestyk-onBlack.png';
+
+export {
+  brandIcon,
+  brandIconWhite,
+  brandIconBlack,
+  brandIconSecondary,
+  brandLogo,
+  brandLogoWhite,
+  brandLogoBlack,
+  brandLogoGrey,
+  brandLogoGreyReverse,
+  brandLogoOnYellow,
+  brandLogoOnBlack,
+};
+
+/** Component variants — see docs/NESTYK/brand-assets.md §3 */
+export type NestykLogoVariant =
+  | 'mark'
+  | 'markOnDark'
+  | 'markOnBrand'
+  | 'markSecondary'
+  | 'wordmark'
+  | 'wordmarkOnDark'
+  | 'wordmarkOnYellow'
+  | 'wordmarkOnBlack';
+
+/** Wordmark aspect from SVG viewBox 322×107 */
+export const NESTYK_WORDMARK_ASPECT = 322 / 107;
+
+/** Mark aspect (square) */
+export const NESTYK_MARK_ASPECT = 1;

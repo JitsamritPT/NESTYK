@@ -21,8 +21,16 @@ export function AgentRoomEditor({ room, onSaved, onBusy }: { room: AgentRoomDeta
       longitude: room.property?.longitude == null ? undefined : Number(room.property.longitude),
     },
     contactId: room.contacts.find((c) => c.isPrimary)?.id ?? room.contacts[0]?.id,
+    selectedContacts: [...room.contacts]
+      .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+      .slice(0, 2)
+      .map((c) => ({ id: c.id, name: c.name, phone: c.phone })),
+    contactIds: [...room.contacts]
+      .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+      .slice(0, 2)
+      .map((c) => c.id),
     layout: room.layout,
-    prices: room.prices.filter((p) => p.contractTypeId != null).map((p) => ({ contractTypeId: p.contractTypeId!, price: p.price })),
+    prices: room.prices.filter((p) => p.contractTypeId != null).map((p) => ({ contractTypeId: p.contractTypeId!, price: p.price, advanceRentMonths: p.advanceRentMonths, depositMonths: p.depositMonths })),
     advanceRentMonths: room.advanceRentMonths, depositMonths: room.depositMonths,
     waterRatePerUnit: room.waterRatePerUnit == null ? undefined : Number(room.waterRatePerUnit),
     electricRatePerUnit: room.electricRatePerUnit == null ? undefined : Number(room.electricRatePerUnit),

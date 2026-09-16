@@ -22,9 +22,11 @@
     "dev:all": "turbo dev",
     "lint": "turbo lint",
     "test": "turbo test",
-    "clean": "turbo clean && rm -rf node_modules"
+    "clean": "turbo clean && rm -rf node_modules",
+    "postinstall": "npx --yes patch-package"
   },
   "devDependencies": {
+    "patch-package": "^8.0.0",
     "prettier": "^3.5.3",
     "turbo": "^2.5.4",
     "typescript": "~5.9.2"

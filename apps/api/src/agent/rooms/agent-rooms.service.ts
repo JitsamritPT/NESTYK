@@ -26,7 +26,7 @@ import { RoomMediaEntity } from '../../entities/room-media.entity';
 import { RoomLayoutValueEntity } from '../../entities/room-layout-value.entity';
 import { RoomFacilityEntity } from '../../entities/room-facility.entity';
 import { RentRoomDocumentEntity } from '../../entities/rent-room-document.entity';
-import { CreateRoomBody } from './dto/create-room.dto';
+import { CreateRoomBody, CreateRoomContactInput } from './dto/create-room.dto';
 
 @Injectable()
 export class AgentRoomsService {
@@ -188,7 +188,7 @@ export class AgentRoomsService {
         throw new BadRequestException('Room photos must be different files');
       }
       await this.photos.validateRoomPhotos(agent.id, body.medias!.filter((m) => !oldUrls.has(m.mediaUrl)), baseUrl);
-      const contactId = await this.resolveContactId(manager, agent.id, body);
+      const contactIds = await this.resolveContactIds(manager, agent.id, body);
       const propertyId = await this.resolvePropertyForSave(manager, body, existing);
       const priceRows = await this.resolvePrices(manager, body.prices ?? []);
       const roomType = await this.resolveRoomType(manager, body.roomTypeId);
@@ -219,6 +219,8 @@ export class AgentRoomsService {
           contractTypeId: row.contractType.id,
           contractTypeCode: row.contractType.code,
           price: row.price,
+          advanceRentMonths: row.advanceRentMonths ?? existing?.prices?.find((p) => Number(p.contractTypeId) === row.contractType.id)?.advanceRentMonths ?? body.advanceRentMonths ?? existing?.advance_rent_months ?? 1,
+          depositMonths: row.depositMonths ?? existing?.prices?.find((p) => Number(p.contractTypeId) === row.contractType.id)?.depositMonths ?? body.depositMonths ?? existing?.deposit_months ?? 2,
         })),
         custom_facilities: body.customFacilities ?? existing?.custom_facilities ?? [],
         latitude: body.latitude != null ? String(body.latitude) : null,
@@ -251,7 +253,7 @@ export class AgentRoomsService {
         await manager.delete(RentRoomPriceEntity, { rent_room_id: saved.id });
         await manager.delete(RoomLayoutValueEntity, { rent_room_id: saved.id });
         await manager.delete(RoomMediaEntity, { rent_id: saved.id });
-        await manager.update(RentRoomContactEntity, { rent_room_id: saved.id }, { is_primary: false });
+        await manager.delete(RentRoomContactEntity, { rent_room_id: saved.id });
       }
 
 
@@ -265,18 +267,19 @@ export class AgentRoomsService {
         );
       }
 
-      const contactLink = existing ? await manager.findOne(RentRoomContactEntity, {
-        where: { rent_room_id: saved.id, contact_id: contactId },
-      }) : null;
-      await manager.save(
-        manager.create(RentRoomContactEntity, {
-          ...(contactLink ? { id: contactLink.id } : {}),
-          rent_room_id: saved.id,
-          contact_id: contactId,
-          is_primary: true,
-          role_code: 'contact',
-        }),
-      );
+      if (!existing) {
+        await manager.delete(RentRoomContactEntity, { rent_room_id: saved.id });
+      }
+      for (let i = 0; i < contactIds.length; i++) {
+        await manager.save(
+          manager.create(RentRoomContactEntity, {
+            rent_room_id: saved.id,
+            contact_id: contactIds[i],
+            is_primary: i === 0,
+            role_code: 'contact',
+          }),
+        );
+      }
 
       if (body.layout?.length) {
         const allowedLayout = new Set(['bedroom', 'bathroom', 'room_size', 'floor', 'building']);
@@ -369,7 +372,8 @@ export class AgentRoomsService {
       return {
         id: saved.id,
         propertyId,
-        contactId,
+        contactId: contactIds[0],
+        contactIds,
         listingSourceCode: listingSource.code,
         isScoutRoom: true,
         visibility: saved.visibility,
@@ -414,11 +418,61 @@ export class AgentRoomsService {
     if (!body.visibility || !['private', 'published'].includes(body.visibility)) {
       throw new BadRequestException('visibility must be private or published');
     }
-    if (!body.contactId && !body.contact?.name?.trim()) {
-      throw new BadRequestException('contactId or contact{name,phone} required');
+    const hasContactIds =
+      Array.isArray(body.contactIds) && body.contactIds.length > 0;
+    const hasContacts =
+      Array.isArray(body.contacts) && body.contacts.length > 0;
+    if (
+      !hasContactIds &&
+      !body.contactId &&
+      !hasContacts &&
+      !body.contact?.name?.trim()
+    ) {
+      throw new BadRequestException(
+        'contactIds, contactId, contacts, or contact{name,phone} required',
+      );
     }
-    if (!body.contactId && !body.contact?.phone?.trim()) {
+    if (hasContactIds) {
+      if (body.contactIds!.length > 2) {
+        throw new BadRequestException('At most 2 contacts per room');
+      }
+      if (
+        body.contactIds!.some(
+          (id) => !Number.isSafeInteger(id) || id < 1,
+        )
+      ) {
+        throw new BadRequestException('Invalid contactIds');
+      }
+      if (new Set(body.contactIds).size !== body.contactIds!.length) {
+        throw new BadRequestException('Duplicate contactIds');
+      }
+    }
+    if (hasContacts) {
+      if (body.contacts!.length > 2) {
+        throw new BadRequestException('At most 2 contacts per room');
+      }
+      for (const row of body.contacts!) {
+        if (!row?.name?.trim() || !row?.phone?.trim()) {
+          throw new BadRequestException('Each contact needs name and phone');
+        }
+      }
+    }
+    if (
+      !hasContactIds &&
+      !body.contactId &&
+      !hasContacts &&
+      !body.contact?.phone?.trim()
+    ) {
       throw new BadRequestException('contact.phone required');
+    }
+    const pendingNew =
+      (hasContacts ? body.contacts!.length : 0) +
+      (!hasContacts && body.contact?.name?.trim() ? 1 : 0);
+    const pendingIds =
+      (hasContactIds ? body.contactIds!.length : 0) +
+      (!hasContactIds && body.contactId ? 1 : 0);
+    if (pendingNew + pendingIds > 2) {
+      throw new BadRequestException('At most 2 contacts per room');
     }
     if (!body.propertyId && !body.property?.address?.trim()) {
       throw new BadRequestException('propertyId or property{address,district,province} required');
@@ -452,9 +506,18 @@ export class AgentRoomsService {
       throw new BadRequestException('prices must have at least 1 row');
     }
     for (const p of body.prices) {
+      for (const key of ['advanceRentMonths', 'depositMonths'] as const) {
+        const value = p[key];
+        if (value != null && (!Number.isInteger(value) || value < 0 || value > 12)) {
+          throw new BadRequestException(`${key} must be an integer between 0 and 12 for each lease`);
+        }
+      }
       if (!p.contractTypeId || !(p.price > 0)) {
         throw new BadRequestException('each price needs contractTypeId and price > 0');
       }
+    }
+    if (new Set(body.prices.map((p) => p.contractTypeId)).size !== body.prices.length) {
+      throw new BadRequestException('contractTypeId must be unique per room');
     }
     if (body.waterRatePerUnit != null && !(Number(body.waterRatePerUnit) > 0)) {
       throw new BadRequestException('waterRatePerUnit must be > 0 when provided');
@@ -489,43 +552,76 @@ export class AgentRoomsService {
     }
   }
 
+  private async resolveContactIds(
+    manager: DataSource['manager'],
+    agentId: number,
+    body: CreateRoomBody,
+  ): Promise<number[]> {
+    const ids: number[] = [];
+
+    const pushExisting = async (contactId: number) => {
+      const existing = await manager.findOne(ContactEntity, {
+        where: { id: contactId, created_by_user_id: agentId },
+      });
+      if (!existing) {
+        throw new NotFoundException('contactId not found for this agent');
+      }
+      if (!ids.includes(existing.id)) ids.push(existing.id);
+    };
+
+    const pushNew = async (input: CreateRoomContactInput) => {
+      const phone = input.phone.trim();
+      const reused = await manager.findOne(ContactEntity, {
+        where: { created_by_user_id: agentId, phone },
+      });
+      if (reused) {
+        reused.name = input.name.trim();
+        reused.email = input.email ?? reused.email;
+        reused.note = input.note ?? reused.note;
+        await manager.save(reused);
+        if (!ids.includes(reused.id)) ids.push(reused.id);
+        return;
+      }
+      const created = await manager.save(
+        manager.create(ContactEntity, {
+          name: input.name.trim(),
+          phone,
+          email: input.email ?? null,
+          note: input.note ?? null,
+          created_by_user_id: agentId,
+        }),
+      );
+      if (!ids.includes(created.id)) ids.push(created.id);
+    };
+
+    if (body.contactIds?.length) {
+      for (const id of body.contactIds) await pushExisting(id);
+    } else if (body.contactId) {
+      await pushExisting(body.contactId);
+    }
+
+    if (body.contacts?.length) {
+      for (const row of body.contacts) await pushNew(row);
+    } else if (body.contact?.name?.trim() && body.contact?.phone?.trim()) {
+      await pushNew(body.contact);
+    }
+
+    if (!ids.length) {
+      throw new BadRequestException('At least one contact is required');
+    }
+    if (ids.length > 2) {
+      throw new BadRequestException('At most 2 contacts per room');
+    }
+    return ids;
+  }
+
   private async resolveContactId(
     manager: DataSource['manager'],
     agentId: number,
     body: CreateRoomBody,
   ): Promise<number> {
-    if (body.contactId) {
-      const existing = await manager.findOne(ContactEntity, {
-        where: { id: body.contactId, created_by_user_id: agentId },
-      });
-      if (!existing) {
-        throw new NotFoundException('contactId not found for this agent');
-      }
-      return existing.id;
-    }
-
-    const phone = body.contact!.phone.trim();
-    const reused = await manager.findOne(ContactEntity, {
-      where: { created_by_user_id: agentId, phone },
-    });
-    if (reused) {
-      reused.name = body.contact!.name.trim();
-      reused.email = body.contact!.email ?? reused.email;
-      reused.note = body.contact!.note ?? reused.note;
-      await manager.save(reused);
-      return reused.id;
-    }
-
-    const created = await manager.save(
-      manager.create(ContactEntity, {
-        name: body.contact!.name.trim(),
-        phone,
-        email: body.contact!.email ?? null,
-        note: body.contact!.note ?? null,
-        created_by_user_id: agentId,
-      }),
-    );
-    return created.id;
+    const ids = await this.resolveContactIds(manager, agentId, body);
+    return ids[0];
   }
 
   private async resolveRoomType(
@@ -562,7 +658,7 @@ export class AgentRoomsService {
 
   private async resolvePrices(
     manager: DataSource['manager'],
-    prices: Array<{ contractTypeId: number; price: number }>,
+    prices: Array<{ contractTypeId: number; price: number; advanceRentMonths?: number; depositMonths?: number }>,
   ) {
     const ids = [...new Set(prices.map((row) => row.contractTypeId))];
     const types = await manager.find(MasterContractTypeEntity, {
@@ -574,7 +670,7 @@ export class AgentRoomsService {
       if (!contractType) {
         throw new BadRequestException(`Unknown contractTypeId: ${row.contractTypeId}`);
       }
-      return { contractType, price: row.price };
+      return { contractType, price: row.price, advanceRentMonths: row.advanceRentMonths, depositMonths: row.depositMonths };
     });
   }
 

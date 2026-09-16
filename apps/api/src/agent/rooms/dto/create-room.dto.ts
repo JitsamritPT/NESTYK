@@ -43,13 +43,21 @@ export type CreateRoomContactInput = {
 };
 
 export type CreateRoomPriceInput = {
+  advanceRentMonths?: number;
+  depositMonths?: number;
   contractTypeId: number;
   price: number;
 };
 
 export type CreateRoomBody = {
   visibility?: 'private' | 'published';
+  /** Up to 2 existing contact ids (preferred). First becomes primary. */
+  contactIds?: number[];
+  /** @deprecated Prefer contactIds — still accepted as a single contact. */
   contactId?: number;
+  /** New contact(s) to create/reuse by phone. Combined with contactIds, max 2 total. */
+  contacts?: CreateRoomContactInput[];
+  /** @deprecated Prefer contacts[] — still accepted as a single new contact. */
   contact?: CreateRoomContactInput;
   propertyId?: number;
   property?: CreateRoomPropertyInput;

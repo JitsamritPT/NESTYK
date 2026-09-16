@@ -1,8 +1,10 @@
 export type AppIconName =
   | 'search'
   | 'home'
+  | 'house-plus'
   | 'key'
   | 'grid'
+  | 'list-rows'
   | 'menu'
   | 'bell'
   | 'moon'
@@ -24,6 +26,7 @@ export type AppIconName =
   | 'handshake'
   | 'shield'
   | 'user'
+  | 'user-plus'
   | 'credit-card'
   | 'gear'
   | 'globe'
@@ -32,6 +35,9 @@ export type AppIconName =
   | 'qr-code'
   | 'buildings'
   | 'bed'
+  | 'bath'
+  | 'stairs'
+  | 'room-size'
   | 'camera'
   | 'coins'
   | 'map-pin'
@@ -42,7 +48,10 @@ export type AppIconName =
   | 'google'
   | 'facebook'
   | 'apple'
-  | 'swap';
+  | 'swap'
+  | 'funnel'
+  | 'lock'
+  | 'plus';
 
 export type AppIconTone =
   | 'active'

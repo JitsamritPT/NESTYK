@@ -81,7 +81,7 @@ function ServicesTabIcon({
           animStyle,
         ]}
       >
-        <MobileNestykLogo variant="mark" height={SERVICES_LOGO_SIZE} />
+        <MobileNestykLogo variant="markSecondary" height={SERVICES_LOGO_SIZE} />
       </Animated.View>
     </View>
   );
