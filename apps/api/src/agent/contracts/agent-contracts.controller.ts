@@ -99,7 +99,7 @@ export class AgentContractsController {
     @CurrentUser() user: AuthRequestUser,
     @Param("id", ParseIntPipe) id: number,
     @Param("kind") kind: string,
-    @UploadedFile() file: { buffer: Buffer; size: number } | undefined,
+    @UploadedFile() file: { buffer: Buffer; size: number; originalname?: string } | undefined,
   ) {
     return this.contracts.uploadDocument(user.id, id, kind, file);
   }

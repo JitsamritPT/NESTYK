@@ -120,13 +120,23 @@ test('createSignInvite returns public url and publicSign records party', async (
       }),
   };
   const service = new AgentContractsService(db, documents);
+  const createdBefore = Date.now();
   const invite = await service.createSignInvite(7, 11, { party: 'tenant' });
+  const createdAfter = Date.now();
+  const expiresAt = new Date(invite.expiresAt).getTime();
+  assert.ok(expiresAt >= createdBefore + 15 * 60 * 1000);
+  assert.ok(expiresAt <= createdAfter + 15 * 60 * 1000);
   assert.equal(invite.party, 'tenant');
   assert.match(invite.url, /^https:\/\/web\.example\/sign\/.+/);
   const token = invite.url.split('/sign/')[1];
   const preview = await service.publicSignPreview(token);
   assert.equal(preview.party, 'tenant');
   assert.equal(preview.alreadySigned, false);
+  const validExpiry = invites[0].expires_at;
+  invites[0].expires_at = new Date(Date.now() - 1);
+  await assert.rejects(() => service.publicSignPreview(token), /หมดอายุ/);
+  await assert.rejects(() => service.publicSign(token, { signaturePng }), /หมดอายุ/);
+  invites[0].expires_at = validExpiry;
   const result = await service.publicSign(token, { signaturePng });
   assert.deepEqual(result, { ok: true, party: 'tenant' });
   assert.ok(current.tenant_signed_at);

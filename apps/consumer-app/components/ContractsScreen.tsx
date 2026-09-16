@@ -422,23 +422,22 @@ export function ContractsScreen({
     setSignPadKey((key) => key + 1);
     setSignParties(parties);
   }
-  async function shareSignInvite(party: "owner" | "tenant", partyLabel: string) {
+  async function shareSignInvite(party: "owner" | "tenant") {
     if (!selected || busy) return;
     setBusy(true);
     setError("");
     setNotice("");
     try {
       const invite = await createContractSignInvite(selected.id, party);
-      const message = docs.shareSignMessage
-        .replace("{party}", partyLabel)
-        .replace("{url}", invite.url);
-      await Share.share(
-        Platform.OS === "ios"
-          ? { message, url: invite.url }
-          : { message },
-      );
-      setNotice(docs.shareSignSuccess);
+      if (Platform.OS === "web" && typeof navigator !== "undefined" && !navigator.share && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(invite.url);
+        setNotice("คัดลอกลิงก์สำหรับลงนามแล้ว");
+        return;
+      }
+      const result = await Share.share({ message: invite.url });
+      if (Platform.OS === "web" || result?.action === Share.sharedAction) setNotice(docs.shareSignSuccess);
     } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
       setError(
         e instanceof Error && e.message ? e.message : docs.shareSignError,
       );
@@ -990,7 +989,14 @@ export function ContractsScreen({
                   selected.reservationLetterStatus === "ready";
                 const generated = selected.reservationLetterStatus === "ready";
                 return (
-                  <View key={slot.kind} style={{ gap: 8 }}>
+                  <View key={slot.kind} style={[s.documentItem, { borderColor: theme.border }]}>
+                    <View style={s.documentHead}>
+                      <View style={[s.documentStatus, { borderColor: generated ? "#198460" : theme.textSecondary, backgroundColor: generated ? "#19846018" : theme.background }]}>
+                        <Text style={[s.body, { color: generated ? "#198460" : theme.textSecondary }]}>{generated ? "✓" : "○"}</Text>
+                      </View>
+                      <Text style={[s.documentTitle, title]}>{slot.name}</Text>
+                    </View>
+                    {generated && <Text style={[s.body, title]}>{`reservation-${selected.contractNo}.pdf`}</Text>}
                     <MobileButton
                       variant="outline"
                       disabled={busy}
@@ -1010,27 +1016,37 @@ export function ContractsScreen({
                 );
               }
               const hasFile = !!slot.url;
-              return hasFile && slot.url ? (
-                <MobileButton
-                  key={slot.kind}
-                  variant="outline"
-                  disabled={busy}
-                  onPress={() => {
-                    openDocumentPreview(slot.name, slot.url!, slot.kind);
-                  }}
-                >
-                  {docs.preview.replace("{name}", slot.name)}
-                </MobileButton>
-              ) : (
-                <MobileButton
-                  key={slot.kind}
-                  variant="primary"
-                  disabled={busy}
-                  isLoading={uploadingKind === slot.kind}
-                  onPress={() => setPickKind(slot.kind)}
-                >
-                  {docs.upload.replace("{name}", slot.name)}
-                </MobileButton>
+              const storedNames = selected.data.documentFileNames as Record<string, string> | undefined;
+              const extension = slot.url?.split(/[?#]/)[0]?.match(/\.(pdf|jpe?g|png)$/i)?.[0] ?? "";
+              const originalName = storedNames?.[slot.kind];
+              const fileName = typeof originalName === "string" && originalName.trim()
+                ? originalName
+                : `${slot.name}${extension}`;
+              const statusColor = hasFile ? "#198460" : theme.textSecondary;
+              return (
+                <View key={slot.kind} style={[s.documentItem, { borderColor: theme.border }]}>
+                  <View style={s.documentHead}>
+                    <View style={[s.documentStatus, { borderColor: statusColor, backgroundColor: `${statusColor}18` }]}>
+                      <Text style={[s.body, { color: statusColor }]}>{hasFile ? "✓" : "○"}</Text>
+                    </View>
+                    <Text style={[s.documentTitle, title]}>{slot.name}</Text>
+                  </View>
+                  {hasFile && slot.url ? (
+                    <View style={[s.documentFile, { backgroundColor: theme.background }]}>
+                      <Text style={[s.body, title]} numberOfLines={2}>{fileName}</Text>
+                      <MobileButton variant="outline" disabled={busy} onPress={() => openDocumentPreview(fileName, slot.url!, slot.kind)}>
+                        ดู
+                      </MobileButton>
+                    </View>
+                  ) : (
+                    <>
+                      <Text style={[s.small, muted]}>ยังไม่ได้แนบเอกสารสำหรับรายการนี้</Text>
+                      <MobileButton disabled={busy} isLoading={uploadingKind === slot.kind} onPress={() => setPickKind(slot.kind)}>
+                        แนบเอกสาร
+                      </MobileButton>
+                    </>
+                  )}
+                </View>
               );
             })}
           </View>
@@ -1056,6 +1072,7 @@ export function ContractsScreen({
               {party.signed && party.signatureUrl ? (
                 <MobileButton
                   variant="outline"
+                  style={s.signatureButton}
                   disabled={busy}
                   onPress={() =>
                     setViewSignature({
@@ -1072,15 +1089,19 @@ export function ContractsScreen({
                   {(party.key === "owner" || party.key === "tenant") && (
                     <MobileButton
                       variant="outline"
+                      style={s.shareButton}
                       disabled={busy}
                       onPress={() => {
-                        void shareSignInvite(party.key, party.label);
+                        if (party.key === "owner" || party.key === "tenant") {
+                          void shareSignInvite(party.key);
+                        }
                       }}
                     >
                       {docs.shareSign}
                     </MobileButton>
                   )}
                   <MobileButton
+                    style={s.signatureButton}
                     disabled={busy}
                     onPress={() => openSignSheet([party.key])}
                   >
@@ -1165,7 +1186,7 @@ export function ContractsScreen({
                       isLoading={uploadingKind === previewDoc.kind}
                       onPress={replaceFromPreview}
                     >
-                      {docs.replace.replace("{name}", previewDoc.name)}
+                      อัพโหลดใหม่
                     </MobileButton>
                   )}
                   <MobileButton
@@ -1562,11 +1583,21 @@ const s = StyleSheet.create({
   signRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
+    minHeight: 64,
+    paddingVertical: 6,
   },
+  signatureButton: { width: 96, minHeight: 46, flexShrink: 0, paddingHorizontal: 8, borderWidth: 1, borderColor: tokens.colors.brand[500] },
+  shareButton: { width: 64, minHeight: 46, flexShrink: 0, paddingHorizontal: 8 },
+  documentItem: { gap: 10, padding: 12, borderWidth: 1, borderRadius: 14 },
+  documentHead: { flexDirection: "row", gap: 10, alignItems: "center" },
+  documentStatus: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  documentTitle: { flex: 1, fontFamily: tokens.typography.native.headingTh, fontSize: 15, lineHeight: 23 },
+  documentFile: { gap: 8, padding: 12, borderRadius: 12 },
   partyActions: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    alignItems: "center",
+    flexShrink: 0,
     gap: 8,
     justifyContent: "flex-end",
   },

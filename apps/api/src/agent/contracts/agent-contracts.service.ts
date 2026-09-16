@@ -37,7 +37,7 @@ import {
   ContractDocumentStorageService,
 } from "./contract-document-storage.service";
 
-const SIGN_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SIGN_INVITE_TTL_MS = 15 * 60 * 1000;
 const SHAREABLE_SIGN_PARTIES = ["owner", "tenant"] as const;
 
 const DOCUMENT_COLUMNS: Record<
@@ -478,7 +478,7 @@ export class AgentContractsService {
     agentId: number,
     id: number,
     kind: string,
-    file: { buffer: Buffer; size: number } | undefined,
+    file: { buffer: Buffer; size: number; originalname?: string } | undefined,
   ) {
     if (!CONTRACT_DOCUMENT_KINDS.some((allowed) => allowed === kind))
       throw new BadRequestException("ชนิดเอกสารไม่ถูกต้อง");
@@ -507,7 +507,12 @@ export class AgentContractsService {
       .getRepository(LeaseContractEntity)
       .update(
         { id: c.id, created_by_user_id: agentId },
-        { [DOCUMENT_COLUMNS[documentKind]]: stored.path },
+        {
+          [DOCUMENT_COLUMNS[documentKind]]: stored.path,
+          ...(file?.originalname ? {
+            data: () => `COALESCE(data, '{}'::jsonb) || jsonb_build_object('documentFileNames', COALESCE(data->'documentFileNames', '{}'::jsonb) || ${"'" + JSON.stringify({ [documentKind]: file.originalname }).replace(/'/g, "''") + "'"}::jsonb)`,
+          } : {}),
+        },
       );
     return this.view(agentId, c.id);
   }

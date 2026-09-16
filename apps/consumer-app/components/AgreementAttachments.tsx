@@ -127,7 +127,7 @@ export function AgreementAttachments({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sheet, setSheet] = useState<Sheet>(null);
-  const [preview, setPreview] = useState<{ name: string; url: string } | null>(
+  const [preview, setPreview] = useState<{ name: string; url: string; document: AgreementAttachment } | null>(
     null,
   );
   const [extraSubject, setExtraSubject] =
@@ -268,23 +268,11 @@ export function AgreementAttachments({
   async function openDoc(document: AgreementAttachment) {
     await act(async () => {
       const result = await openAgreementAttachment(contractId, document.id);
-      setPreview({ name: document.fileName, url: result.url });
+      setPreview({ name: document.fileName, url: result.url, document });
     });
   }
 
-  function renderDocActions(
-    document: AgreementAttachment,
-    requirement?: Requirement,
-  ) {
-    const replace = () => {
-      if (requirement) startUploadForRequirement(requirement);
-      else
-        queuePickAndUpload({
-          subject: document.subject,
-          documentTypeCode: document.documentTypeCode,
-          supersedesDocumentId: document.id,
-        });
-    };
+  function renderDocActions(document: AgreementAttachment) {
     return (
       <View style={s.actions}>
         <MobileButton
@@ -296,11 +284,6 @@ export function AgreementAttachments({
         >
           ดู
         </MobileButton>
-        {state?.editable && document.isCurrent && (
-          <MobileButton variant="outline" disabled={busy} onPress={replace}>
-            อัปโหลดใหม่
-          </MobileButton>
-        )}
       </View>
     );
   }
@@ -352,7 +335,7 @@ export function AgreementAttachments({
               {new Date(doc.createdAt).toLocaleDateString("th-TH")}
             </Text>
 
-            {renderDocActions(doc, requirement)}
+            {renderDocActions(doc)}
           </View>
         ) : (
           <>
@@ -660,6 +643,28 @@ export function AgreementAttachments({
             ปิดเอกสาร
           </MobileButton>
           {preview && <ContractDocumentPreview url={preview.url} />}
+          {preview && state?.editable && preview.document.isCurrent && (
+            <MobileButton
+              disabled={busy}
+              onPress={() => {
+                const document = preview.document;
+                setPreview(null);
+                setTimeout(() => {
+                  const requirement = state.requirements.find((item) =>
+                    currentDocForRequirement(item, state.documents)?.id === document.id,
+                  );
+                  if (requirement) startUploadForRequirement(requirement);
+                  else queuePickAndUpload({
+                    subject: document.subject,
+                    documentTypeCode: document.documentTypeCode,
+                    supersedesDocumentId: document.id,
+                  });
+                }, 400);
+              }}
+            >
+              อัพโหลดใหม่
+            </MobileButton>
+          )}
         </View>
       </Modal>
     </View>
