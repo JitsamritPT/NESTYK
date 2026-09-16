@@ -9,7 +9,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
+import { useLocale } from "@nestyk/i18n";
+import { MobileBrandLoader, MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { AgentContract, AgentTenant } from "@nestyk/types";
 import { getAgentTenant, listAgentTenants } from "../lib/agent-tenants-api";
 import { TenantForm } from "./TenantForm";
@@ -66,6 +67,7 @@ const renewal = (t: AgentTenant) =>
   });
 
 export function AgentTenantsScreen() {
+  const { t } = useLocale();
   const { theme } = useMobileTheme();
   const [items, setItems] = useState<AgentTenant[]>([]);
   const [selected, setSelected] = useState<AgentTenant | null>(null);
@@ -87,6 +89,7 @@ export function AgentTenantsScreen() {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [gateOpen, setGateOpen] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -94,6 +97,11 @@ export function AgentTenantsScreen() {
   const panel = { backgroundColor: theme.surface, borderColor: theme.border };
   const title = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
+
+  useEffect(() => {
+    if (loading && !items.length) setGateOpen(false);
+  }, [loading, items.length]);
+
   async function reload() {
     const version = ++refreshVersion.current;
     setLoading(true);
@@ -187,6 +195,16 @@ export function AgentTenantsScreen() {
         "สัญญาบันทึกแล้ว แต่โหลดข้อมูลผู้เช่าล่าสุดไม่สำเร็จ กรุณาออกจากเมนูผู้เช่าแล้วเข้าใหม่",
       );
     }
+  }
+  if (!gateOpen && !creating && !selected) {
+    return (
+      <MobileBrandLoader
+        fill
+        size="md"
+        done={!loading}
+        onComplete={() => setGateOpen(true)}
+      />
+    );
   }
   if (creating)
     return (
@@ -424,7 +442,9 @@ export function AgentTenantsScreen() {
           </Pressable>
         ))}
       </View>
-      {loading || opening ? <ActivityIndicator /> : null}
+      {opening ? (
+        <ActivityIndicator color={tokens.colors.roles.agent} />
+      ) : null}
       {!!error && (
         <Text accessibilityRole="alert" style={[s.body, { color: "#C43D4C" }]}>
           {error}

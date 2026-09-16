@@ -25,14 +25,18 @@ import {
   Handshake,
   Shield,
   User,
+  UserPlus,
   CreditCard,
   Gear,
   Globe,
-  CheckCircle,
+  Check,
   CalendarPlus,
   QrCode,
   Buildings,
   Bed,
+  Bathtub,
+  StackSimple,
+  FrameCorners,
   Camera,
   Coins,
   MapPin,
@@ -44,16 +48,20 @@ import {
   FacebookLogo,
   AppleLogo,
   ArrowsLeftRight,
+  Funnel,
+  Lock,
+  Plus,
   IconProps,
 } from 'phosphor-react';
 import { tokens } from '../theme/tokens';
 import { AppIconName, AppIconTone } from './types';
 
-const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
+const ICON_MAP: Record<Exclude<AppIconName, 'house-plus'>, React.ComponentType<IconProps>> = {
   search: MagnifyingGlass,
   home: House,
   key: Key,
   grid: SquaresFour,
+  'list-rows': List,
   menu: List,
   bell: Bell,
   moon: Moon,
@@ -75,14 +83,18 @@ const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
   handshake: Handshake,
   shield: Shield,
   user: User,
+  'user-plus': UserPlus,
   'credit-card': CreditCard,
   gear: Gear,
   globe: Globe,
-  check: CheckCircle,
+  check: Check,
   'calendar-plus': CalendarPlus,
   'qr-code': QrCode,
   buildings: Buildings,
   bed: Bed,
+  bath: Bathtub,
+  stairs: StackSimple,
+  'room-size': FrameCorners,
   camera: Camera,
   coins: Coins,
   'map-pin': MapPin,
@@ -94,6 +106,9 @@ const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
   facebook: FacebookLogo,
   apple: AppleLogo,
   swap: ArrowsLeftRight,
+  funnel: Funnel,
+  lock: Lock,
+  plus: Plus,
 };
 
 const TONE_COLORS: Record<AppIconTone, string> = {
@@ -125,6 +140,19 @@ export const AppIcon: React.FC<AppIconProps> = ({
   weight = 'regular',
   className,
 }) => {
+  if (name === 'house-plus') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+        <path
+          d="M12 20H3V10L12 2L20 9M19 13V21M15 17H23"
+          stroke={color ?? TONE_COLORS[tone]}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
   const Icon = ICON_MAP[name];
   if (!Icon) return null;
   return (

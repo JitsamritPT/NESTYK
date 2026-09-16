@@ -49,7 +49,7 @@ export const SmartAppBanner: React.FC<SmartAppBannerProps> = ({
               flexShrink: 0,
             }}
           >
-            <NestykLogo variant="mark" height={38} style={{ borderRadius: 10 }} />
+            <NestykLogo variant="markOnDark" height={38} style={{ borderRadius: 10 }} />
           </div>
           <div>
             <div style={{ fontWeight: 500, fontSize: '14px', letterSpacing: '0.2px' }}>

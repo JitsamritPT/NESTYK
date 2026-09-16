@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Apply docs/new-project schemas in order onto local Postgres.
+# Apply docs/new-project schemas onto local Supabase Postgres (same stack as Storage).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-CONTAINER="${NESTYK_PG_CONTAINER:-nestyk-postgres}"
+CONTAINER="${NESTYK_PG_CONTAINER:-supabase_db_NESTYK}"
 DB_USER="${POSTGRES_USER:-postgres}"
-DB_NAME="${POSTGRES_DB:-nestyk_db}"
+DB_NAME="${POSTGRES_DB:-postgres}"
 
 FILES=(
   "docs/new-project/roles/schema.sql"
   "docs/new-project/agent/create-room/schema.sql"
   "docs/new-project/agent/create-room/migrations/20260909-amenities-catalog.sql"
+  "docs/new-project/agent/create-room/migrations/20260909-remove-local-room-photos.sql"
   "docs/new-project/agent/leads/schema.sql"
   "docs/new-project/agent/leads/migrations/20260908-room-seeker-preferences.sql"
   "docs/new-project/agent/leads/migrations/20260908-lead-profile.sql"
@@ -22,7 +23,7 @@ FILES=(
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
   echo "Container '$CONTAINER' is not running."
-  echo "Start with: docker compose up -d"
+  echo "Start with: ./docs/new-project/docker/start-supabase-local.sh"
   exit 1
 fi
 

@@ -26,10 +26,28 @@ const room = {
     { is_primary: true, contact: { id: 3, created_by_user_id: 7, name: 'Own contact', phone: '123' } },
     { is_primary: false, contact: { id: 4, created_by_user_id: 8, name: 'Other agent secret', phone: '456' } },
   ],
-  layout_values: [{ layout: { code: 'bedroom' }, value: '1' }],
+  layout_values: [
+    { layout: { code: 'bedroom' }, value: '1' },
+    { layout: { code: 'room_size' }, value: '35' },
+  ],
+  room_type: { bedroom_count: 1 },
+  updated_at: new Date('2026-01-15T10:00:00.000Z'),
   facilities: [], custom_facilities: [],
   owner_identity_number: 'must-not-leak', documents: [{ id: 1, kind: 'ownership', media_url: 'https://example.com/ownership.pdf', sort_order: 0 }],
 };
+
+test('detail returns independent lease terms and falls back for legacy rooms', async () => {
+  const source = { ...room, advance_rent_months: 1, deposit_months: 2, prices: [
+    { contractTypeId: 1, contractTypeCode: 'monthly_12', price: 15000, advanceRentMonths: 0, depositMonths: 3 },
+    { contractTypeId: 2, contractTypeCode: 'monthly_6', price: 18000, advanceRentMonths: 2, depositMonths: 1 },
+  ] };
+  const service = new AgentListingsService({ findOne: async () => source });
+  const result = await service.viewMine(7, 22);
+  assert.deepEqual(result.prices.map((p) => [p.contractTypeId, p.advanceRentMonths, p.depositMonths]), [[2, 2, 1], [1, 0, 3]]);
+  source.prices = [];
+  const legacy = await service.viewMine(7, 22);
+  assert.ok(legacy.prices.every((p) => p.advanceRentMonths === 1 && p.depositMonths === 2));
+});
 
 test('detail endpoint scopes access, returns all prices and cover first, excludes sensitive fields', async (t) => {
   process.env.ALLOW_DEV_AUTH = 'true';
@@ -69,7 +87,7 @@ test('detail endpoint scopes access, returns all prices and cover first, exclude
 test('list paginates distinct room IDs and uses all normalized prices', async () => {
   const calls = [];
   const qb = {};
-  for (const name of ['leftJoin','where','andWhere','select','distinct','orderBy','offset','limit']) qb[name] = (...args) => { calls.push([name, ...args]); return qb; };
+  for (const name of ['leftJoin','where','andWhere','select','addSelect','distinct','groupBy','orderBy','addOrderBy','offset','limit']) qb[name] = (...args) => { calls.push([name, ...args]); return qb; };
   qb.clone = () => qb;
   qb.getCount = async () => 41;
   qb.getRawMany = async () => [{ id: 22 }];
@@ -80,7 +98,11 @@ test('list paginates distinct room IDs and uses all normalized prices', async ()
   assert.equal(result.total, 41);
   assert.equal(result.items[0].prices.length, 2);
   assert.equal(result.items[0].coverMediaUrl, 'cover.jpg');
-  assert.ok(calls.some(([name, value]) => name === 'distinct' && value === true));
+  assert.equal(result.items[0].bedroomCount, '1');
+  assert.equal(result.items[0].roomSizeSqm, '35');
+  assert.ok(calls.some(([name, col]) => name === 'groupBy' && col === 'room.id'));
+  assert.ok(calls.some(([name, col]) => name === 'addSelect' && col === 'MAX(room.updated_at)'));
+  assert.ok(calls.some(([name, col]) => name === 'orderBy' && col === 'sort_key'));
   assert.ok(calls.some(([name, value]) => name === 'offset' && value === 20));
   assert.ok(calls.some(([name, sql, params]) => name === 'andWhere' && params?.q === '%test%'));
 });

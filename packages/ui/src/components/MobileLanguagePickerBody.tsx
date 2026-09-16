@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useLocale, SupportedLocale } from '@nestyk/i18n';
-import { MobileIcon } from '../icons/MobileIcon';
+import { SelectionCheck } from './SelectionCheck';
 import { tokens } from '../theme/tokens';
 import { getCardElevation } from '../theme/elevation';
 import { useMobileTheme } from '../theme/ThemeContext';
@@ -94,9 +94,7 @@ export const MobileLanguagePickerBody: React.FC<MobileLanguagePickerBodyProps> =
               >
                 {t.mobile.settings.languageNames[option]}
               </Text>
-              {isActive ? (
-                <MobileIcon name="check" size={20} color={BRAND_YELLOW} weight="bold" />
-              ) : null}
+              {isActive ? <SelectionCheck selected variant="chip" size="md" /> : null}
             </TouchableOpacity>
           );
         })}

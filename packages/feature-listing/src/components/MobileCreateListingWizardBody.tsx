@@ -4,9 +4,13 @@ import { RoomNearbyEditor, type NearbySearch } from './RoomNearbyEditor';
 import { RoomEditSectionList } from './RoomEditSectionList';
 import { RoomPhotoLightbox } from './RoomPhotoLightbox';
 import { RoomPhotoCompareModal } from './RoomPhotoCompareModal';
+import { WizardSheetChrome } from './WizardSheetChrome';
+import { WizardSheetFooter } from './WizardSheetFooter';
+import { ContactListRow } from './ContactListRow';
+import { SelectedContactCard } from './SelectedContactCard';
 import { relocateNearby, isCustomPlace } from '../nearby';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -19,13 +23,16 @@ import {
   Modal,
   BackHandler,
   Image,
+  TextInput,
 } from 'react-native';
 import { useLocale } from '@nestyk/i18n';
 import {
   MobileButton,
-  MobileBadge,
   MobileInput,
   MobileIcon,
+  MobileBottomSheet,
+  SelectionChip,
+  SelectionCheck,
   tokens,
   getCardElevation,
 } from '@nestyk/ui/native';
@@ -33,16 +40,47 @@ import { ListingEngineConfig } from '../config';
 import { PlaceDetails, PlaceSuggestion } from '../places';
 import { PropertyPlaceMap } from './PropertyPlaceMap';
 
-const CREATE_STEPS = [1, 2, 6, 5, 8];
+const CREATE_STEPS = [1, 2, 5, 8, 6];
 const EDIT_STEPS = [1, 2, 5, 8, 6, 3, 4, 7];
+/** Required before save on create hub (photos optional). */
+const CREATE_REQUIRED_STEPS = [1, 2, 5, 8];
 const OWNER_NOTE_MAX = 200;
 const DEFAULT_MAP = { latitude: 13.7563, longitude: 100.5018 };
 const ADVANCE_MONTH_OPTIONS = [0, 1, 2] as const;
 const DEPOSIT_MONTH_OPTIONS = [1, 2, 3] as const;
+/** Suggested only when opening Add lease the first time — not pre-committed on create. */
+const SUGGESTED_ADVANCE_MONTHS = 1;
+const SUGGESTED_DEPOSIT_MONTHS = 2;
+const MAX_ROOM_CONTACTS = 2;
+
+type RoomContactSelection = {
+  key: string;
+  id?: number;
+  name: string;
+  phone: string;
+  roomCount?: number;
+};
+
+function roomContactKey(id?: number, phone?: string) {
+  if (id != null) return `id:${id}`;
+  return `new:${String(phone ?? '').replace(/\D/g, '')}`;
+}
 const LISTING_SOURCE_OPTIONS = [
-  { code: 'co_agent' as const, role: 'agent' as const, icon: 'handshake' as const },
-  { code: 'owner' as const, role: 'owner' as const, icon: 'user' as const },
+  {
+    code: 'owner' as const,
+    icon: 'user' as const,
+    iconColor: '#926515',
+    iconBg: '#FFF3D6',
+  },
+  {
+    code: 'co_agent' as const,
+    icon: 'handshake' as const,
+    iconColor: '#52647A',
+    iconBg: '#EEF2F6',
+  },
 ];
+const SOURCE_SELECT_BORDER = tokens.colors.brand[500];
+const SOURCE_IDLE_BORDER = tokens.colors.border;
 
 export type ContactOption = {
   id: number;
@@ -90,18 +128,33 @@ export type CreateRoomWizardSubmitData = {
     longitude?: number;
   };
   contactId?: number;
+  /** Up to 2 existing contact ids (first = primary). */
+  contactIds?: number[];
   contact?: {
     name: string;
     phone: string;
     note?: string;
   };
+  /** New contacts without id (created on save). Combined with contactIds ≤ 2. */
+  contacts?: Array<{
+    name: string;
+    phone: string;
+    note?: string;
+  }>;
+  /** Prefill for edit UI (id optional for unsaved drafts). */
+  selectedContacts?: Array<{
+    id?: number;
+    name: string;
+    phone: string;
+    roomCount?: number;
+  }>;
   listingTitle: string;
   listingSourceCode: ListingSourceCode;
   roomTypeId?: number;
   roomId?: string;
   waterRatePerUnit?: number;
   electricRatePerUnit?: number;
-  prices: Array<{ contractTypeId: number; price: number }>;
+  prices: Array<{ contractTypeId: number; price: number; advanceRentMonths?: number; depositMonths?: number }>;
   advanceRentMonths: number;
   depositMonths: number;
   layout: Array<{ code: string; value: string }>;
@@ -136,6 +189,15 @@ export interface MobileCreateListingWizardBodyProps {
   title?: string;
   submitLabel?: string;
   onSubmittingChange?: (busy: boolean) => void;
+  /**
+   * Parent (shell back / Android back) should call this first.
+   * Returns true when the wizard consumed the back (section → hub → source).
+   */
+  backHandlerRef?: React.MutableRefObject<(() => boolean) | null>;
+  /**
+   * Sync shell header title: section names on drill-in, "Add room" on hub/source.
+   */
+  onHeaderTitleChange?: (title: string) => void;
   pickPhotos?: (limit: number) => Promise<RoomPhoto[]>;
   uploadPhoto?: (photo: RoomPhoto) => Promise<string>;
   enhancePhoto?: (photo: RoomPhoto) => Promise<RoomPhoto>;
@@ -143,6 +205,7 @@ export interface MobileCreateListingWizardBodyProps {
   onSubmitListing?: (data: CreateRoomWizardSubmitData) => void | Promise<void>;
   searchPlaces?: (query: string) => Promise<PlaceSuggestion[]>;
   getPlaceDetails?: (placeId: string) => Promise<PlaceDetails>;
+  reverseGeocode?: (latitude: number, longitude: number) => Promise<PlaceDetails>;
   listContacts?: () => Promise<ContactOption[]>;
   listPropertyTypes?: () => Promise<PropertyTypeOption[]>;
   listContractTypes?: () => Promise<ContractTypeOption[]>;
@@ -170,6 +233,7 @@ function formatBaht(value: number) {
 
 function monthChipLabel(months: number, noneLabel: string, monthsTemplate: string) {
   if (months === 0) return noneLabel;
+  if (months === 1 && monthsTemplate === '{months} months') return '1 month';
   return interpolate(monthsTemplate, { months });
 }
 
@@ -189,12 +253,15 @@ export const MobileCreateListingWizardBody: React.FC<
   title,
   submitLabel,
   onSubmittingChange,
+  backHandlerRef,
+  onHeaderTitleChange,
   pickPhotos,
   uploadPhoto,
   enhancePhoto,
   onSubmitListing,
   searchPlaces,
   getPlaceDetails,
+  reverseGeocode,
   listContacts,
   listPropertyTypes,
   listContractTypes,
@@ -205,11 +272,10 @@ export const MobileCreateListingWizardBody: React.FC<
 }) => {
   const { t } = useLocale();
   const cr = t.agent.createRoom;
-  const themeColor = tokens.colors.roles[config.actorRole];
+  const accent = tokens.colors.brand[500];
+  const accentInk = tokens.colors.primary;
 
   const [step, setStep] = useState(1);
-  const visibleSteps = initialData ? EDIT_STEPS : CREATE_STEPS;
-  const stepIndex = visibleSteps.indexOf(step);
   const [description, setDescription] = useState('');
   const [availableFrom, setAvailableFrom] = useState('');
   const [nearbyOther, setNearbyOther] = useState('');
@@ -233,7 +299,7 @@ export const MobileCreateListingWizardBody: React.FC<
   const [propertyName, setPropertyName] = useState('');
   const [address, setAddress] = useState('');
   const [district, setDistrict] = useState('');
-  const [province, setProvince] = useState('Bangkok');
+  const [province, setProvince] = useState('');
   const [subdistrict, setSubdistrict] = useState('');
   const [postalCode, setPostalCode] = useState('');
   const [propertyTypeId, setPropertyTypeId] = useState<number | null>(null);
@@ -246,10 +312,15 @@ export const MobileCreateListingWizardBody: React.FC<
   const [placesLoading, setPlacesLoading] = useState(false);
   const [placesError, setPlacesError] = useState('');
   const [hasSearchedPlaces, setHasSearchedPlaces] = useState(false);
+  const [pinResolving, setPinResolving] = useState(false);
+  const [placeEntryMode, setPlaceEntryMode] = useState<'search' | 'manual'>('search');
+  const [addressFromPlace, setAddressFromPlace] = useState(false);
   const skipPlacesSearch = useRef(false);
   const placesSeq = useRef(0);
   const searchPlacesRef = useRef(searchPlaces);
   const getPlaceDetailsRef = useRef(getPlaceDetails);
+  const reverseGeocodeRef = useRef(reverseGeocode);
+  const pinResolveSeq = useRef(0);
   const listContactsRef = useRef(listContacts);
   const listPropertyTypesRef = useRef(listPropertyTypes);
   const listContractTypesRef = useRef(listContractTypes);
@@ -257,12 +328,18 @@ export const MobileCreateListingWizardBody: React.FC<
   const formScrollRef = useRef<ScrollView>(null);
   searchPlacesRef.current = searchPlaces;
   getPlaceDetailsRef.current = getPlaceDetails;
+  reverseGeocodeRef.current = reverseGeocode;
   listContactsRef.current = listContacts;
   listPropertyTypesRef.current = listPropertyTypes;
   listContractTypesRef.current = listContractTypes;
   listRoomTypesRef.current = listRoomTypes;
   const [listingTitle, setListingTitle] = useState('');
-  const [listingSourceCode, setListingSourceCode] = useState<ListingSourceCode | null>(null);
+  const [listingSourceCode, setListingSourceCode] = useState<ListingSourceCode | null>(
+    initialData?.listingSourceCode ?? null,
+  );
+  const [sourceDraft, setSourceDraft] = useState<ListingSourceCode | null>(
+    initialData?.listingSourceCode ?? null,
+  );
   const [roomId, setRoomId] = useState('');
   const [floor, setFloor] = useState('');
   const [building, setBuilding] = useState('');
@@ -270,6 +347,9 @@ export const MobileCreateListingWizardBody: React.FC<
   const [roomTypes, setRoomTypes] = useState<RoomTypeOption[]>([]);
   const [roomTypesLoading, setRoomTypesLoading] = useState(false);
   const [roomTypesError, setRoomTypesError] = useState('');
+  const [layoutSheet, setLayoutSheet] = useState<'roomType' | 'bedroom' | 'bathroom' | null>(
+    null,
+  );
 
   const [bedroom, setBedroom] = useState('');
   const [bathroom, setBathroom] = useState('1');
@@ -280,8 +360,28 @@ export const MobileCreateListingWizardBody: React.FC<
   const [contractTypes, setContractTypes] = useState<ContractTypeOption[]>([]);
   const [contractTypesLoading, setContractTypesLoading] = useState(false);
   const [contractTypesError, setContractTypesError] = useState('');
-  const [advanceRentMonths, setAdvanceRentMonths] = useState(1);
-  const [depositMonths, setDepositMonths] = useState(2);
+  const [advanceRentMonths, setAdvanceRentMonths] = useState<number | null>(null);
+  const [depositMonths, setDepositMonths] = useState<number | null>(null);
+  const [termsByTypeId, setTermsByTypeId] = useState<Record<string, { advanceRentMonths: number; depositMonths: number }>>({});
+  const leaseTerms = (id: number) => termsByTypeId[String(id)] ?? {
+    advanceRentMonths: advanceRentMonths ?? SUGGESTED_ADVANCE_MONTHS,
+    depositMonths: depositMonths ?? SUGGESTED_DEPOSIT_MONTHS,
+  };
+  const [leaseSheet, setLeaseSheet] = useState<
+    null | { mode: 'add' } | { mode: 'edit'; contractTypeId: number }
+  >(null);
+  const [draftTermId, setDraftTermId] = useState<number | null>(null);
+  const [draftRent, setDraftRent] = useState('');
+  const [draftAdvance, setDraftAdvance] = useState(SUGGESTED_ADVANCE_MONTHS);
+  const [draftDeposit, setDraftDeposit] = useState(SUGGESTED_DEPOSIT_MONTHS);
+  const [leaseSheetError, setLeaseSheetError] = useState('');
+  /** Room contact: pick list or create form as bottom sheets. */
+  const [contactSheet, setContactSheet] = useState<null | 'pick' | 'create'>(null);
+  const [draftContactId, setDraftContactId] = useState<number | null>(null);
+  const [contactSheetError, setContactSheetError] = useState('');
+  /** Draft fields for New contact sheet only — committed on Use this contact. */
+  const [draftOwnerName, setDraftOwnerName] = useState('');
+  const [draftOwnerPhone, setDraftOwnerPhone] = useState('');
   const [waterRate, setWaterRate] = useState('');
   const [electricRate, setElectricRate] = useState('');
 
@@ -291,6 +391,7 @@ export const MobileCreateListingWizardBody: React.FC<
   const [enhancingUri, setEnhancingUri] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ uri: string; beforeUri?: string } | null>(null);
   const [compare, setCompare] = useState<{ sourceUri: string; beforeUri: string; after: RoomPhoto } | null>(null);
+  const [photoMenuUri, setPhotoMenuUri] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const submitLock = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -305,7 +406,7 @@ export const MobileCreateListingWizardBody: React.FC<
   const [owners, setOwners] = useState<PropertyOwnerOption[]>([]);
   const [ownersLoading, setOwnersLoading] = useState(false);
   const [ownersError, setOwnersError] = useState('');
-  const [selectedOwnerId, setSelectedOwnerId] = useState<number | null>(null);
+  const [roomContacts, setRoomContacts] = useState<RoomContactSelection[]>([]);
   const [requiredPrompt, setRequiredPrompt] = useState<string | null>(null);
 
   useEffect(() => {
@@ -329,15 +430,46 @@ export const MobileCreateListingWizardBody: React.FC<
     setRentsByTypeId(Object.fromEntries(initialData.prices.map((price) => [String(price.contractTypeId), String(price.price)])));
     setSelectedContractTypeIds(initialData.prices.map((price) => price.contractTypeId));
     setAdvanceRentMonths(initialData.advanceRentMonths); setDepositMonths(initialData.depositMonths);
+    setTermsByTypeId(Object.fromEntries(initialData.prices.map((price) => [String(price.contractTypeId), {
+      advanceRentMonths: price.advanceRentMonths ?? initialData.advanceRentMonths ?? SUGGESTED_ADVANCE_MONTHS,
+      depositMonths: price.depositMonths ?? initialData.depositMonths ?? SUGGESTED_DEPOSIT_MONTHS,
+    }])));
     setWaterRate(initialData.waterRatePerUnit == null ? '' : String(initialData.waterRatePerUnit));
     setElectricRate(initialData.electricRatePerUnit == null ? '' : String(initialData.electricRatePerUnit));
     setPhotos(initialData.medias.map((media) => ({ uri: media.mediaUrl, mediaUrl: media.mediaUrl, name: 'room.jpg', mimeType: 'image/jpeg' })));
-    setSelectedOwnerId(initialData.contactId ?? null);
-    setOwnerMode(initialData.contactId ? 'pick' : 'create');
-    setOwnerName(initialData.contact?.name ?? ''); setOwnerPhone(initialData.contact?.phone ?? '');
+    const seeded =
+      initialData.selectedContacts?.length
+        ? initialData.selectedContacts
+        : initialData.contactId || initialData.contact
+          ? [
+              {
+                id: initialData.contactId,
+                name:
+                  initialData.contact?.name ??
+                  initialData.selectedContacts?.[0]?.name ??
+                  '',
+                phone:
+                  initialData.contact?.phone ??
+                  initialData.selectedContacts?.[0]?.phone ??
+                  '',
+              },
+            ].filter((c) => c.name || c.phone || c.id)
+          : [];
+    setRoomContacts(
+      seeded.slice(0, MAX_ROOM_CONTACTS).map((c) => ({
+        key: roomContactKey(c.id, c.phone),
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        roomCount: c.roomCount,
+      })),
+    );
+    setOwnerMode(seeded.length ? 'pick' : listContacts ? 'pick' : 'create');
+    setOwnerName(initialData.contact?.name ?? '');
+    setOwnerPhone(initialData.contact?.phone ?? '');
     setOwnerOther(initialData.contact?.note ?? '');
     skipPlacesSearch.current = true;
-  }, [initialData]);
+  }, [initialData, listContacts]);
 
   useEffect(() => {
     if (latitude == null || longitude == null) return;
@@ -358,9 +490,66 @@ export const MobileCreateListingWizardBody: React.FC<
     return keys[step - 1] ?? '';
   }, [cr.steps, step]);
 
+  const sectionHint = useMemo(() => {
+    if (step === 1) return cr.propertySectionHint;
+    if (step === 2) return cr.layoutSectionHint;
+    if (step === 5) return cr.pricingSectionHint;
+    if (step === 8) return cr.roomContactSectionHint;
+    return null;
+  }, [
+    step,
+    cr.propertySectionHint,
+    cr.layoutSectionHint,
+    cr.pricingSectionHint,
+    cr.roomContactSectionHint,
+  ]);
+
+  const roomsLinkedLabel = useCallback(
+    (count: number | null | undefined) => {
+      const n = count ?? 0;
+      if (n <= 0) return cr.ownerRoomsNone;
+      if (n === 1) return cr.ownerRoomsOne;
+      return interpolate(cr.ownerRoomsCount, { count: n });
+    },
+    [cr.ownerRoomsNone, cr.ownerRoomsOne, cr.ownerRoomsCount],
+  );
+
+  const selectedPropertyTypeCode = useMemo(
+    () => propertyTypes.find((opt) => opt.id === propertyTypeId)?.code ?? null,
+    [propertyTypes, propertyTypeId],
+  );
+  const isHouseType = selectedPropertyTypeCode === 'house';
+  const nameFieldLabel = isHouseType
+    ? cr.propertyNameOrLocationLabel
+    : cr.projectOrBuildingLabel;
+  const nameFieldPlaceholder = isHouseType
+    ? cr.propertyNameOrLocationPlaceholder
+    : cr.projectOrBuildingPlaceholder;
+  const hasMapPin = latitude != null && longitude != null;
+  const areaFieldsEditable =
+    placeEntryMode === 'manual' ||
+    !searchPlaces ||
+    !district.trim() ||
+    !province.trim();
+
+  const selectedRoomType = useMemo(
+    () => roomTypes.find((item) => item.id === roomTypeId) ?? null,
+    [roomTypes, roomTypeId],
+  );
+  const selectedRoomTypeLabel = useMemo(() => {
+    if (!selectedRoomType) return null;
+    const labels = t.masters.roomTypes as Record<string, string>;
+    return labels[selectedRoomType.code] ?? selectedRoomType.code;
+  }, [selectedRoomType, t.masters.roomTypes]);
+  /** Fixed by room type (studio / N-bed). Duplex & penthouse stay editable. */
+  const bedroomLocked = selectedRoomType?.bedroomCount != null;
+
+  const BEDROOM_OPTIONS = [1, 2, 3, 4, 5] as const;
+  const BATHROOM_OPTIONS = [1, 2, 3, 4, 5] as const;
+
   const fieldLabel = (key: string) => {
     const labels: Record<string, string> = {
-      propertyName: cr.propertyName,
+      propertyName: nameFieldLabel,
       address: cr.address,
       district: cr.district,
       province: cr.province,
@@ -424,42 +613,151 @@ export const MobileCreateListingWizardBody: React.FC<
     });
   };
 
-  const toggleContract = (id: number) => {
-    setSelectedContractTypeIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
-      return contractTypes.map((opt) => opt.id).filter((item) => next.includes(item));
+  const closeLeaseSheet = () => {
+    setLeaseSheet(null);
+    setLeaseSheetError('');
+  };
+
+  const closeContactSheet = () => {
+    setContactSheet(null);
+    setContactSheetError('');
+    setDraftOwnerName('');
+    setDraftOwnerPhone('');
+  };
+
+  /** Create → pick; pick → close. Avoids stacking two Modals. */
+  const dismissContactSheetStep = () => {
+    if (contactSheet === 'create') {
+      setDraftOwnerName('');
+      setDraftOwnerPhone('');
+      setContactSheetError('');
+      setContactSheet('pick');
+      return;
+    }
+    closeContactSheet();
+  };
+
+  const openPickContactSheet = () => {
+    setDraftContactId(null);
+    setOwnerQuery('');
+    setContactSheetError('');
+    setContactSheet('pick');
+  };
+
+  const openCreateContactSheet = () => {
+    if (roomContacts.length >= MAX_ROOM_CONTACTS) {
+      setContactSheetError(cr.roomContactsFull);
+      setContactSheet('pick');
+      return;
+    }
+    // Same sheet — swap content only (no second Modal).
+    setDraftOwnerName('');
+    setDraftOwnerPhone('');
+    setContactSheetError('');
+    setContactSheet('create');
+  };
+
+  const openAddLease = () => {
+    const isFirstLease = selectedContractTypeIds.length === 0;
+    setDraftTermId(null);
+    setDraftRent('');
+    setDraftAdvance(
+      isFirstLease || advanceRentMonths == null
+        ? SUGGESTED_ADVANCE_MONTHS
+        : advanceRentMonths,
+    );
+    setDraftDeposit(
+      isFirstLease || depositMonths == null
+        ? SUGGESTED_DEPOSIT_MONTHS
+        : depositMonths,
+    );
+    setLeaseSheetError('');
+    setLeaseSheet({ mode: 'add' });
+  };
+
+  const openEditLease = (contractTypeId: number) => {
+    setDraftTermId(contractTypeId);
+    setDraftRent(rentsByTypeId[String(contractTypeId)] ?? '');
+    setDraftAdvance(leaseTerms(contractTypeId).advanceRentMonths);
+    setDraftDeposit(leaseTerms(contractTypeId).depositMonths);
+    setLeaseSheetError('');
+    setLeaseSheet({ mode: 'edit', contractTypeId });
+  };
+
+  const commitLeaseSheet = () => {
+    if (draftTermId == null) {
+      setLeaseSheetError(cr.leaseLengthRequired);
+      return;
+    }
+    const rent = draftRent.trim();
+    if (!rent || !(Number(rent) > 0)) {
+      setLeaseSheetError(cr.rentAmountRequired);
+      return;
+    }
+    if (leaseSheet?.mode === 'add' && !selectedContractTypeIds.includes(draftTermId)) {
+      setSelectedContractTypeIds((prev) =>
+        contractTypes.map((opt) => opt.id).filter((id) => prev.includes(id) || id === draftTermId),
+      );
+    }
+    setRentsByTypeId((prev) => ({ ...prev, [String(draftTermId)]: rent }));
+    setTermsByTypeId((prev) => ({ ...prev, [String(draftTermId)]: {
+      advanceRentMonths: draftAdvance, depositMonths: draftDeposit,
+    } }));
+    clearFieldError('contractTerm');
+    clearFieldError(`rent_${draftTermId}`);
+    closeLeaseSheet();
+  };
+
+  const removeLeaseFromSheet = () => {
+    if (leaseSheet?.mode !== 'edit') return;
+    const id = leaseSheet.contractTypeId;
+    const remaining = selectedContractTypeIds.filter((item) => item !== id);
+    setSelectedContractTypeIds(remaining);
+    setTermsByTypeId((prev) => {
+      const next = { ...prev };
+      delete next[String(id)];
+      return next;
     });
+    setRentsByTypeId((prev) => {
+      const next = { ...prev };
+      delete next[String(id)];
+      return next;
+    });
+    if (remaining.length === 0) {
+      setAdvanceRentMonths(null);
+      setDepositMonths(null);
+    }
     clearFieldError('contractTerm');
     clearFieldError(`rent_${id}`);
+    closeLeaseSheet();
   };
 
   const renderMonthChips = (
     options: readonly number[],
     value: number,
     onChange: (months: number) => void,
+    monthlyRent?: number,
   ) => (
     <View style={styles.termRow}>
       {options.map((months) => {
         const selected = value === months;
+        const amount =
+          monthlyRent && monthlyRent > 0 && months > 0 ? monthlyRent * months : null;
         return (
-          <Pressable
+          <SelectionChip
             key={months}
+            label={monthChipLabel(months, cr.monthsNone, cr.contractMonths)}
+            subtitle={
+              amount != null
+                ? interpolate(cr.thbAmount, { amount: formatBaht(amount) })
+                : undefined
+            }
+            selected={selected}
             onPress={() => onChange(months)}
-            android_ripple={{ color: '#00000022' }}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            style={({ pressed }) => [
-              styles.termChip,
-              selected ? { backgroundColor: themeColor, borderColor: themeColor } : null,
-              pressed ? { opacity: 0.88 } : null,
-            ]}
-          >
-            <Text
-              style={[styles.termChipText, selected ? styles.termChipTextSelected : null]}
-            >
-              {monthChipLabel(months, cr.monthsNone, cr.contractMonths)}
-            </Text>
-          </Pressable>
+            accentColor={accent}
+            inkColor={tokens.colors.primary}
+            style={styles.termChipGrow}
+          />
         );
       })}
     </View>
@@ -467,6 +765,13 @@ export const MobileCreateListingWizardBody: React.FC<
 
   useEffect(() => {
     if (!searchPlacesRef.current) return;
+    if (placeEntryMode === 'manual') {
+      setSuggestions([]);
+      setPlacesLoading(false);
+      setPlacesError('');
+      setHasSearchedPlaces(false);
+      return;
+    }
     if (skipPlacesSearch.current) {
       skipPlacesSearch.current = false;
       return;
@@ -509,7 +814,7 @@ export const MobileCreateListingWizardBody: React.FC<
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [propertyName, cr.placesError]);
+  }, [propertyName, cr.placesError, placeEntryMode]);
 
   useEffect(() => {
     if (step !== 8) return;
@@ -572,12 +877,9 @@ export const MobileCreateListingWizardBody: React.FC<
         if (cancelled) return;
         setContractTypes(rows);
         setContractTypesError('');
-        setSelectedContractTypeIds((prev) => {
-          const valid = prev.filter((id) => rows.some((item) => item.id === id));
-          if (valid.length) return valid;
-          const twelve = rows.find((item) => item.termMonths === 12) ?? rows[0];
-          return twelve ? [twelve.id] : [];
-        });
+        setSelectedContractTypeIds((prev) =>
+          prev.filter((id) => rows.some((item) => item.id === id)),
+        );
       })
       .catch((err) => {
         if (cancelled) return;
@@ -604,6 +906,21 @@ export const MobileCreateListingWizardBody: React.FC<
         if (cancelled) return;
         setRoomTypes(rows);
         setRoomTypesError('');
+        if (initialData) return;
+        setRoomTypeId((current) => {
+          if (current != null) return current;
+          const def =
+            rows.find((row) => row.code === 'one_bedroom') ??
+            rows.find((row) => row.bedroomCount === 1) ??
+            null;
+          if (!def) return current;
+          if (def.bedroomCount != null) {
+            setBedroom(String(def.bedroomCount));
+          } else {
+            setBedroom('1');
+          }
+          return def.id;
+        });
       })
       .catch((err) => {
         if (cancelled) return;
@@ -618,43 +935,172 @@ export const MobileCreateListingWizardBody: React.FC<
     return () => {
       cancelled = true;
     };
-  }, [cr.roomTypeLoadError]);
+  }, [cr.roomTypeLoadError, initialData]);
 
-  const selectedOwner = useMemo(
-    () => owners.find((item) => item.id === selectedOwnerId) ?? null,
-    [owners, selectedOwnerId],
+  const selectedOwnerIds = useMemo(
+    () =>
+      new Set(
+        roomContacts
+          .map((c) => c.id)
+          .filter((id): id is number => id != null),
+      ),
+    [roomContacts],
   );
 
   const filteredOwners = useMemo(() => {
     const q = ownerQuery.trim().toLowerCase();
     const qDigits = digitsOnly(ownerQuery);
-    if (!q) return owners;
     return owners.filter((item) => {
+      if (selectedOwnerIds.has(item.id)) return false;
+      if (!q) return true;
       const nameHit = item.name.toLowerCase().includes(q);
       const phoneHit =
         item.phone.includes(ownerQuery.trim()) ||
         (qDigits.length > 0 && digitsOnly(item.phone).includes(qDigits));
       return nameHit || phoneHit;
     });
-  }, [owners, ownerQuery]);
+  }, [owners, ownerQuery, selectedOwnerIds]);
 
   const matchedOwnerByPhone = useMemo(() => {
-    const phone = digitsOnly(ownerPhone);
-    if (ownerMode !== 'create' || phone.length < 8) return null;
+    const phone = digitsOnly(
+      contactSheet === 'create' ? draftOwnerPhone : ownerPhone,
+    );
+    if (contactSheet !== 'create' && ownerMode !== 'create') return null;
+    if (phone.length < 8) return null;
     return owners.find((item) => digitsOnly(item.phone) === phone) ?? null;
-  }, [owners, ownerPhone, ownerMode]);
+  }, [
+    owners,
+    ownerPhone,
+    draftOwnerPhone,
+    ownerMode,
+    contactSheet,
+  ]);
 
-  const handleSelectOwner = (item: PropertyOwnerOption) => {
-    Keyboard.dismiss();
-    setSelectedOwnerId(item.id);
-    setOwnerName(item.name);
-    setOwnerPhone(item.phone);
-    setOwnerOther(item.note || '');
-    setOwnerMode('pick');
-    setOwnerQuery('');
+  const addRoomContact = (entry: RoomContactSelection) => {
+    setRoomContacts((current) => {
+      if (current.some((c) => c.key === entry.key)) return current;
+      if (current.length >= MAX_ROOM_CONTACTS) return current;
+      return [...current, entry].slice(0, MAX_ROOM_CONTACTS);
+    });
     clearFieldError('ownerPick');
     clearFieldError('ownerName');
     clearFieldError('ownerPhone');
+  };
+
+  const removeRoomContact = (key: string) => {
+    setRoomContacts((current) => current.filter((c) => c.key !== key));
+  };
+
+  const handleSelectOwner = (item: PropertyOwnerOption) => {
+    Keyboard.dismiss();
+    if (roomContacts.length >= MAX_ROOM_CONTACTS) {
+      setContactSheetError(cr.roomContactsFull);
+      return;
+    }
+    addRoomContact({
+      key: roomContactKey(item.id, item.phone),
+      id: item.id,
+      name: item.name,
+      phone: item.phone,
+      roomCount: item.roomCount,
+    });
+    setOwnerMode('pick');
+    setOwnerQuery('');
+    setDraftOwnerName('');
+    setDraftOwnerPhone('');
+    setContactSheet(null);
+    setContactSheetError('');
+  };
+
+  const commitPickContact = () => {
+    if (draftContactId == null) {
+      setContactSheetError(cr.ownerPickRequired);
+      return;
+    }
+    const item = owners.find((row) => row.id === draftContactId);
+    if (!item) {
+      setContactSheetError(cr.ownerPickRequired);
+      return;
+    }
+    handleSelectOwner(item);
+  };
+
+  const commitCreateContact = () => {
+    const name = draftOwnerName.trim();
+    const phone = draftOwnerPhone.trim();
+    if (!name || !phone) {
+      setContactSheetError(cr.required);
+      return;
+    }
+    if (roomContacts.length >= MAX_ROOM_CONTACTS) {
+      setContactSheetError(cr.roomContactsFull);
+      return;
+    }
+    if (matchedOwnerByPhone) {
+      handleSelectOwner(matchedOwnerByPhone);
+      return;
+    }
+    const key = roomContactKey(undefined, phone);
+    if (roomContacts.some((c) => c.key === key || digitsOnly(c.phone) === digitsOnly(phone))) {
+      setContactSheetError(cr.ownerFoundExisting);
+      return;
+    }
+    addRoomContact({ key, name, phone, roomCount: 0 });
+    setOwnerMode('pick');
+    setDraftOwnerName('');
+    setDraftOwnerPhone('');
+    setContactSheet(null);
+    setContactSheetError('');
+  };
+
+  const applyPlaceDetails = (details: PlaceDetails, fallbackName?: string) => {
+    setPropertyName(details.name || fallbackName || propertyName);
+    setAddress(details.address);
+    setDistrict(details.district);
+    setProvince(details.province);
+    setSubdistrict(details.subdistrict || '');
+    setPostalCode(details.postalCode || '');
+    setLatitude(details.latitude);
+    setLongitude(details.longitude);
+    setAddressFromPlace(true);
+    clearFieldError('propertyName');
+    clearFieldError('address');
+    if (details.district) clearFieldError('district');
+    if (details.province) clearFieldError('province');
+    setPlacesError('');
+  };
+
+  const handlePinCoordinateChange = async (lat: number, lng: number) => {
+    setLatitude(lat);
+    setLongitude(lng);
+    const loadReverse = reverseGeocodeRef.current;
+    if (!loadReverse) return;
+    const seq = ++pinResolveSeq.current;
+    setPinResolving(true);
+    try {
+      const details = await loadReverse(lat, lng);
+      if (seq !== pinResolveSeq.current) return;
+      setPropertyName((current) => current.trim() || details.name || current);
+      setAddress(details.address);
+      setDistrict(details.district);
+      setProvince(details.province);
+      setSubdistrict(details.subdistrict || '');
+      setPostalCode(details.postalCode || '');
+      setLatitude(details.latitude);
+      setLongitude(details.longitude);
+      setAddressFromPlace(true);
+      clearFieldError('propertyName');
+      clearFieldError('address');
+      if (details.district) clearFieldError('district');
+      if (details.province) clearFieldError('province');
+      setPlacesError('');
+    } catch (err) {
+      if (seq === pinResolveSeq.current) {
+        setPlacesError(err instanceof Error && err.message ? err.message : cr.placesError);
+      }
+    } finally {
+      if (seq === pinResolveSeq.current) setPinResolving(false);
+    }
   };
 
   const handleSelectPlace = async (item: PlaceSuggestion) => {
@@ -669,19 +1115,8 @@ export const MobileCreateListingWizardBody: React.FC<
     try {
       const details = await loadDetails(item.placeId);
       skipPlacesSearch.current = true;
-      setPropertyName(details.name || item.name);
-      setAddress(details.address);
-      setDistrict(details.district);
-      setProvince(details.province);
-      setSubdistrict(details.subdistrict || '');
-      setPostalCode(details.postalCode || '');
-      setLatitude(details.latitude);
-      setLongitude(details.longitude);
-      clearFieldError('propertyName');
-      clearFieldError('address');
-      if (details.district) clearFieldError('district');
-      if (details.province) clearFieldError('province');
-      setPlacesError('');
+      applyPlaceDetails(details, item.name);
+      setPlaceEntryMode('search');
     } catch (err) {
       setPlacesError(err instanceof Error && err.message ? err.message : cr.placesError);
     } finally {
@@ -728,9 +1163,9 @@ export const MobileCreateListingWizardBody: React.FC<
     }
 
     if (current === 8) {
-      if (selectedOwnerId) {
-        // existing owner is enough
-      } else if (ownerMode === 'pick' && listContactsRef.current) {
+      if (roomContacts.length > 0) {
+        // at least one selected contact
+      } else if (listContactsRef.current) {
         nextErrors.ownerPick = cr.ownerPickRequired;
       } else {
         if (!ownerName.trim()) nextErrors.ownerName = cr.required;
@@ -761,90 +1196,223 @@ export const MobileCreateListingWizardBody: React.FC<
     return Object.keys(nextErrors)[0] ?? null;
   };
 
-  // Edit mode: overview of all sections with completeness, or a single section form.
+  // Hub overview (create + edit) or a single section form.
   const [editView, setEditView] = useState<'overview' | 'section'>('overview');
-  const showOverview = !!initialData && editView === 'overview';
+  const pickingSource = !listingSourceCode;
+  const showOverview = !!listingSourceCode && editView === 'overview';
+  const showSection = !!listingSourceCode && editView === 'section';
+
   const openSection = (target: number) => {
     setErrors({});
     setStep(target);
-    if (initialData) setEditView('section');
+    setEditView('section');
   };
   const backToOverview = () => {
     setErrors({});
     setEditView('overview');
   };
 
-  const sectionHasData = (current: number): boolean => {
-    if (current === 3) return facilities.length > 0 || customFacilities.trim().length > 0;
-    if (current === 4) return nearbyPlaces.length > 0 || nearbyOther.trim().length > 0;
-    if (current === 6) return photoCount > 0;
-    if (current === 7) return description.trim().length > 0;
-    return true;
-  };
-
-  // Error keys that describe an invalid value rather than a missing field.
-  const NON_FIELD_KEYS = ['nearbyPlaces', 'availableFrom', 'documents', 'customFacilities', 'ownerPick'];
-
-  const editSections = (() => {
-    if (!initialData) return [];
-    const ov = cr.editOverview;
-    const defs: Array<{ step: number; icon: 'buildings' | 'bed' | 'camera' | 'coins' | 'sparkle' | 'map-pin' | 'note' | 'user'; label: string; hint: string }> = [
-      { step: 1, icon: 'buildings', label: cr.steps.property, hint: ov.sectionHints.property },
-      { step: 2, icon: 'bed', label: cr.steps.layout, hint: ov.sectionHints.layout },
-      { step: 6, icon: 'camera', label: cr.steps.photos, hint: ov.sectionHints.photos },
-      { step: 5, icon: 'coins', label: cr.steps.pricing, hint: ov.sectionHints.pricing },
-      { step: 3, icon: 'sparkle', label: cr.steps.facilities, hint: ov.sectionHints.facilities },
-      { step: 4, icon: 'map-pin', label: cr.steps.nearby, hint: ov.sectionHints.nearby },
-      { step: 7, icon: 'note', label: cr.detailsTitle, hint: ov.sectionHints.details },
-      { step: 8, icon: 'user', label: cr.steps.ownerVisibility, hint: ov.sectionHints.contact },
-    ];
-    return defs.map((def) => {
-      const missing = Object.keys(collectStepErrors(def.step));
-      if (missing.length > 0) {
-        const fieldKeys = missing.filter((key) => !NON_FIELD_KEYS.includes(key));
-        const allFields = fieldKeys.length === missing.length;
-        return {
-          ...def,
-          status: 'incomplete' as const,
-          statusLabel: allFields ? interpolate(ov.missingFields, { count: missing.length }) : requiredMessage(missing[0]),
-          detail: allFields ? interpolate(ov.missingList, { fields: fieldKeys.map(fieldLabel).join(', ') }) : requiredMessage(missing[0]),
-        };
-      }
-      if (!sectionHasData(def.step)) {
-        return { ...def, status: 'empty' as const, statusLabel: ov.notAdded, detail: ov.notAdded };
-      }
-      return { ...def, status: 'complete' as const, statusLabel: ov.complete, detail: ov.complete };
-    });
-  })();
-  const incompleteSectionCount = editSections.filter((s) => s.status === 'incomplete').length;
-  const currentSection = editSections.find((s) => s.step === step);
-
-  useEffect(() => {
-    if (!initialData || editView !== 'section') return;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (submitLock.current) return true;
+  /** Stepwise back only — never exits the create tab (parent handles exit). */
+  const handleWizardBack = useCallback(() => {
+    if (submitLock.current) return true;
+    if (requiredPrompt) {
+      setRequiredPrompt(null);
+      return true;
+    }
+    if (contactSheet != null) {
+      dismissContactSheetStep();
+      return true;
+    }
+    if (leaseSheet != null) {
+      closeLeaseSheet();
+      return true;
+    }
+    if (layoutSheet != null) {
+      setLayoutSheet(null);
+      return true;
+    }
+    if (listingSourceCode && editView === 'section') {
       setErrors({});
       setEditView('overview');
       return true;
-    });
-    return () => sub.remove();
-  }, [initialData, editView]);
+    }
+    if (listingSourceCode && editView === 'overview' && !initialData) {
+      setSourceDraft(listingSourceCode);
+      setListingSourceCode(null);
+      setEditView('overview');
+      return true;
+    }
+    return false;
+  }, [
+    requiredPrompt,
+    listingSourceCode,
+    editView,
+    initialData,
+    contactSheet,
+    leaseSheet,
+    layoutSheet,
+  ]);
 
-  const goNext = () => {
+  useEffect(() => {
+    if (!backHandlerRef) return;
+    backHandlerRef.current = handleWizardBack;
+    return () => {
+      backHandlerRef.current = null;
+    };
+  }, [backHandlerRef, handleWizardBack]);
+
+  useEffect(() => {
+    if (!onHeaderTitleChange) return;
+    // Sub-pages: section name in shell header. Hub/source: parent shows Add room.
+    onHeaderTitleChange(showSection ? stepTitle : '');
+  }, [onHeaderTitleChange, showSection, stepTitle]);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => handleWizardBack());
+    return () => sub.remove();
+  }, [handleWizardBack]);
+
+  const finishSection = () => {
     const invalid = validateStep(step);
     if (invalid) {
       setRequiredPrompt(requiredMessage(invalid));
       return;
     }
-    setStep(visibleSteps[Math.min(visibleSteps.length - 1, stepIndex + 1)]);
+    backToOverview();
   };
 
-  const goBack = () => {
-    if (step === 1) {
-      setListingSourceCode(null);
-      return;
+  const sectionHasData = (current: number): boolean => {
+    if (current === 1) return propertyName.trim().length > 0;
+    if (current === 2) return listingTitle.trim().length > 0 || isFilledCount(bedroom);
+    if (current === 3) return facilities.length > 0 || customFacilities.trim().length > 0;
+    if (current === 4) return nearbyPlaces.length > 0 || nearbyOther.trim().length > 0;
+    if (current === 5) return selectedContractTypeIds.length > 0;
+    if (current === 6) return photoCount > 0;
+    if (current === 7) return description.trim().length > 0;
+    if (current === 8) {
+      if (roomContacts.length > 0) return true;
+      return ownerName.trim().length > 0 && ownerPhone.trim().length > 0;
     }
-    setStep(visibleSteps[Math.max(0, stepIndex - 1)]);
+    return true;
+  };
+
+  const sectionSummary = (current: number): string => {
+    const ov = cr.editOverview;
+    if (current === 1) {
+      const bits = [propertyName.trim(), district.trim() || province.trim()].filter(Boolean);
+      return bits.length ? bits.join(' · ') : ov.sectionHints.property;
+    }
+    if (current === 2) {
+      const bits = [
+        bedroom.trim() ? interpolate(t.agent.listings.specBed, { count: bedroom.trim() }) : '',
+        sizeSqm.trim() ? `${sizeSqm.trim()} sqm` : '',
+      ].filter(Boolean);
+      return bits.length ? bits.join(' · ') : ov.sectionHints.layout;
+    }
+    if (current === 5) {
+      if (!selectedContractTypeIds.length) return ov.sectionHints.pricing;
+      const prices = selectedContractTypeIds.map((id) => Number(rentsByTypeId[String(id)])).filter((price) => price > 0);
+      return prices.length ? interpolate(cr.leaseSummary, {
+        count: selectedContractTypeIds.length,
+        amount: formatBaht(Math.min(...prices)),
+      }) : ov.sectionHints.pricing;
+    }
+    if (current === 6) {
+      return interpolate(cr.photosOptionalStatus, { count: photoCount });
+    }
+    if (current === 8) {
+      if (roomContacts.length) {
+        return roomContacts.map((c) => c.name).join(' · ');
+      }
+      if (ownerName.trim()) {
+        return `${ownerName.trim()}${ownerPhone.trim() ? ` · ${ownerPhone.trim()}` : ''}`;
+      }
+      return ov.sectionHints.contact;
+    }
+    return '';
+  };
+
+  // Error keys that describe an invalid value rather than a missing field.
+  const NON_FIELD_KEYS = ['nearbyPlaces', 'availableFrom', 'documents', 'customFacilities', 'ownerPick'];
+
+  const hubSteps = initialData ? EDIT_STEPS : CREATE_STEPS;
+  const requiredHubSteps = initialData ? EDIT_STEPS.filter((s) => ![3, 4, 6, 7].includes(s)) : CREATE_REQUIRED_STEPS;
+
+  const editSections = (() => {
+    if (!listingSourceCode && !initialData) return [];
+    const ov = cr.editOverview;
+    const defs: Array<{
+      step: number;
+      icon: 'buildings' | 'bed' | 'camera' | 'coins' | 'sparkle' | 'map-pin' | 'note' | 'user';
+      label: string;
+      optional?: boolean;
+    }> = [
+      { step: 1, icon: 'buildings', label: cr.steps.property },
+      { step: 2, icon: 'bed', label: cr.steps.layout },
+      { step: 5, icon: 'coins', label: cr.steps.pricing },
+      { step: 8, icon: 'user', label: cr.steps.ownerVisibility },
+      { step: 6, icon: 'camera', label: cr.steps.photos, optional: true },
+      { step: 3, icon: 'sparkle', label: cr.steps.facilities },
+      { step: 4, icon: 'map-pin', label: cr.steps.nearby },
+      { step: 7, icon: 'note', label: cr.detailsTitle },
+    ];
+    return hubSteps.map((stepId) => {
+      const def = defs.find((d) => d.step === stepId)!;
+      const hint = sectionSummary(def.step) || ov.sectionHints[
+        def.step === 1 ? 'property'
+          : def.step === 2 ? 'layout'
+          : def.step === 5 ? 'pricing'
+          : def.step === 6 ? 'photos'
+          : def.step === 8 ? 'contact'
+          : def.step === 3 ? 'facilities'
+          : def.step === 4 ? 'nearby'
+          : 'details'
+      ];
+      const missing = Object.keys(collectStepErrors(def.step));
+      if (missing.length > 0 && sectionHasData(def.step)) {
+        const fieldKeys = missing.filter((key) => !NON_FIELD_KEYS.includes(key));
+        const allFields = fieldKeys.length === missing.length;
+        return {
+          ...def,
+          hint,
+          status: 'incomplete' as const,
+          statusLabel: allFields
+            ? interpolate(ov.missingList, { fields: fieldKeys.map(fieldLabel).join(', ') })
+            : requiredMessage(missing[0]),
+          detail: allFields
+            ? interpolate(ov.missingList, { fields: fieldKeys.map(fieldLabel).join(', ') })
+            : requiredMessage(missing[0]),
+        };
+      }
+      if (!sectionHasData(def.step)) {
+        return {
+          ...def,
+          hint,
+          status: 'empty' as const,
+          statusLabel: def.optional ? interpolate(cr.photosOptionalStatus, { count: 0 }) : ov.notAdded,
+          detail: ov.notAdded,
+        };
+      }
+      return {
+        ...def,
+        hint,
+        status: 'complete' as const,
+        statusLabel: ov.complete,
+        detail: ov.complete,
+      };
+    });
+  })();
+  const incompleteSectionCount = editSections.filter((s) => s.status === 'incomplete').length;
+  const requiredCompleteCount = requiredHubSteps.filter((stepId) => {
+    const section = editSections.find((s) => s.step === stepId);
+    return section?.status === 'complete';
+  }).length;
+  const currentSection = editSections.find((s) => s.step === step);
+
+  const confirmSource = () => {
+    if (!sourceDraft) return;
+    setListingSourceCode(sourceDraft);
+    setEditView('overview');
   };
 
   const buildPayload = (uploadedPhotos: RoomPhoto[]): CreateRoomWizardSubmitData => {
@@ -863,16 +1431,37 @@ export const MobileCreateListingWizardBody: React.FC<
     if (floor.trim()) layout.push({ code: 'floor', value: floor.trim() });
     if (building.trim()) layout.push({ code: 'building', value: building.trim() });
 
-    const contactPayload = selectedOwnerId
-      ? { contactId: selectedOwnerId, contact: undefined }
-      : {
-          contactId: undefined,
-          contact: {
-            name: ownerName.trim(),
-            phone: ownerPhone.trim(),
-            note: ownerOther.trim() || undefined,
-          },
-        };
+    const existingIds = roomContacts
+      .map((c) => c.id)
+      .filter((id): id is number => id != null);
+    const newContacts = roomContacts
+      .filter((c) => c.id == null)
+      .map((c) => ({ name: c.name.trim(), phone: c.phone.trim() }));
+    const contactPayload =
+      roomContacts.length > 0
+        ? {
+            contactIds: existingIds.length ? existingIds : undefined,
+            contacts: newContacts.length ? newContacts : undefined,
+            contactId: existingIds[0],
+            contact: newContacts[0],
+            selectedContacts: roomContacts.map((c) => ({
+              id: c.id,
+              name: c.name,
+              phone: c.phone,
+              roomCount: c.roomCount,
+            })),
+          }
+        : {
+            contactId: undefined,
+            contactIds: undefined,
+            contacts: undefined,
+            contact: {
+              name: ownerName.trim(),
+              phone: ownerPhone.trim(),
+              note: ownerOther.trim() || undefined,
+            },
+            selectedContacts: undefined,
+          };
 
     return {
       ...initialData,
@@ -899,9 +1488,10 @@ export const MobileCreateListingWizardBody: React.FC<
       prices: selectedContractTypeIds.map((id) => ({
         contractTypeId: id,
         price: Number(rentsByTypeId[String(id)]),
+        ...leaseTerms(id),
       })),
-      advanceRentMonths,
-      depositMonths,
+      advanceRentMonths: advanceRentMonths ?? SUGGESTED_ADVANCE_MONTHS,
+      depositMonths: depositMonths ?? SUGGESTED_DEPOSIT_MONTHS,
       layout,
       listingDescription: description.trim(),
       availableFromDate: availableFrom || undefined,
@@ -919,10 +1509,17 @@ export const MobileCreateListingWizardBody: React.FC<
 
   const handleSubmit = async () => {
     if (!listingSourceCode) return;
+    const stepsToValidate = initialData ? EDIT_STEPS : CREATE_REQUIRED_STEPS;
     let invalid: string | null = null;
-    for (const current of visibleSteps) {
+    let invalidStep: number | null = null;
+    for (const current of stepsToValidate) {
       invalid = validateStep(current);
-      if (invalid) { setStep(current); if (initialData) setEditView('section'); break; }
+      if (invalid) {
+        invalidStep = current;
+        setStep(current);
+        setEditView('section');
+        break;
+      }
     }
     if (invalid || submitLock.current) {
       if (invalid) setRequiredPrompt(requiredMessage(invalid));
@@ -955,37 +1552,23 @@ export const MobileCreateListingWizardBody: React.FC<
     Alert.alert(cr.saveError, cr.photoUnavailable);
   };
 
-  const renderNav = (opts?: { isLast?: boolean }) => (
-    <View style={styles.btnRow}>
-      {initialData ? (
-        <View style={{ flex: 1 }}>
-          <MobileButton variant="outline" onPress={backToOverview} disabled={submitting}>
-            {cr.editOverview.backToSections}
-          </MobileButton>
-        </View>
-      ) : step > 1 || listingSourceCode ? (
-        <View style={{ flex: 1 }}>
-          <MobileButton variant="outline" onPress={goBack} disabled={submitting}>
-            {cr.back}
-          </MobileButton>
-        </View>
-      ) : (
-        <View style={{ flex: 1 }} />
-      )}
-      <View style={{ flex: 1 }}>
-        {opts?.isLast ? (
-          <MobileButton onPress={handleSubmit} isLoading={submitting} disabled={submitting || !!enhancingUri}>
-            {submitLabel ?? cr.submit}
-          </MobileButton>
-        ) : (
-          <MobileButton onPress={goNext} disabled={pickingPhotos || !!enhancingUri}>{cr.next}</MobileButton>
-        )}
+  const renderNav = () => (
+    <View style={styles.footerSolo}>
+      <View style={styles.footerNote}>
+        <MobileIcon name="warning" size={16} color={tokens.colors.textSecondary} />
+        <Text style={styles.footerNoteText}>{cr.sessionSaveNote}</Text>
       </View>
+      <MobileButton
+        onPress={finishSection}
+        disabled={submitting || pickingPhotos || !!enhancingUri}
+        style={styles.footerCta}
+        textStyle={styles.footerCtaText}
+      >
+        {cr.sectionDone}
+      </MobileButton>
     </View>
   );
 
-  const navOpts = initialData || stepIndex === visibleSteps.length - 1 ? { isLast: true as const } : undefined;
-  const pickingSource = !listingSourceCode;
   const sourceLabels: Record<ListingSourceCode, string> = {
     co_agent: cr.sourceCoAgent,
     owner: cr.sourceOwner,
@@ -998,114 +1581,172 @@ export const MobileCreateListingWizardBody: React.FC<
   return (
     <View style={styles.container}>
       <View style={styles.chrome}>
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title}>{title ?? cr.title}</Text>
-          </View>
-          {pickingSource || showOverview ? null : (
-            <MobileBadge
-              role={config.actorRole}
-              label={initialData ? cr.editSections : interpolate(cr.stepOf, { step: stepIndex + 1, total: visibleSteps.length })}
-            />
-          )}
-        </View>
-
         {pickingSource ? (
-          <Text style={styles.subtitle}>{cr.sourcePrompt}</Text>
-        ) : showOverview ? (
-          <Text style={styles.subtitle}>{cr.editSections}</Text>
-        ) : (
           <>
-            {!initialData && <View style={[styles.progressTrack]}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width: `${((stepIndex + 1) / visibleSteps.length) * 100}%`,
-                    backgroundColor: themeColor,
-                  },
-                ]}
-              />
-            </View>
-            }
-            <Text style={[styles.stepLabel, { color: themeColor }]}>{stepTitle}</Text>
-            {!initialData && <Text style={styles.hint}>{cr.quickCreateHint}</Text>}
-            {initialData && currentSection && (
-              <View style={styles.sectionStatusRow}>
-                <MobileIcon
-                  name={currentSection.status === 'incomplete' ? 'warning' : 'check'}
-                  size={16}
-                  weight="fill"
-                  color={currentSection.status === 'incomplete' ? tokens.colors.warning : currentSection.status === 'complete' ? tokens.colors.success : tokens.colors.textSecondary}
-                />
-                <Text
-                  style={[
-                    styles.sectionStatusText,
-                    { color: currentSection.status === 'incomplete' ? tokens.colors.warning : currentSection.status === 'complete' ? tokens.colors.success : tokens.colors.textSecondary },
-                  ]}
-                >
-                  {currentSection.detail}
-                </Text>
-              </View>
-            )}
+            <Text style={styles.sourcePrompt}>{cr.sourcePrompt}</Text>
+            <Text style={styles.sourceLead}>{cr.sourcePromptHint}</Text>
           </>
-        )}
+        ) : showOverview ? (
+          <>
+            {/* Shell header shows Add room on hub; section titles move to header. */}
+            <Text style={styles.pageTitle}>
+              {title ?? (initialData ? cr.title : cr.setupHubTitle)}
+            </Text>
+            <Text style={styles.sourceLead}>
+              {initialData ? cr.editSections : cr.setupHubHint}
+            </Text>
+          </>
+        ) : showSection ? (
+          <>
+            {sectionHint ? <Text style={styles.sourceLead}>{sectionHint}</Text> : null}
+          </>
+        ) : null}
       </View>
 
       {showOverview ? (
-        <Animated.View key="overview" entering={FadeIn.duration(150)} style={styles.formScroll}>
+        <Animated.View key="overview" entering={FadeIn.duration(150)} style={styles.formPane}>
           <ScrollView
             style={styles.formScroll}
             contentContainerStyle={styles.formScrollContent}
             showsVerticalScrollIndicator={false}
           >
+            {(listingTitle.trim() || propertyName.trim() || photos[0]) ? (
+              <Pressable
+                onPress={() => openSection(listingTitle.trim() || propertyName.trim() ? 1 : 2)}
+                disabled={submitting}
+                accessibilityRole="button"
+                accessibilityLabel={listingTitle.trim() || propertyName.trim() || cr.steps.property}
+                android_ripple={{ color: '#00000014' }}
+                style={({ pressed }) => [
+                  styles.hubPreview,
+                  pressed ? { opacity: 0.9 } : null,
+                ]}
+              >
+                <View style={styles.hubPreviewThumb}>
+                  {photos[0]?.uri ? (
+                    <Image
+                      source={{ uri: photos[0].uri, cache: 'reload' }}
+                      style={styles.hubPreviewThumbImg}
+                    />
+                  ) : (
+                    <MobileIcon name="buildings" size={22} color={tokens.colors.textSecondary} />
+                  )}
+                </View>
+                <View style={styles.hubPreviewCopy}>
+                  <Text style={styles.hubPreviewTitle} numberOfLines={1}>
+                    {listingTitle.trim() || propertyName.trim() || cr.steps.property}
+                  </Text>
+                  <Text style={styles.hubPreviewMeta} numberOfLines={1}>
+                    {[
+                      bedroom.trim()
+                        ? interpolate(t.agent.listings.specBed, { count: bedroom.trim() })
+                        : null,
+                      sizeSqm.trim() ? `${sizeSqm.trim()} sqm` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || cr.setupHubHint}
+                  </Text>
+                </View>
+                <MobileIcon name="chevron-right" size={18} color={tokens.colors.divider} />
+              </Pressable>
+            ) : null}
             <RoomEditSectionList
               sections={editSections}
-              themeColor={themeColor}
               disabled={submitting}
-              summaryTone={incompleteSectionCount > 0 ? 'warning' : 'success'}
-              summaryLabel={incompleteSectionCount > 0
-                ? interpolate(cr.editOverview.needsAttention, { count: incompleteSectionCount })
-                : cr.editOverview.allComplete}
+              progress={
+                requiredHubSteps.length
+                  ? requiredCompleteCount / requiredHubSteps.length
+                  : 0
+              }
+              summaryTone={
+                requiredCompleteCount >= requiredHubSteps.length && incompleteSectionCount === 0
+                  ? 'success'
+                  : 'warning'
+              }
+              summaryLabel={interpolate(cr.setupProgress, {
+                done: requiredCompleteCount,
+                total: requiredHubSteps.length,
+              })}
               onSelect={openSection}
             />
+            <View style={styles.hubFootnoteRow}>
+              <Text style={styles.hubFootnoteIcon}>ⓘ</Text>
+              <Text style={styles.hubFootnote}>{cr.setupMissingHint}</Text>
+            </View>
           </ScrollView>
+          <View style={styles.footer}>
+            {!initialData && <Text style={styles.footerNoteText}>{cr.visibilityPrivateHint}</Text>}
+            <MobileButton
+              onPress={handleSubmit}
+              isLoading={submitting}
+              disabled={submitting || !!enhancingUri}
+              style={styles.footerCta}
+              textStyle={styles.footerCtaText}
+            >
+              {submitLabel ?? cr.saveRoom}
+            </MobileButton>
+          </View>
         </Animated.View>
       ) : pickingSource ? (
         <View style={styles.sourceScreen}>
-          <View style={styles.sourceRow}>
+          <ScrollView contentContainerStyle={{ gap: 20, paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+          <View style={styles.sourceList}>
             {LISTING_SOURCE_OPTIONS.map((opt) => {
-              const color = tokens.colors.roles[opt.role];
+              const selected = sourceDraft === opt.code;
               return (
                 <Pressable
                   key={opt.code}
-                  onPress={() => {
-                    setListingSourceCode(opt.code);
-                    setStep(1);
-                  }}
-                  android_ripple={{ color: '#00000022' }}
-                  accessibilityRole="button"
+                  onPress={() => setSourceDraft(opt.code)}
+                  android_ripple={{ color: '#00000014' }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
                   style={({ pressed }) => [
                     styles.sourceCard,
-                    nativeElevation(1),
-                    { borderColor: color },
-                    pressed ? { opacity: 0.88 } : null,
+                    {
+                      borderColor: selected ? accent : SOURCE_IDLE_BORDER,
+                      backgroundColor: tokens.colors.white,
+                    },
+                    pressed ? { opacity: 0.92 } : null,
                   ]}
                 >
-                  <View style={[styles.sourceIconWrap, { backgroundColor: color }]}>
-                    <MobileIcon name={opt.icon} size={28} color="#FFFFFF" />
+                  <View style={[styles.sourceIconWrap, { backgroundColor: opt.iconBg }]}>
+                    <MobileIcon name={opt.icon} size={24} weight="regular" color={opt.iconColor} />
                   </View>
-                  <Text style={styles.sourceTitle}>{sourceLabels[opt.code]}</Text>
-                  <Text style={styles.sourceHint}>{sourceHints[opt.code]}</Text>
+                  <View style={styles.sourceCopy}>
+                    <Text style={styles.sourceTitle}>{sourceLabels[opt.code]}</Text>
+                    <Text style={styles.sourceHint}>{sourceHints[opt.code]}</Text>
+                  </View>
+                  <SelectionCheck selected={selected} variant="row" size="md" />
                 </Pressable>
               );
             })}
           </View>
+          <View style={styles.sourceNoteRow}>
+            <Text style={styles.sourceNote}>ⓘ  {cr.sourceNote}</Text>
+          </View>
+          </ScrollView>
+          <View style={styles.sourceFooter}>
+            <MobileButton
+              onPress={confirmSource}
+              disabled={!sourceDraft}
+              style={[
+                styles.footerCta,
+                { backgroundColor: sourceDraft ? accent : '#E9EDF2', opacity: 1 },
+              ]}
+              textStyle={{
+                fontSize: 16,
+                lineHeight: 24,
+                color: sourceDraft ? accentInk : '#64748B',
+              }}
+            >
+              {cr.next}
+            </MobileButton>
+          </View>
         </View>
-      ) : (
+      ) : showSection ? (
         <Animated.View
-          key={initialData ? `section-${step}` : 'form'}
-          entering={initialData ? FadeIn.duration(150) : undefined}
+          key={`section-${step}`}
+          entering={FadeIn.duration(150)}
           style={styles.formPane}
         >
       <ScrollView
@@ -1115,7 +1756,7 @@ export const MobileCreateListingWizardBody: React.FC<
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.card, nativeElevation(1)]}>
+        <View style={styles.formBody}>
           <View style={styles.cardBody}>
           {step === 1 && (
             <>
@@ -1127,7 +1768,7 @@ export const MobileCreateListingWizardBody: React.FC<
               </View>
               {propertyTypesLoading ? (
                 <View style={styles.suggestStatus}>
-                  <ActivityIndicator size="small" color={themeColor} />
+                  <ActivityIndicator size="small" color={accent} />
                   <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
                 </View>
               ) : null}
@@ -1139,139 +1780,221 @@ export const MobileCreateListingWizardBody: React.FC<
                   const selected = propertyTypeId === opt.id;
                   const labels = t.masters.propertyTypes as Record<string, string>;
                   return (
-                    <Pressable
+                    <SelectionChip
                       key={opt.id}
+                      label={labels[opt.code] ?? opt.code}
+                      selected={selected}
                       onPress={() => {
                         setPropertyTypeId(opt.id);
                         clearFieldError('propertyType');
                       }}
-                      android_ripple={{ color: '#00000022' }}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      style={({ pressed }) => [
+                      accentColor={tokens.colors.brand[500]}
+                      inkColor={tokens.colors.primary}
+                      style={[
                         styles.propertyTypeChip,
-                        selected
-                          ? { backgroundColor: themeColor, borderColor: themeColor }
-                          : errors.propertyType
-                            ? { borderColor: tokens.colors.error }
-                            : null,
-                        pressed ? { opacity: 0.88 } : null,
+                        !selected && errors.propertyType
+                          ? { borderColor: tokens.colors.error }
+                          : null,
                       ]}
-                    >
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          styles.propertyTypeChipText,
-                          selected ? styles.typeChipTextSelected : null,
-                        ]}
-                      >
-                        {labels[opt.code] ?? opt.code}
-                      </Text>
-                    </Pressable>
+                      labelStyle={styles.propertyTypeChipText}
+                    />
                   );
                 })}
               </View>
               {errors.propertyType ? (
                 <Text style={styles.errorText}>{errors.propertyType}</Text>
               ) : null}
-              <MobileInput
-                label={cr.propertyName}
-                placeholder={cr.propertyNamePlaceholder}
-                value={propertyName}
-                autoCorrect={false}
-                autoCapitalize="words"
-                required
-                onChangeText={(v) => {
-                  setPropertyName(v);
-                  clearFieldError('propertyName');
-                }}
-                error={errors.propertyName}
-                helperText={searchPlaces ? cr.placesHint : undefined}
-              />
-              {searchPlaces &&
-              (placesLoading ||
-                placesError ||
-                suggestions.length > 0 ||
-                hasSearchedPlaces) ? (
-                <View style={styles.suggestBox}>
-                  {placesLoading ? (
-                    <View style={styles.suggestStatus}>
-                      <ActivityIndicator size="small" color={themeColor} />
-                      <Text style={styles.suggestStatusText}>{cr.placesSearching}</Text>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>
+                  {nameFieldLabel}
+                  <Text style={styles.requiredMark}> *</Text>
+                </Text>
+                {placeEntryMode === 'manual' || !searchPlaces ? (
+                  <MobileInput
+                    placeholder={nameFieldPlaceholder}
+                    value={propertyName}
+                    autoCorrect={false}
+                    autoCapitalize="words"
+                    onChangeText={(v) => {
+                      setPropertyName(v);
+                      clearFieldError('propertyName');
+                    }}
+                    error={errors.propertyName}
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.searchInputWrap,
+                      errors.propertyName ? { borderColor: tokens.colors.error } : null,
+                    ]}
+                  >
+                    <MobileIcon name="search" size={18} color={tokens.colors.textSecondary} />
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder={nameFieldPlaceholder}
+                      placeholderTextColor={tokens.colors.placeholder}
+                      value={propertyName}
+                      autoCorrect={false}
+                      autoCapitalize="words"
+                      onChangeText={(v) => {
+                        setPropertyName(v);
+                        clearFieldError('propertyName');
+                      }}
+                    />
+                    {propertyName.trim().length > 0 ? (
+                      <Pressable
+                        onPress={() => {
+                          setPropertyName('');
+                          clearFieldError('propertyName');
+                        }}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear"
+                        style={styles.searchClearBtn}
+                      >
+                        <MobileIcon name="close" size={16} color={tokens.colors.textSecondary} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                )}
+                {placeEntryMode === 'search' && searchPlaces && errors.propertyName ? (
+                  <Text style={styles.errorText}>{errors.propertyName}</Text>
+                ) : null}
+              </View>
+              {searchPlaces && placeEntryMode === 'search' ? (
+                <>
+                  {(placesLoading ||
+                    placesError ||
+                    suggestions.length > 0 ||
+                    hasSearchedPlaces) ? (
+                    <View style={styles.suggestBox}>
+                      {placesLoading ? (
+                        <View style={styles.suggestStatus}>
+                          <ActivityIndicator size="small" color={accent} />
+                          <Text style={styles.suggestStatusText}>{cr.placesSearching}</Text>
+                        </View>
+                      ) : null}
+                      {placesError ? (
+                        <Text style={[styles.errorText, styles.suggestPad]}>{placesError}</Text>
+                      ) : null}
+                      {!placesLoading &&
+                      hasSearchedPlaces &&
+                      suggestions.length === 0 &&
+                      !placesError ? (
+                        <Text style={[styles.suggestStatusText, styles.suggestPad]}>
+                          {cr.placesEmpty}
+                        </Text>
+                      ) : null}
+                      {suggestions.map((item, index) => (
+                        <Pressable
+                          key={item.placeId}
+                          onPress={() => handleSelectPlace(item)}
+                          android_ripple={{ color: '#00000014' }}
+                          style={[
+                            styles.suggestRow,
+                            index === 0 && !placesLoading && !placesError
+                              ? { borderTopWidth: 0 }
+                              : null,
+                          ]}
+                        >
+                          <Text style={styles.suggestName}>{item.name}</Text>
+                          {item.address ? (
+                            <Text style={styles.suggestAddress}>{item.address}</Text>
+                          ) : null}
+                        </Pressable>
+                      ))}
                     </View>
                   ) : null}
-                  {placesError ? (
-                    <Text style={[styles.errorText, styles.suggestPad]}>{placesError}</Text>
-                  ) : null}
-                  {!placesLoading &&
-                  hasSearchedPlaces &&
-                  suggestions.length === 0 &&
-                  !placesError ? (
-                    <Text style={[styles.suggestStatusText, styles.suggestPad]}>
-                      {cr.placesEmpty}
-                    </Text>
-                  ) : null}
-                  {suggestions.map((item, index) => (
-                    <Pressable
-                      key={item.placeId}
-                      onPress={() => handleSelectPlace(item)}
-                      android_ripple={{ color: '#00000014' }}
-                      style={[
-                        styles.suggestRow,
-                        index === 0 && !placesLoading && !placesError
-                          ? { borderTopWidth: 0 }
-                          : null,
-                      ]}
-                    >
-                      <Text style={styles.suggestName}>{item.name}</Text>
-                      {item.address ? (
-                        <Text style={styles.suggestAddress}>{item.address}</Text>
-                      ) : null}
-                    </Pressable>
-                  ))}
-                </View>
+                  <Pressable
+                    onPress={() => {
+                      placesSeq.current += 1;
+                      setPlaceEntryMode('manual');
+                      setSuggestions([]);
+                      setHasSearchedPlaces(false);
+                      setPlacesError('');
+                      setPlacesLoading(false);
+                    }}
+                    accessibilityRole="button"
+                    hitSlop={6}
+                    style={styles.manualEntryRow}
+                  >
+                    <Text style={styles.manualEntryLink}>{cr.enterManually}</Text>
+                    <MobileIcon name="chevron-right" size={16} color={tokens.colors.accent} />
+                  </Pressable>
+                </>
+              ) : searchPlaces ? (
+                <Pressable
+                  onPress={() => setPlaceEntryMode('search')}
+                  accessibilityRole="button"
+                  hitSlop={6}
+                  style={styles.manualEntryRow}
+                >
+                  <Text style={styles.manualEntryLink}>{cr.searchOnMap}</Text>
+                  <MobileIcon name="chevron-right" size={16} color={tokens.colors.accent} />
+                </Pressable>
               ) : null}
-              <Text style={styles.fieldLabel}>{cr.mapLabel}</Text>
               <PropertyPlaceMap
-                key={`${latitude ?? DEFAULT_MAP.latitude},${longitude ?? DEFAULT_MAP.longitude}`}
                 latitude={latitude ?? DEFAULT_MAP.latitude}
                 longitude={longitude ?? DEFAULT_MAP.longitude}
+                hasPin={hasMapPin}
+                onCoordinateChange={handlePinCoordinateChange}
+                adjustPinLabel={cr.adjustPin}
+                adjustPinActiveLabel={cr.adjustPinActive}
+                placePinHint={cr.mapPlacePinHint}
+                resolving={pinResolving}
+                mapsApiKey={mapsApiKey}
               />
               <MobileInput
                 label={cr.address}
                 placeholder={cr.addressPlaceholder}
                 value={address}
                 required
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
                 onChangeText={(v) => {
                   setAddress(v);
+                  setAddressFromPlace(false);
                   clearFieldError('address');
                 }}
                 error={errors.address}
+                helperText={addressFromPlace ? cr.addressFilledHint : undefined}
+                style={styles.addressMultiline}
               />
-              <MobileInput
-                label={cr.subdistrict}
-                value={subdistrict}
-                editable={false}
-              />
-              <MobileInput
-                label={cr.district}
-                value={district}
-                editable={false}
-                required
-                error={errors.district}
-              />
-              <MobileInput
-                label={cr.province}
-                value={province}
-                editable={false}
-                required
-                error={errors.province}
-              />
+              <View style={styles.twoColumnRow}>
+                <MobileInput
+                  label={cr.district}
+                  value={district}
+                  required
+                  editable={areaFieldsEditable}
+                  onChangeText={(v) => {
+                    setDistrict(v);
+                    setAddressFromPlace(false);
+                    clearFieldError('district');
+                  }}
+                  error={errors.district}
+                  containerStyle={styles.halfField}
+                />
+                <MobileInput
+                  label={cr.province}
+                  value={province}
+                  required
+                  editable={areaFieldsEditable}
+                  onChangeText={(v) => {
+                    setProvince(v);
+                    setAddressFromPlace(false);
+                    clearFieldError('province');
+                  }}
+                  error={errors.province}
+                  containerStyle={styles.halfField}
+                />
+              </View>
             </>
           )}
 
           {step === 2 && (
             <>
+              <View style={styles.layoutSection}>
               <MobileInput
                 label={cr.listingTitle}
                 placeholder={cr.listingTitlePlaceholder}
@@ -1282,152 +2005,137 @@ export const MobileCreateListingWizardBody: React.FC<
                   clearFieldError('listingTitle');
                 }}
                 error={errors.listingTitle}
+                helperText={cr.listingTitleHint}
               />
               {listRoomTypes ? (
-                <>
-              <View>
-                <Text style={styles.fieldLabel}>
-                  {cr.roomType}
-                  <Text style={styles.requiredMark}> *</Text>
-                </Text>
-              </View>
-              {roomTypesLoading ? (
-                <View style={styles.suggestStatus}>
-                  <ActivityIndicator size="small" color={themeColor} />
-                  <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
-                </View>
-              ) : null}
-              {roomTypesError ? (
-                <Text style={styles.errorText}>{roomTypesError}</Text>
-              ) : null}
-              <View style={styles.roomTypeRow}>
-                {roomTypes.map((opt) => {
-                  const selected = roomTypeId === opt.id;
-                  const labels = t.masters.roomTypes as Record<string, string>;
-                  return (
-                    <Pressable
-                      key={opt.id}
-                      onPress={() => {
-                        setRoomTypeId(opt.id);
-                        clearFieldError('roomType');
-                        if (opt.bedroomCount != null) {
-                          setBedroom(String(opt.bedroomCount));
-                          clearFieldError('bedroom');
-                        }
-                      }}
-                      android_ripple={{ color: '#00000022' }}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      style={({ pressed }) => [
-                        styles.roomTypeChip,
-                        selected
-                          ? { backgroundColor: themeColor, borderColor: themeColor }
-                          : errors.roomType
-                            ? { borderColor: tokens.colors.error }
-                            : null,
-                        pressed ? { opacity: 0.88 } : null,
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>
+                    {cr.roomType}
+                    <Text style={styles.requiredMark}> *</Text>
+                  </Text>
+                  {roomTypesLoading ? (
+                    <View style={styles.suggestStatus}>
+                      <ActivityIndicator size="small" color={accent} />
+                      <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
+                    </View>
+                  ) : null}
+                  {roomTypesError ? (
+                    <Text style={styles.errorText}>{roomTypesError}</Text>
+                  ) : null}
+                  <Pressable
+                    onPress={() => !roomTypesLoading && setLayoutSheet('roomType')}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                      styles.selectRow,
+                      errors.roomType ? { borderColor: tokens.colors.error } : null,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.selectValue,
+                        !selectedRoomTypeLabel ? styles.selectPlaceholder : null,
                       ]}
                     >
-                      <Text
-                        numberOfLines={1}
-                        style={[
-                          styles.roomTypeChipText,
-                          selected ? styles.typeChipTextSelected : null,
-                        ]}
-                      >
-                        {labels[opt.code] ?? opt.code}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {errors.roomType ? (
-                <Text style={styles.errorText}>{errors.roomType}</Text>
-              ) : null}
-                </>
+                      {selectedRoomTypeLabel ?? cr.selectRoomType}
+                    </Text>
+                    <MobileIcon name="chevron-down" size={18} color={tokens.colors.textSecondary} />
+                  </Pressable>
+                  {errors.roomType ? (
+                    <Text style={styles.errorText}>{errors.roomType}</Text>
+                  ) : null}
+                </View>
               ) : null}
               <View style={styles.fieldGrid}>
                 <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.bedroom}
-                    keyboardType="numeric"
-                    value={bedroom}
-                    required
-                    onChangeText={(v) => {
-                      setBedroom(digitsOnly(v));
-                      clearFieldError('bedroom');
+                  <Text style={styles.fieldLabel}>
+                    {cr.bedroom}
+                    <Text style={styles.requiredMark}> *</Text>
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      if (bedroomLocked) return;
+                      setLayoutSheet('bedroom');
                     }}
-                    error={errors.bedroom}
-                  />
+                    disabled={bedroomLocked}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: bedroomLocked }}
+                    style={({ pressed }) => [
+                      styles.selectRow,
+                      bedroomLocked ? styles.selectRowLocked : null,
+                      errors.bedroom ? { borderColor: tokens.colors.error } : null,
+                      !bedroomLocked && pressed ? { opacity: 0.9 } : null,
+                    ]}
+                  >
+                    <MobileIcon name="bed" size={18} color={tokens.colors.textSecondary} />
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.selectValue,
+                        !bedroom.trim() ? styles.selectPlaceholder : null,
+                      ]}
+                    >
+                      {bedroom.trim() || cr.selectCount}
+                    </Text>
+                    {bedroomLocked ? null : (
+                      <MobileIcon name="chevron-down" size={18} color={tokens.colors.textSecondary} />
+                    )}
+                  </Pressable>
+                  {errors.bedroom ? (
+                    <Text style={styles.errorText}>{errors.bedroom}</Text>
+                  ) : null}
                 </View>
                 <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.bathroom}
-                    keyboardType="numeric"
-                    value={bathroom}
-                    required
-                    onChangeText={(v) => {
-                      setBathroom(digitsOnly(v));
-                      clearFieldError('bathroom');
-                    }}
-                    error={errors.bathroom}
-                  />
+                  <Text style={styles.fieldLabel}>
+                    {cr.bathroom}
+                    <Text style={styles.requiredMark}> *</Text>
+                  </Text>
+                  <Pressable
+                    onPress={() => setLayoutSheet('bathroom')}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                      styles.selectRow,
+                      errors.bathroom ? { borderColor: tokens.colors.error } : null,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
+                  >
+                    <MobileIcon name="bath" size={18} color={tokens.colors.textSecondary} />
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.selectValue,
+                        !bathroom.trim() ? styles.selectPlaceholder : null,
+                      ]}
+                    >
+                      {bathroom.trim() || cr.selectCount}
+                    </Text>
+                    <MobileIcon name="chevron-down" size={18} color={tokens.colors.textSecondary} />
+                  </Pressable>
+                  {errors.bathroom ? (
+                    <Text style={styles.errorText}>{errors.bathroom}</Text>
+                  ) : null}
                 </View>
               </View>
-              {initialData && <>
               <View style={styles.fieldGrid}>
-                <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.waterRate}
-                    keyboardType="numeric"
-                    value={waterRate}
-                    onChangeText={setWaterRate}
-                  />
-                </View>
-                <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.electricRate}
-                    keyboardType="numeric"
-                    value={electricRate}
-                    onChangeText={setElectricRate}
-                  />
-                </View>
-              </View>
-              <View style={styles.fieldGrid}>
-                <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.roomId}
-                    placeholder={cr.roomIdPlaceholder}
-                    value={roomId}
-                    onChangeText={setRoomId}
-                  />
-                </View>
                 <View style={styles.fieldGridItem}>
                   <MobileInput
                     label={cr.floor}
                     placeholder={cr.floorPlaceholder}
                     keyboardType="numeric"
                     value={floor}
+                    leadingIcon="stairs"
                     onChangeText={setFloor}
-                  />
-                </View>
-              </View>
-              <View style={styles.fieldGrid}>
-                <View style={styles.fieldGridItem}>
-                  <MobileInput
-                    label={cr.building}
-                    placeholder={cr.buildingPlaceholder}
-                    autoCapitalize="characters"
-                    value={building}
-                    onChangeText={setBuilding}
                   />
                 </View>
                 <View style={styles.fieldGridItem}>
                   <MobileInput
                     label={cr.sizeSqm}
                     keyboardType="numeric"
-                    placeholder="28"
+                    placeholder="35"
                     value={sizeSqm}
+                    leadingIcon="room-size"
+                    trailingText="sqm"
                     onChangeText={(v) => {
                       setSizeSqm(v);
                       clearFieldError('sizeSqm');
@@ -1436,135 +2144,159 @@ export const MobileCreateListingWizardBody: React.FC<
                   />
                 </View>
               </View>
-              </>}
+              <MobileInput
+                label={cr.building}
+                placeholder={cr.buildingPlaceholder}
+                autoCapitalize="characters"
+                value={building}
+                leadingIcon="buildings"
+                onChangeText={setBuilding}
+              />
+              {initialData ? (
+                <>
+                  <View style={styles.fieldGrid}>
+                    <View style={styles.fieldGridItem}>
+                      <MobileInput
+                        label={cr.waterRate}
+                        keyboardType="numeric"
+                        value={waterRate}
+                        onChangeText={setWaterRate}
+                      />
+                    </View>
+                    <View style={styles.fieldGridItem}>
+                      <MobileInput
+                        label={cr.electricRate}
+                        keyboardType="numeric"
+                        value={electricRate}
+                        onChangeText={setElectricRate}
+                      />
+                    </View>
+                  </View>
+                  <MobileInput
+                    label={cr.roomId}
+                    placeholder={cr.roomIdPlaceholder}
+                    value={roomId}
+                    onChangeText={setRoomId}
+                  />
+                </>
+              ) : null}
+              </View>
             </>
           )}
 
           {step === 5 && (
             <>
-              <View>
-                <Text style={styles.fieldLabel}>
-                  {cr.contractTerm}
-                  <Text style={styles.requiredMark}> *</Text>
-                </Text>
-                <Text style={styles.hint}>{cr.contractTermHint}</Text>
-              </View>
+              <Pressable
+                onPress={openAddLease}
+                disabled={
+                  contractTypesLoading ||
+                  contractTypes.length === 0 ||
+                  selectedContractTypeIds.length >= contractTypes.length
+                }
+                android_ripple={{ color: '#00000014' }}
+                accessibilityRole="button"
+                accessibilityLabel={cr.addLease}
+                style={({ pressed }) => [
+                  styles.addLeaseBtn,
+                  { borderColor: accent },
+                  selectedContractTypeIds.length >= contractTypes.length && contractTypes.length > 0
+                    ? styles.addLeaseBtnDisabled
+                    : null,
+                  pressed ? { opacity: 0.88 } : null,
+                ]}
+              >
+                <MobileIcon name="plus" size={18} color={tokens.colors.primary} weight="bold" />
+                <Text style={styles.addLeaseBtnText}>{cr.addLease}</Text>
+              </Pressable>
+
               {contractTypesLoading ? (
                 <View style={styles.suggestStatus}>
-                  <ActivityIndicator size="small" color={themeColor} />
+                  <ActivityIndicator size="small" color={accent} />
                   <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
                 </View>
               ) : null}
               {contractTypesError ? (
                 <Text style={styles.errorText}>{contractTypesError}</Text>
               ) : null}
-              <View style={styles.termRow}>
-                {contractTypes.map((opt) => {
-                  const selected = selectedContractTypeIds.includes(opt.id);
-                  return (
-                    <Pressable
-                      key={opt.id}
-                      onPress={() => toggleContract(opt.id)}
-                      android_ripple={{ color: '#00000022' }}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected }}
-                      style={({ pressed }) => [
-                        styles.termChip,
-                        selected
-                          ? { backgroundColor: themeColor, borderColor: themeColor }
-                          : null,
-                        pressed ? { opacity: 0.88 } : null,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.termChipText,
-                          selected ? styles.termChipTextSelected : null,
+
+              <View style={styles.leaseList}>
+                {contractTypes
+                  .filter((opt) => selectedContractTypeIds.includes(opt.id))
+                  .map((opt) => {
+                    const rent = rentsByTypeId[String(opt.id)] ?? '';
+                    const rentNum = Number(rent);
+                    return (
+                      <Pressable
+                        key={opt.id}
+                        onPress={() => openEditLease(opt.id)}
+                        android_ripple={{ color: '#00000014' }}
+                        accessibilityRole="button"
+                        accessibilityLabel={interpolate(cr.leaseCardTitle, {
+                          months: opt.termMonths,
+                        })}
+                        style={({ pressed }) => [
+                          styles.leaseCard,
+                          pressed ? { opacity: 0.92 } : null,
                         ]}
                       >
-                        {interpolate(cr.contractMonths, { months: opt.termMonths })}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+                        <View style={styles.leaseCardText}>
+                          <Text style={styles.leaseCardTitle}>
+                            {interpolate(cr.leaseCardTitle, { months: opt.termMonths })}
+                          </Text>
+                          {rentNum > 0 ? (
+                            <Text style={styles.leaseCardPrice}>
+                              {interpolate(cr.leaseCardRent, {
+                                amount: formatBaht(rentNum),
+                              })}
+                            </Text>
+                          ) : (
+                            <Text style={styles.leaseCardSub}>{cr.rentAmountRequired}</Text>
+                          )}
+                          {(
+                            <Text style={styles.leaseCardSub}>
+                              {interpolate(cr.leaseCardAdvanceDeposit, {
+                                advance: monthChipLabel(
+                                  leaseTerms(opt.id).advanceRentMonths,
+                                  cr.monthsNone,
+                                  cr.contractMonths,
+                                ),
+                                deposit: monthChipLabel(
+                                  leaseTerms(opt.id).depositMonths,
+                                  cr.monthsNone,
+                                  cr.contractMonths,
+                                ),
+                              })}
+                            </Text>
+                          )}
+                        </View>
+                        <MobileIcon
+                          name="chevron-right"
+                          size={20}
+                          color={tokens.colors.textSecondary}
+                        />
+                      </Pressable>
+                    );
+                  })}
               </View>
+
               {errors.contractTerm ? (
                 <Text style={styles.errorText}>{errors.contractTerm}</Text>
               ) : null}
-              {contractTypes
-                .filter((opt) => selectedContractTypeIds.includes(opt.id))
-                .map((opt) => (
-                  <MobileInput
-                    key={opt.id}
-                    label={interpolate(cr.monthlyRentForTerm, { months: opt.termMonths })}
-                    placeholder="12000"
-                    keyboardType="numeric"
-                    value={rentsByTypeId[String(opt.id)] ?? ''}
-                    required
-                    onChangeText={(v) => {
-                      setRentsByTypeId((prev) => ({ ...prev, [String(opt.id)]: v }));
-                      clearFieldError(`rent_${opt.id}`);
-                    }}
-                    error={errors[`rent_${opt.id}`]}
-                  />
+              {Object.keys(errors)
+                .filter((key) => key.startsWith('rent_'))
+                .map((key) => (
+                  <Text key={key} style={styles.errorText}>
+                    {errors[key]}
+                  </Text>
                 ))}
-              <View>
-                <Text style={styles.fieldLabel}>
-                  {cr.advanceRent}
-                  <Text style={styles.requiredMark}> *</Text>
-                </Text>
-                <Text style={styles.hint}>{cr.advanceRentHint}</Text>
-              </View>
-              {renderMonthChips(ADVANCE_MONTH_OPTIONS, advanceRentMonths, setAdvanceRentMonths)}
-              <View>
-                <Text style={styles.fieldLabel}>
-                  {cr.deposit}
-                  <Text style={styles.requiredMark}> *</Text>
-                </Text>
-                <Text style={styles.hint}>{cr.depositHint}</Text>
-              </View>
-              {renderMonthChips(DEPOSIT_MONTH_OPTIONS, depositMonths, setDepositMonths)}
-              {contractTypes.some(
-                (opt) =>
-                  selectedContractTypeIds.includes(opt.id) &&
-                  Number(rentsByTypeId[String(opt.id)]) > 0,
-              ) ? (
-                <View style={styles.moveInBox}>
-                  <Text style={styles.moveInLabel}>{cr.moveInSummaryLabel}</Text>
-                  {contractTypes
-                    .filter(
-                      (opt) =>
-                        selectedContractTypeIds.includes(opt.id) &&
-                        Number(rentsByTypeId[String(opt.id)]) > 0,
-                    )
-                    .map((opt) => (
-                      <Text
-                        key={opt.id}
-                        style={[styles.moveInValue, { color: themeColor }]}
-                      >
-                        {interpolate(cr.moveInTermLine, {
-                          term: opt.termMonths,
-                          amount: formatBaht(
-                            Number(rentsByTypeId[String(opt.id)]) *
-                              (advanceRentMonths + depositMonths),
-                          ),
-                        })}
-                      </Text>
-                    ))}
-                </View>
-              ) : null}
             </>
           )}
 
           {step === 6 && (
             <>
-              <Text style={styles.fieldLabel}>
-                {cr.steps.photos}
-                {initialData?.visibility === 'published' && <Text style={styles.requiredMark}> *</Text>}
-              </Text>
-              <Text style={styles.hint}>{initialData?.visibility === 'published' ? cr.photosHint : cr.optionalPhotosHint}</Text>
-              {enhancePhoto ? <Text style={styles.hint}>{cr.enhancePhotoHint}</Text> : null}
-              <Text style={[styles.photoCount, { color: themeColor }]}>
+              <Text style={styles.sourceLead}>
+                {initialData?.visibility === 'published' ? cr.photosHint : cr.optionalPhotosHint}
+                {' · '}
                 {interpolate(cr.photosCount, { count: photoCount })}
               </Text>
               {errors.photos ? (
@@ -1572,89 +2304,74 @@ export const MobileCreateListingWizardBody: React.FC<
               ) : null}
               <View style={styles.photoGrid}>
                 {photos.map((photo, i) => (
-                  <View key={photo.uri} style={styles.photoCard}>
+                  <View key={photo.uri} style={styles.photoTile}>
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={cr.viewPhoto}
                       disabled={submitting || !!enhancingUri}
                       onPress={() => setPreview({ uri: photo.uri, beforeUri: photo.originalUri })}
                     >
-                      <Image source={{ uri: photo.uri, cache: 'reload' }} style={styles.photoThumb} />
+                      <Image source={{ uri: photo.uri, cache: 'reload' }} style={styles.photoTileImg} />
+                      {i === 0 ? (
+                        <View style={[styles.coverBadge, { backgroundColor: accent }]}>
+                          <Text style={[styles.coverBadgeText, { color: accentInk }]}>{cr.coverPhoto}</Text>
+                        </View>
+                      ) : null}
                       {photo.originalUri ? (
-                        <View style={[styles.aiBadge, { backgroundColor: themeColor }]}>
-                          <Text style={styles.aiBadgeText}>AI</Text>
+                        <View style={[styles.aiBadge, { backgroundColor: accent }]}>
+                          <Text style={[styles.aiBadgeText, { color: accentInk }]}>AI</Text>
                         </View>
                       ) : null}
                     </Pressable>
-                    {i === 0 ? (
-                      <Text style={styles.hint}>{cr.coverPhoto}</Text>
-                    ) : (
-                      <MobileButton
-                        variant="outline"
-                        disabled={submitting || !!enhancingUri}
-                        onPress={() => setPhotos((current) => [photo, ...current.filter((item) => item.uri !== photo.uri)])}
-                      >
-                        {cr.setCover}
-                      </MobileButton>
-                    )}
-                    {enhancePhoto ? (
-                      <MobileButton
-                        variant="outline"
-                        disabled={submitting || pickingPhotos || !!enhancingUri}
-                        isLoading={enhancingUri === photo.uri}
-                        onPress={async () => {
-                          if (!enhancePhoto || enhancingUri) return;
-                          setEnhancingUri(photo.uri);
-                          try {
-                            const enhanced = await enhancePhoto(photo);
-                            setCompare({
-                              sourceUri: photo.uri,
-                              beforeUri: photo.originalUri ?? photo.uri,
-                              after: {
-                                ...enhanced,
-                                originalUri: photo.originalUri ?? photo.uri,
-                              },
-                            });
-                          } catch (err) {
-                            Alert.alert(cr.enhancePhotoError, err instanceof Error ? err.message : String(err));
-                          } finally {
-                            setEnhancingUri(null);
-                          }
-                        }}
-                      >
-                        {cr.enhancePhoto}
-                      </MobileButton>
-                    ) : null}
-                    <MobileButton
-                      variant="outline"
-                      disabled={submitting || !!enhancingUri}
-                      onPress={() => setPhotos((current) => current.filter((item) => item.uri !== photo.uri))}
+                    <Pressable
+                      style={styles.photoMenuBtn}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      onPress={() => setPhotoMenuUri(photo.uri)}
                     >
-                      {cr.removePhoto}
-                    </MobileButton>
+                      <MobileIcon name="dots-vertical" size={18} color={tokens.colors.white} />
+                    </Pressable>
                   </View>
                 ))}
+                {photoCount < 12 && pickPhotos ? (
+                  <Pressable
+                    style={styles.photoAddTile}
+                    disabled={submitting || pickingPhotos || !!enhancingUri}
+                    onPress={async () => {
+                      if (!pickPhotos || pickingPhotos) return;
+                      setPickingPhotos(true);
+                      try {
+                        const selected = await pickPhotos(12 - photoCount);
+                        setPhotos((current) =>
+                          [
+                            ...current,
+                            ...selected.filter(
+                              (photo, index) =>
+                                !current.some((item) => item.uri === photo.uri) &&
+                                selected.findIndex((item) => item.uri === photo.uri) === index,
+                            ),
+                          ].slice(0, 12),
+                        );
+                        clearFieldError('photos');
+                      } catch (err) {
+                        Alert.alert(cr.saveError, err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setPickingPhotos(false);
+                      }
+                    }}
+                  >
+                    {pickingPhotos ? (
+                      <ActivityIndicator color={accent} />
+                    ) : (
+                      <>
+                        <MobileIcon name="plus" size={22} color={tokens.colors.textSecondary} />
+                        <Text style={styles.photoAddLabel}>{cr.addPhoto}</Text>
+                      </>
+                    )}
+                  </Pressable>
+                ) : null}
               </View>
-              <MobileButton
-                variant="outline"
-                disabled={submitting || pickingPhotos || !!enhancingUri || photoCount >= 12 || !pickPhotos}
-                isLoading={pickingPhotos}
-                onPress={async () => {
-                  if (!pickPhotos || pickingPhotos) return;
-                  setPickingPhotos(true);
-                  try {
-                    const selected = await pickPhotos(12 - photoCount);
-                    setPhotos((current) => [...current, ...selected.filter((photo, index) => !current.some((item) => item.uri === photo.uri) && selected.findIndex((item) => item.uri === photo.uri) === index)].slice(0, 12));
-                    clearFieldError('photos');
-                  } catch (err) {
-                    Alert.alert(cr.saveError, err instanceof Error ? err.message : String(err));
-                  } finally {
-                    setPickingPhotos(false);
-                  }
-                }}
-              >
-                {cr.addPhoto}
-              </MobileButton>
+              <Text style={styles.hubFootnote}>{cr.optionalPhotosHint}</Text>
               <RoomPhotoLightbox
                 visible={preview != null}
                 uri={preview?.uri ?? ''}
@@ -1681,17 +2398,85 @@ export const MobileCreateListingWizardBody: React.FC<
                   setCompare(null);
                 }}
               />
+              <MobileBottomSheet visible={photoMenuUri != null} onClose={() => setPhotoMenuUri(null)}>
+                <View style={styles.photoSheet}>
+                  <MobileButton
+                    variant="outline"
+                    disabled={!photoMenuUri || photos[0]?.uri === photoMenuUri}
+                    onPress={() => {
+                      const uri = photoMenuUri;
+                      if (!uri) return;
+                      setPhotos((current) => {
+                        const target = current.find((p) => p.uri === uri);
+                        if (!target) return current;
+                        return [target, ...current.filter((p) => p.uri !== uri)];
+                      });
+                      setPhotoMenuUri(null);
+                    }}
+                  >
+                    {cr.setCover}
+                  </MobileButton>
+                  {enhancePhoto ? (
+                    <MobileButton
+                      variant="outline"
+                      disabled={!photoMenuUri || !!enhancingUri}
+                      isLoading={!!photoMenuUri && enhancingUri === photoMenuUri}
+                      onPress={async () => {
+                        const uri = photoMenuUri;
+                        if (!uri || !enhancePhoto || enhancingUri) return;
+                        const photo = photos.find((p) => p.uri === uri);
+                        if (!photo) return;
+                        setEnhancingUri(uri);
+                        setPhotoMenuUri(null);
+                        try {
+                          const enhanced = await enhancePhoto(photo);
+                          setCompare({
+                            sourceUri: photo.uri,
+                            beforeUri: photo.originalUri ?? photo.uri,
+                            after: {
+                              ...enhanced,
+                              originalUri: photo.originalUri ?? photo.uri,
+                            },
+                          });
+                        } catch (err) {
+                          Alert.alert(cr.enhancePhotoError, err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setEnhancingUri(null);
+                        }
+                      }}
+                    >
+                      {cr.enhancePhoto}
+                    </MobileButton>
+                  ) : null}
+                  <MobileButton
+                    variant="outline"
+                    disabled={!photoMenuUri}
+                    onPress={() => {
+                      const uri = photoMenuUri;
+                      if (!uri) return;
+                      setPhotos((current) => current.filter((item) => item.uri !== uri));
+                      setPhotoMenuUri(null);
+                    }}
+                    textStyle={{ color: tokens.colors.error }}
+                  >
+                    {cr.removePhoto}
+                  </MobileButton>
+                  <MobileButton variant="outline" onPress={() => setPhotoMenuUri(null)}>
+                    {t.common.cancel}
+                  </MobileButton>
+                </View>
+              </MobileBottomSheet>
             </>
           )}
 
           {submitting && <Text accessibilityLiveRegion="polite" style={styles.hint}>{interpolate(cr.uploadProgress, { count: uploadProgress, total: photoCount })}</Text>}
 
           {step === 3 && <>
-            <RoomFacilitiesEditor options={facilityOptions} selected={facilities} onChange={setFacilities} custom={customFacilities} onCustomChange={setCustomFacilities} loading={facilitiesLoading} error={facilityError} onRetry={loadFacilities} color={themeColor} />
+            <RoomFacilitiesEditor options={facilityOptions} selected={facilities} onChange={setFacilities} custom={customFacilities} onCustomChange={setCustomFacilities} loading={facilitiesLoading} error={facilityError} onRetry={loadFacilities} color={accent} />
             {!!errors.customFacilities && <Text style={styles.errorText}>{errors.customFacilities}</Text>}
           </>}
           {step === 4 && <>
-            <RoomNearbyEditor latitude={latitude} longitude={longitude} value={nearbyPlaces} onChange={(value) => { setNearbyPlaces(value); clearFieldError('nearbyPlaces'); }} search={searchNearby} apiKey={mapsApiKey} color={themeColor} error={errors.nearbyPlaces} />
+            <RoomNearbyEditor latitude={latitude} longitude={longitude} value={nearbyPlaces} onChange={(value) => { setNearbyPlaces(value); clearFieldError('nearbyPlaces'); }} search={searchNearby} apiKey={mapsApiKey} color={accent} error={errors.nearbyPlaces} />
             <MobileInput label={cr.nearbyNotes} placeholder={cr.nearbyPlaceholder} value={nearbyOther} onChangeText={setNearbyOther} multiline maxLength={500} style={{ height: 100, textAlignVertical: 'top' }} />
           </>}
           {step === 7 && <>
@@ -1701,7 +2486,7 @@ export const MobileCreateListingWizardBody: React.FC<
             <Text style={styles.fieldLabel}>{cr.steps.documents}</Text>
             <Text style={styles.hint}>{cr.documentLinksHint}</Text>
             {documents.map((document, index) => <View key={index} style={styles.ownerCard}>
-              <View style={styles.typeRow}>{(['id_passport', 'bookbank', 'ownership', 'other'] as const).map((kind) => <Pressable key={kind} accessibilityRole="radio" accessibilityState={{ checked: document.kind === kind }} onPress={() => setDocuments((current) => current.map((d, i) => i === index ? { ...d, kind } : d))} style={[styles.typeChip, document.kind === kind && { backgroundColor: themeColor, borderColor: themeColor }]}><Text style={[styles.typeChipText, document.kind === kind && styles.typeChipTextSelected]}>{cr.documentKinds[kind]}</Text></Pressable>)}</View>
+              <View style={styles.typeRow}>{(['id_passport', 'bookbank', 'ownership', 'other'] as const).map((kind) => <Pressable key={kind} accessibilityRole="radio" accessibilityState={{ checked: document.kind === kind }} onPress={() => setDocuments((current) => current.map((d, i) => i === index ? { ...d, kind } : d))} style={[styles.typeChip, document.kind === kind && { backgroundColor: accent, borderColor: accent }]}><Text style={[styles.typeChipText, document.kind === kind && styles.typeChipTextSelected]}>{cr.documentKinds[kind]}</Text></Pressable>)}</View>
               <MobileInput label={cr.documentUrl} placeholder="https://" autoCapitalize="none" value={document.mediaUrl} maxLength={500} onChangeText={(mediaUrl) => setDocuments((current) => current.map((d, i) => i === index ? { ...d, mediaUrl } : d))} />
               <MobileButton variant="outline" onPress={() => setDocuments((current) => current.filter((_, i) => i !== index))}>{cr.removeDocument}</MobileButton>
             </View>)}
@@ -1710,127 +2495,61 @@ export const MobileCreateListingWizardBody: React.FC<
           </>}
           {step === 8 && (
             <>
-              {ownerMode === 'pick' && listContacts ? (
-                <>
-                  {selectedOwner ? (
-                    <View style={[styles.ownerCard, nativeElevation(1)]}>
-                      <Text style={styles.ownerCardName}>{selectedOwner.name}</Text>
-                      <Text style={styles.ownerCardPhone}>{selectedOwner.phone}</Text>
-                      <Text style={styles.ownerCardMeta}>
-                        {interpolate(cr.ownerRoomsCount, {
-                          count: selectedOwner.roomCount ?? 0,
-                        })}
-                      </Text>
-                      {selectedOwner.note ? (
-                        <Text style={styles.ownerCardNote}>{selectedOwner.note}</Text>
-                      ) : null}
-                      <View style={styles.btnRow}>
-                        <View style={{ flex: 1 }}>
-                          <MobileButton
-                            variant="outline"
-                            onPress={() => {
-                              setSelectedOwnerId(null);
-                              setOwnerQuery('');
-                            }}
-                          >
-                            {cr.ownerChange}
-                          </MobileButton>
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <MobileButton
-                            variant="outline"
-                            onPress={() => {
-                              setSelectedOwnerId(null);
-                              setOwnerName('');
-                              setOwnerPhone('');
-                              setOwnerOther('');
-                              setOwnerMode('create');
-                            }}
-                          >
-                            {cr.ownerAddNew}
-                          </MobileButton>
-                        </View>
-                      </View>
-                    </View>
-                  ) : (
-                    <>
-                      <MobileInput
-                        label={cr.ownerSearch}
-                        placeholder={cr.ownerSearchPlaceholder}
-                        value={ownerQuery}
-                        required
-                        onChangeText={(v) => {
-                          setOwnerQuery(v);
-                          clearFieldError('ownerPick');
-                        }}
-                        error={errors.ownerPick}
-                      />
-                      {ownersLoading ? (
-                        <View style={styles.suggestStatus}>
-                          <ActivityIndicator size="small" color={themeColor} />
-                          <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
-                        </View>
-                      ) : null}
-                      {ownersError ? (
-                        <Text style={styles.errorText}>{ownersError}</Text>
-                      ) : null}
-                      {!ownersLoading && !ownersError && filteredOwners.length === 0 ? (
-                        <Text style={styles.hint}>{cr.ownerEmpty}</Text>
-                      ) : null}
-                      {filteredOwners.length > 0 ? (
-                        <View style={styles.suggestBox}>
-                          {filteredOwners.map((item, index) => (
-                            <Pressable
-                              key={item.id}
-                              onPress={() => handleSelectOwner(item)}
-                              android_ripple={{ color: '#00000014' }}
-                              style={[
-                                styles.suggestRow,
-                                index === 0 ? { borderTopWidth: 0 } : null,
-                              ]}
-                            >
-                              <Text style={styles.suggestName}>{item.name}</Text>
-                              <Text style={styles.suggestAddress}>{item.phone}</Text>
-                              <Text style={styles.suggestAddress}>
-                                {interpolate(cr.ownerRoomsCount, {
-                                  count: item.roomCount ?? 0,
-                                })}
-                              </Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                      ) : null}
-                      <MobileButton
-                        variant="outline"
-                        onPress={() => {
-                          setSelectedOwnerId(null);
-                          setOwnerName('');
-                          setOwnerPhone('');
-                          setOwnerOther('');
-                          setOwnerMode('create');
-                        }}
-                      >
-                        {cr.ownerAddNew}
-                      </MobileButton>
-                    </>
-                  )}
-                </>
+              <Text style={styles.hint}>{cr.roomContactsMaxHint}</Text>
+              {roomContacts.length > 0 ? (
+                <View style={{ gap: 12 }}>
+                  <Text style={styles.fieldLabel}>{cr.selectedContactLabel}</Text>
+                  {roomContacts.map((c) => (
+                    <SelectedContactCard
+                      key={c.key}
+                      name={c.name}
+                      phone={c.phone}
+                      roomsLabel={roomsLinkedLabel(c.roomCount)}
+                      accentColor={accent}
+                      removeLabel={cr.roomContactRemove}
+                      onRemove={
+                        listContacts
+                          ? () => removeRoomContact(c.key)
+                          : undefined
+                      }
+                    />
+                  ))}
+                </View>
+              ) : null}
+
+              {listContacts ? (
+                roomContacts.length < MAX_ROOM_CONTACTS ? (
+                  <Pressable
+                    onPress={openPickContactSheet}
+                    android_ripple={{ color: '#00000014' }}
+                    accessibilityRole="button"
+                    accessibilityLabel={cr.chooseContactTitle}
+                    style={({ pressed }) => [
+                      styles.changeContactBtn,
+                      { borderColor: tokens.colors.border },
+                      pressed ? { opacity: 0.88 } : null,
+                    ]}
+                  >
+                    <Text style={styles.changeContactBtnText}>
+                      {cr.chooseContactTitle}
+                    </Text>
+                    <MobileIcon
+                      name="chevron-right"
+                      size={20}
+                      color={tokens.colors.textSecondary}
+                    />
+                  </Pressable>
+                ) : (
+                  <Text style={styles.hint}>{cr.roomContactsFull}</Text>
+                )
               ) : (
                 <>
-                  {listContacts ? (
-                    <MobileButton
-                      variant="outline"
-                      onPress={() => {
-                        setOwnerMode('pick');
-                        setSelectedOwnerId(null);
-                      }}
-                    >
-                      {cr.ownerPickExisting}
-                    </MobileButton>
+                  {!roomContacts.length ? (
+                    <Text style={styles.hint}>{cr.ownerPickRequired}</Text>
                   ) : null}
                   <MobileInput
                     label={cr.ownerName}
-                    placeholder="Somchai Jaidee"
+                    placeholder="e.g. Alex Morgan"
                     value={ownerName}
                     required
                     onChangeText={(v) => {
@@ -1841,7 +2560,7 @@ export const MobileCreateListingWizardBody: React.FC<
                   />
                   <MobileInput
                     label={cr.ownerPhone}
-                    placeholder="0812345678"
+                    placeholder="e.g. 0812345678"
                     keyboardType="phone-pad"
                     value={ownerPhone}
                     required
@@ -1851,42 +2570,397 @@ export const MobileCreateListingWizardBody: React.FC<
                     }}
                     error={errors.ownerPhone}
                   />
-                  {matchedOwnerByPhone ? (
-                    <View style={styles.ownerMatchBox}>
-                      <Text style={styles.ownerCardName}>{cr.ownerFoundExisting}</Text>
-                      <Text style={styles.ownerCardPhone}>
-                        {matchedOwnerByPhone.name} · {matchedOwnerByPhone.phone}
-                      </Text>
-                      <MobileButton
-                        variant="outline"
-                        onPress={() => handleSelectOwner(matchedOwnerByPhone)}
-                      >
-                        {cr.ownerUseThis}
-                      </MobileButton>
-                    </View>
-                  ) : null}
-                  {initialData && (
-                  <MobileInput
-                    label={cr.ownerOther}
-                    placeholder={cr.ownerOtherPlaceholder}
-                    value={ownerOther}
-                    multiline
-                    maxLength={OWNER_NOTE_MAX}
-                    onChangeText={(v) => setOwnerOther(v.slice(0, OWNER_NOTE_MAX))}
-                    helperText={interpolate(cr.ownerOtherCount, { count: ownerOther.length })}
-                    style={{ height: 96, textAlignVertical: 'top', paddingTop: 10 }}
-                  />
-                  )}
                 </>
               )}
+
+              {errors.ownerPick ? (
+                <Text style={styles.errorText}>{errors.ownerPick}</Text>
+              ) : null}
+              {errors.ownerName ? (
+                <Text style={styles.errorText}>{errors.ownerName}</Text>
+              ) : null}
+              {errors.ownerPhone ? (
+                <Text style={styles.errorText}>{errors.ownerPhone}</Text>
+              ) : null}
             </>
           )}
           </View>
         </View>
       </ScrollView>
-      <View style={styles.footer}>{renderNav(navOpts)}</View>
+      <View style={styles.footer}>{renderNav()}</View>
         </Animated.View>
-      )}
+      ) : null}
+
+      <MobileBottomSheet visible={layoutSheet != null} onClose={() => setLayoutSheet(null)}>
+        <WizardSheetChrome
+          title={
+            layoutSheet === 'roomType'
+              ? cr.roomType
+              : layoutSheet === 'bedroom'
+                ? cr.bedroom
+                : cr.bathroom
+          }
+          closeLabel={cr.closePhotoPreview}
+          onClose={() => setLayoutSheet(null)}
+        />
+        <ScrollView
+          style={styles.layoutSheetScroll}
+          contentContainerStyle={styles.layoutSheetBody}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+        >
+          {layoutSheet === 'roomType'
+            ? roomTypes.map((opt) => {
+                const selected = roomTypeId === opt.id;
+                const labels = t.masters.roomTypes as Record<string, string>;
+                return (
+                  <Pressable
+                    key={opt.id}
+                    onPress={() => {
+                      setRoomTypeId(opt.id);
+                      clearFieldError('roomType');
+                      if (opt.code === 'studio') {
+                        setBedroom('0');
+                        clearFieldError('bedroom');
+                      } else if (opt.bedroomCount != null) {
+                        setBedroom(String(opt.bedroomCount));
+                        clearFieldError('bedroom');
+                      }
+                      setLayoutSheet(null);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.layoutSheetRow,
+                      selected ? styles.layoutSheetRowSelected : null,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.layoutSheetRowText,
+                        selected ? styles.layoutSheetRowTextSelected : null,
+                      ]}
+                    >
+                      {labels[opt.code] ?? opt.code}
+                    </Text>
+                    {selected ? <SelectionCheck selected variant="chip" size="md" /> : null}
+                  </Pressable>
+                );
+              })
+            : (layoutSheet === 'bedroom' ? BEDROOM_OPTIONS : BATHROOM_OPTIONS).map((count) => {
+                const selected =
+                  layoutSheet === 'bedroom'
+                    ? bedroom.trim() === String(count)
+                    : bathroom.trim() === String(count);
+                return (
+                  <Pressable
+                    key={`${layoutSheet}-${count}`}
+                    onPress={() => {
+                      if (layoutSheet === 'bedroom') {
+                        setBedroom(String(count));
+                        clearFieldError('bedroom');
+                      } else {
+                        setBathroom(String(count));
+                        clearFieldError('bathroom');
+                      }
+                      setLayoutSheet(null);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={({ pressed }) => [
+                      styles.layoutSheetRow,
+                      selected ? styles.layoutSheetRowSelected : null,
+                      pressed ? { opacity: 0.9 } : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.layoutSheetRowText,
+                        selected ? styles.layoutSheetRowTextSelected : null,
+                      ]}
+                    >
+                      {String(count)}
+                    </Text>
+                    {selected ? <SelectionCheck selected variant="chip" size="md" /> : null}
+                  </Pressable>
+                );
+              })}
+        </ScrollView>
+      </MobileBottomSheet>
+
+      <MobileBottomSheet visible={leaseSheet != null} onClose={closeLeaseSheet} avoidKeyboard>
+        {(() => {
+          const editing = leaseSheet?.mode === 'edit';
+          const editOpt =
+            editing && leaseSheet
+              ? contractTypes.find((opt) => opt.id === leaseSheet.contractTypeId)
+              : null;
+          return (
+            <>
+              <WizardSheetChrome
+                title={
+                  editing && editOpt
+                    ? interpolate(cr.leaseCardTitle, { months: editOpt.termMonths })
+                    : cr.addLease
+                }
+                subtitle={editing ? cr.editLeaseSubtitle : undefined}
+                closeLabel={cr.closePhotoPreview}
+                onClose={closeLeaseSheet}
+              />
+
+              <ScrollView
+                style={styles.layoutSheetScroll}
+                contentContainerStyle={styles.leaseSheetBody}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
+                {!editing && <View style={styles.leaseSheetSection}>
+                  <Text style={styles.fieldLabel}>
+                    {cr.leaseLength}
+                    <Text style={styles.requiredMark}> *</Text>
+                  </Text>
+                  <View style={styles.termRow}>
+                    {contractTypes.map((opt) => {
+                      const selected = draftTermId === opt.id;
+                      const alreadyAdded =
+                        !editing &&
+                        selectedContractTypeIds.includes(opt.id) &&
+                        draftTermId !== opt.id;
+                      const disabled = alreadyAdded;
+                      return (
+                        <SelectionChip
+                          key={opt.id}
+                          label={interpolate(cr.contractMonths, { months: opt.termMonths })}
+                          subtitle={alreadyAdded ? cr.leaseAdded : undefined}
+                          selected={selected}
+                          disabled={disabled}
+                          onPress={() => {
+                            if (disabled) return;
+                            setDraftTermId(opt.id);
+                            setLeaseSheetError('');
+                          }}
+                          accentColor={accent}
+                          inkColor={tokens.colors.primary}
+                          style={styles.termChipGrow}
+                        />
+                      );
+                    })}
+                  </View>
+                  {leaseSheetError === cr.leaseLengthRequired && <Text style={styles.errorText}>{leaseSheetError}</Text>}
+                </View>}
+
+                <MobileInput
+                  label={cr.monthlyRent}
+                  required
+                  placeholder="16000"
+                  keyboardType="numeric"
+                  value={draftRent}
+                  error={leaseSheetError === cr.rentAmountRequired ? leaseSheetError : undefined}
+                  trailingText={cr.monthlyRentSuffix}
+                  onChangeText={(v) => {
+                    setDraftRent(digitsOnly(v));
+                    setLeaseSheetError('');
+                  }}
+                />
+
+                <View style={styles.leaseSheetSection}>
+                  <Text style={styles.fieldLabel}>
+                    {cr.advanceRent}
+                    <Text style={styles.requiredMark}> *</Text>
+                  </Text>
+                  <Text style={styles.hint}>{cr.advanceRentHint}</Text>
+                  {renderMonthChips(
+                    ADVANCE_MONTH_OPTIONS,
+                    draftAdvance,
+                    setDraftAdvance,
+                  )}
+                  {Number(draftRent) > 0 && <Text style={styles.hint}>{interpolate(cr.thbAmount, { amount: formatBaht(Number(draftRent) * draftAdvance) })}</Text>}
+                </View>
+
+                <View style={styles.leaseSheetSection}>
+                  <Text style={styles.fieldLabel}>
+                    {cr.deposit}
+                    <Text style={styles.requiredMark}> *</Text>
+                  </Text>
+                  <Text style={styles.hint}>{cr.depositHint}</Text>
+                  {renderMonthChips(
+                    DEPOSIT_MONTH_OPTIONS,
+                    draftDeposit,
+                    setDraftDeposit,
+                  )}
+                  {Number(draftRent) > 0 && <Text style={styles.hint}>{interpolate(cr.thbAmount, { amount: formatBaht(Number(draftRent) * draftDeposit) })}</Text>}
+                </View>
+
+              </ScrollView>
+              <WizardSheetFooter
+                primaryLabel={editing ? cr.applyLeaseChanges : cr.addTerms}
+                onPrimary={commitLeaseSheet}
+                secondaryLabel={editing ? cr.removeLease : undefined}
+                onSecondary={editing ? removeLeaseFromSheet : undefined}
+              />
+            </>
+          );
+        })()}
+      </MobileBottomSheet>
+
+      <MobileBottomSheet
+        visible={contactSheet != null}
+        onClose={dismissContactSheetStep}
+        avoidKeyboard
+      >
+        {contactSheet === 'create' ? (
+          <>
+            <WizardSheetChrome
+              title={cr.newContactTitle}
+              closeLabel={cr.closePhotoPreview}
+              onClose={dismissContactSheetStep}
+            />
+            <ScrollView
+              style={styles.layoutSheetScroll}
+              contentContainerStyle={styles.leaseSheetBody}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
+              <Text style={styles.hint}>{cr.newContactHint}</Text>
+              <MobileInput
+                label={cr.ownerName}
+                required
+                placeholder="e.g. Alex Morgan"
+                value={draftOwnerName}
+                onChangeText={(v) => {
+                  setDraftOwnerName(v);
+                  setContactSheetError('');
+                }}
+                error={
+                  contactSheetError === cr.required && !draftOwnerName.trim()
+                    ? cr.required
+                    : undefined
+                }
+              />
+              <MobileInput
+                label={cr.ownerPhone}
+                required
+                placeholder="e.g. 0812345678"
+                keyboardType="phone-pad"
+                value={draftOwnerPhone}
+                onChangeText={(v) => {
+                  setDraftOwnerPhone(v);
+                  setContactSheetError('');
+                }}
+                error={
+                  contactSheetError === cr.required && !draftOwnerPhone.trim()
+                    ? cr.required
+                    : undefined
+                }
+                helperText={cr.ownerPhoneMatchHint}
+              />
+              {matchedOwnerByPhone ? (
+                <View style={styles.ownerMatchBox}>
+                  <Text style={styles.ownerCardName}>{cr.ownerFoundExisting}</Text>
+                  <Text style={styles.ownerCardPhone}>
+                    {matchedOwnerByPhone.name} · {matchedOwnerByPhone.phone}
+                  </Text>
+                  <MobileButton
+                    variant="outline"
+                    onPress={() => handleSelectOwner(matchedOwnerByPhone)}
+                  >
+                    {cr.ownerUseThis}
+                  </MobileButton>
+                </View>
+              ) : null}
+              <View style={styles.footerNote}>
+                <MobileIcon name="warning" size={16} color={tokens.colors.textSecondary} />
+                <Text style={styles.footerNoteText}>{cr.sessionSaveNote}</Text>
+              </View>
+            </ScrollView>
+            <WizardSheetFooter
+              primaryLabel={cr.ownerUseThis}
+              onPrimary={commitCreateContact}
+            />
+          </>
+        ) : (
+          <>
+            <WizardSheetChrome
+              title={cr.chooseContactTitle}
+              closeLabel={cr.closePhotoPreview}
+              onClose={closeContactSheet}
+            />
+            <ScrollView
+              style={styles.layoutSheetScroll}
+              contentContainerStyle={styles.leaseSheetBody}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
+              <MobileInput
+                placeholder={cr.ownerSearchPlaceholder}
+                value={ownerQuery}
+                onChangeText={(v) => {
+                  setOwnerQuery(v);
+                  setContactSheetError('');
+                }}
+              />
+              <Pressable
+                onPress={() => {
+                  setContactSheetError('');
+                  openCreateContactSheet();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={cr.ownerAddNew}
+                style={({ pressed }) => [
+                  styles.addContactLink,
+                  { opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                <MobileIcon
+                  name="user-plus"
+                  size={18}
+                  color={tokens.colors.accent}
+                />
+                <Text
+                  style={[styles.addContactLinkText, { color: tokens.colors.accent }]}
+                >
+                  {cr.ownerAddNew}
+                </Text>
+              </Pressable>
+              {ownersLoading ? (
+                <View style={styles.suggestStatus}>
+                  <ActivityIndicator size="small" color={accent} />
+                  <Text style={styles.suggestStatusText}>{t.common.loading}</Text>
+                </View>
+              ) : null}
+              {ownersError ? <Text style={styles.errorText}>{ownersError}</Text> : null}
+              {!ownersLoading && !ownersError && filteredOwners.length === 0 ? (
+                <Text style={styles.hint}>{cr.ownerEmpty}</Text>
+              ) : null}
+              <View style={styles.contactList}>
+                {filteredOwners.map((item) => (
+                  <ContactListRow
+                    key={item.id}
+                    name={item.name}
+                    phone={item.phone}
+                    roomsLabel={roomsLinkedLabel(item.roomCount)}
+                    selected={draftContactId === item.id}
+                    accentColor={accent}
+                    onPress={() => {
+                      setDraftContactId(item.id);
+                      setContactSheetError('');
+                    }}
+                  />
+                ))}
+              </View>
+              {contactSheetError ? (
+                <Text style={styles.errorText}>{contactSheetError}</Text>
+              ) : null}
+            </ScrollView>
+            <WizardSheetFooter
+              primaryLabel={cr.useSelectedContact}
+              onPrimary={commitPickContact}
+              primaryDisabled={draftContactId == null}
+            />
+          </>
+        )}
+      </MobileBottomSheet>
 
       <Modal
         visible={!!requiredPrompt}
@@ -1926,12 +3000,76 @@ const styles = StyleSheet.create({
     minHeight: 0,
     gap: 12,
   },
+  hubPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 4,
+  },
+  hubPreviewThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  hubPreviewThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  hubPreviewCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  hubPreviewTitle: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '500',
+    color: tokens.colors.textHeading,
+  },
+  hubPreviewMeta: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+  },
+  hubFootnoteRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 4,
+    paddingHorizontal: 2,
+  },
+  hubFootnoteIcon: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+  },
+  hubFootnote: {
+    flex: 1,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+  },
   formScroll: {
     flex: 1,
     minHeight: 0,
   },
   formScrollContent: {
     paddingBottom: 8,
+    gap: 12,
   },
   sectionStatusRow: {
     flexDirection: 'row',
@@ -1978,17 +3116,11 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: tokens.colors.textSecondary,
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-  },
-  title: {
+  pageTitle: {
     fontFamily: tokens.typography.native.headingTh,
-    fontSize: 18,
-    lineHeight: 27,
-    fontWeight: '500',
+    fontSize: 22,
+    lineHeight: 33,
+    fontWeight: '600',
     color: tokens.colors.textHeading,
   },
   subtitle: {
@@ -2026,47 +3158,72 @@ const styles = StyleSheet.create({
   },
   sourceScreen: {
     flex: 1,
-    justifyContent: 'center',
+    minHeight: 0,
     paddingHorizontal: 4,
-    paddingBottom: 24,
+    paddingBottom: 8,
+    gap: 16,
   },
-  sourceRow: {
-    flexDirection: 'row',
+  sourcePrompt: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 22,
+    lineHeight: 33,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  sourceList: {
     gap: 12,
   },
   sourceCard: {
-    flex: 1,
-    minHeight: 180,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 22,
-    paddingHorizontal: 12,
-    gap: 10,
+    gap: 14,
+    minHeight: 76,
+    borderRadius: 12,
+    borderWidth: 1,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
   },
   sourceIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sourceCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
   },
   sourceTitle: {
     fontFamily: tokens.typography.native.headingTh,
-    fontSize: 18,
-    lineHeight: 27,
+    fontSize: 17,
+    lineHeight: 26,
     fontWeight: '500',
     color: tokens.colors.textHeading,
-    textAlign: 'center',
   },
   sourceHint: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#52647A',
+  },
+  sourceNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  sourceNote: {
+    flex: 1,
     fontFamily: tokens.typography.native.body,
     fontSize: 13,
     lineHeight: 20,
     color: tokens.colors.textSecondary,
-    textAlign: 'center',
+  },
+  sourceFooter: {
+    paddingTop: 8,
   },
   fieldGrid: {
     flexDirection: 'row',
@@ -2075,6 +3232,94 @@ const styles = StyleSheet.create({
   fieldGridItem: {
     flex: 1,
     minWidth: 0,
+    gap: 6,
+  },
+  layoutSection: {
+    gap: 16,
+  },
+  selectRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+  },
+  selectRowLocked: {
+    backgroundColor: tokens.colors.background,
+  },
+  selectValue: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: tokens.colors.primary,
+  },
+  selectPlaceholder: {
+    color: tokens.colors.placeholder,
+  },
+  layoutSheetBody: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  layoutSheetScroll: {
+    flexShrink: 1,
+  },
+  layoutSheetHeader: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 20,
+    paddingRight: 10,
+    paddingBottom: 8,
+    gap: 8,
+  },
+  layoutSheetClose: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  layoutSheetTitle: {
+    flexShrink: 0,
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 20,
+    lineHeight: 30,
+    fontWeight: '500',
+    color: tokens.colors.textHeading,
+    marginBottom: 4,
+  },
+  layoutSheetRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: tokens.colors.border,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  layoutSheetRowSelected: {
+    backgroundColor: tokens.colors.brand[100],
+    borderBottomColor: 'transparent',
+  },
+  layoutSheetRowText: {
+    flex: 1,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '400',
+    color: tokens.colors.textHeading,
+  },
+  layoutSheetRowTextSelected: {
+    fontWeight: '700',
   },
   typeRow: {
     flexDirection: 'row',
@@ -2102,7 +3347,7 @@ const styles = StyleSheet.create({
     color: tokens.colors.textHeading,
   },
   typeChipTextSelected: {
-    color: '#FFFFFF',
+    color: tokens.colors.primary,
     fontWeight: '700',
   },
   roomTypeRow: {
@@ -2119,8 +3364,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: tokens.colors.border,
     backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 4,
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
@@ -2137,51 +3384,207 @@ const styles = StyleSheet.create({
   },
   propertyTypeChip: {
     flex: 1,
-    minWidth: 0,
     minHeight: 52,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: tokens.colors.border,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 8,
   },
   propertyTypeChipText: {
+    fontSize: 15,
+    lineHeight: 23,
+  },
+  fieldBlock: {
+    gap: 6,
+  },
+  searchInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: tokens.colors.primary,
+    paddingVertical: 10,
+  },
+  searchClearBtn: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manualEntryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 2,
+    paddingVertical: 4,
+  },
+  manualEntryLink: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: tokens.colors.accent,
+    textDecorationLine: 'underline',
+  },
+  addressMultiline: {
+    minHeight: 72,
+    height: 72,
+    paddingVertical: 10,
+  },
+  twoColumnRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  halfField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  termRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  termChipGrow: {
+    flexGrow: 1,
+    flexBasis: '28%',
+  },
+  addLeaseBtn: {
+    alignSelf: 'flex-end',
+    minHeight: 48,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  addLeaseBtnText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: tokens.colors.primary,
+  },
+  addLeaseBtnDisabled: {
+    opacity: 0.45,
+  },
+  leaseList: {
+    gap: 10,
+  },
+  leaseCard: {
+    minHeight: 64,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  leaseCardText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  leaseCardTitle: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 17,
+    lineHeight: 25,
+    fontWeight: '700',
+    color: tokens.colors.textHeading,
+  },
+  leaseCardSub: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
+  },
+  leaseCardPrice: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  leaseSheetFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: tokens.colors.border,
+  },
+  changeContactBtn: {
+    minHeight: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    backgroundColor: tokens.colors.white,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  changeContactBtnText: {
+    flex: 1,
     fontFamily: tokens.typography.native.body,
     fontSize: 15,
     lineHeight: 23,
     fontWeight: '600',
     color: tokens.colors.textHeading,
   },
-  termRow: {
+  addContactLink: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
   },
-  termChip: {
+  addContactLinkText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: '600',
+  },
+  leaseSheetTitleBlock: {
+    flexShrink: 0,
     flex: 1,
     minWidth: 0,
-    minHeight: 40,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: tokens.colors.border,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 6,
+    paddingTop: 4,
   },
-  termChipText: {
+  leaseSheetSubtitle: {
     fontFamily: tokens.typography.native.body,
-    fontSize: 14,
-    lineHeight: 21,
-    fontWeight: '600',
-    color: tokens.colors.textHeading,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
+    marginTop: 4,
+    marginBottom: 4,
   },
-  termChipTextSelected: {
-    color: '#FFFFFF',
-    fontWeight: '700',
+  leaseSheetBody: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    gap: 16,
+  },
+  leaseSheetSection: {
+    gap: 8,
+  },
+  leaseSheetPrimary: {
+    marginTop: 4,
+  },
+  leaseSheetSecondary: {
+    marginTop: 0,
   },
   moveInBox: {
     borderWidth: 1,
@@ -2274,7 +3677,72 @@ const styles = StyleSheet.create({
   photoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 10,
+  },
+  photoTile: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    flexShrink: 0,
+    maxWidth: '48%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#F1F5F9',
+  },
+  photoTileImg: {
+    width: '100%',
+    height: '100%',
+  },
+  photoMenuBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  coverBadge: {
+    position: 'absolute',
+    left: 8,
+    bottom: 8,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  coverBadgeText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  photoAddTile: {
+    flexGrow: 1,
+    flexBasis: '46%',
+    flexShrink: 0,
+    maxWidth: '48%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: tokens.colors.divider,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#FFFFFF',
+  },
+  photoAddLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+    fontWeight: '600',
+  },
+  photoSheet: {
+    gap: 10,
+    paddingBottom: 8,
   },
   photoCard: {
     width: 108,
@@ -2288,8 +3756,8 @@ const styles = StyleSheet.create({
   },
   aiBadge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
+    top: 8,
+    left: 8,
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -2300,6 +3768,85 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  contactList: {
+    gap: 10,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1.5,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    minHeight: 72,
+  },
+  contactAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactAvatarText: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  contactCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  contactName: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  contactMeta: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+  },
+  formBody: {
+    gap: 4,
+  },
+  footerSolo: {
+    width: '100%',
+    gap: 10,
+  },
+  footerNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 2,
+  },
+  footerNoteText: {
+    flex: 1,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+  },
+  footerCta: {
+    minHeight: 48,
+    borderRadius: 12,
+  },
+  footerCtaText: {
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  sourceLead: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
   },
   photoSlot: {
     width: 56,

@@ -4,7 +4,7 @@ import { View, Text, Pressable, Modal, ActivityIndicator, Alert, StyleSheet, Pla
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
 import type { AgentLead } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
-import { MobileButton, MobileIcon, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
+import { MobileBrandLoader, MobileButton, MobileIcon, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
 import { getAgentLead, listAgentLeads } from '../lib/agent-leads-api';
 import { CreateLeadForm } from './CreateLeadForm';
 import { AgentLeadDetailBody, LeadStatusBadge } from './AgentLeadDetailBody';
@@ -68,6 +68,11 @@ export function AgentLeadsScreen({
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [gateOpen, setGateOpen] = useState(false);
+
+  useEffect(() => {
+    if (loading && !items.length) setGateOpen(false);
+  }, [loading, items.length]);
 
   useEffect(() => {
     setActiveWorkFilter(workFilter);
@@ -152,121 +157,202 @@ export function AgentLeadsScreen({
 
   return (
     <View style={{ gap: 14 }}>
-      {activeWorkFilter === 'lead_follow_up' ? (
-        <View style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: agentColor }]}>
-          <Text style={{ flex: 1, color: theme.textHeading, fontSize: 13, lineHeight: 19 }}>
-            {dash.filterActive.replace('{label}', dash.leadsFollowUp)}
-          </Text>
-          <MobileButton variant="outline" onPress={() => setActiveWorkFilter(null)}>
-            {dash.clearFilter}
-          </MobileButton>
-        </View>
-      ) : null}
-      <View style={styles.menu}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.textSecondary }}>{c.count.replace('{count}', String(total))}</Text>
-        </View>
-        <MobileButton onPress={() => setCreating(true)}>＋ {c.create}</MobileButton>
-      </View>
-
-      {hasFilters && !searchOpen && <Pressable accessibilityRole="button" onPress={toggleSearch} style={styles.activeSummary}>
-        <MobileIcon name="search" size={14} color={agentColor} />
-        <Text numberOfLines={2} style={[styles.label, { color: theme.textSecondary, flex: 1 }]}>
-          {[query.trim(), province, ...locations, locations.length && includeUnspecified ? c.includeUnspecified : ''].filter(Boolean).join(' · ')}
-        </Text>
-      </Pressable>}
-
-      {searchOpen && <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, gap: 14 }]}>
-        <Text style={[styles.heading, { color: theme.textHeading }]}>{c.searchFilters}</Text>
-        <MobileInput placeholder={c.search} value={draft.query} onChangeText={(value) => setDraft((current) => ({ ...current, query: value }))} returnKeyType="search" onSubmitEditing={applySearch} />
-        <LeadLocationPicker filter province={draft.province} locations={draft.locations} onChange={(p, areas) => setDraft((current) => ({ ...current, province: p, locations: areas, includeUnspecified: areas.length > 0 && current.includeUnspecified }))} />
-        {draft.locations.length > 0 && <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: draft.includeUnspecified }} onPress={() => setDraft((current) => ({ ...current, includeUnspecified: !current.includeUnspecified }))} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Text style={{ color: agentColor }}>{draft.includeUnspecified ? '☑' : '☐'}</Text><Text style={[styles.bodyText, { color: theme.textHeading, flex: 1 }]}>{c.includeUnspecified}</Text>
-        </Pressable>}
-        <MobileButton onPress={applySearch}>{c.applyFilters}</MobileButton>
-        {!!(draft.query || draft.province || hasFilters) && <MobileButton variant="outline" onPress={() => {
-          setDraft({ query: '', province: '', locations: [], includeUnspecified: false });
-          setQuery(''); setProvince(''); setLocations([]); setIncludeUnspecified(false); setPage(1);
-        }}>{c.clearFilters}</MobileButton>}
-      </View>}
-
-      {error && items.length > 0 && (
-        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]} accessibilityLiveRegion="polite">
-          <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
-          <Text style={{ color: theme.textSecondary }}>{error}</Text>
-          <MobileButton variant="outline" onPress={() => setRefresh((n) => n + 1)}>{c.retry}</MobileButton>
-        </View>
-      )}
-      {loading && !items.length ? (
-        <ActivityIndicator color={agentColor} />
-      ) : error && !items.length ? (
-        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
-          <Text style={{ color: theme.textSecondary }}>{error}</Text>
-          <MobileButton onPress={() => setRefresh((n) => n + 1)}>{c.retry}</MobileButton>
-        </View>
-      ) : !items.length ? (
-        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Text style={{ color: theme.textSecondary }}>{(query.trim() || province) ? c.noMatches : c.empty}</Text>
-        </View>
+      {!gateOpen ? (
+        <MobileBrandLoader
+          fill
+          size="md"
+          done={!loading}
+          onComplete={() => setGateOpen(true)}
+        />
       ) : (
-        items.map((lead) => (
-          <Pressable
-            key={lead.id}
-            accessibilityRole="button"
-            accessibilityLabel={`${c.details}: ${lead.name}`}
-            onPress={() => void openLead(lead)}
-            android_ripple={{ color: `${agentColor}22` }}
-            style={({ pressed }) => [
-              styles.card,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-              pressed && Platform.OS === 'ios' ? { opacity: 0.88 } : null,
-            ]}
-          >
-            <View style={styles.menu}>
-              <Text numberOfLines={2} style={[styles.heading, { color: theme.textHeading, flex: 1 }]}>
-                {lead.name}
+        <>
+          {activeWorkFilter === 'lead_follow_up' ? (
+            <View style={[styles.filterChip, { backgroundColor: theme.surface, borderColor: agentColor }]}>
+              <Text style={{ flex: 1, color: theme.textHeading, fontSize: 13, lineHeight: 19 }}>
+                {dash.filterActive.replace('{label}', dash.leadsFollowUp)}
               </Text>
-              <LeadStatusBadge status={lead.status} />
+              <MobileButton variant="outline" onPress={() => setActiveWorkFilter(null)}>
+                {dash.clearFilter}
+              </MobileButton>
             </View>
-            <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{lead.phone}</Text>
-            <View style={[styles.budgetPanel, { backgroundColor: theme.background }]}>
-              <Text style={[styles.label, { color: theme.textSecondary }]}>{c.budget}</Text>
-              <Text style={[styles.budgetValue, { color: agentColor }]}>{budget(lead)}</Text>
+          ) : null}
+          <View style={styles.menu}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.textSecondary }}>{c.count.replace('{count}', String(total))}</Text>
             </View>
-            <View style={styles.facts}>
-              {[
-                [c.roomType, roomType(lead)],
-                [c.province, lead.province || c.unknown],
-                [c.preferredLocation, lead.locationName ? `${lead.locationName} · ${c.mapWithin.replace('{km}', String(lead.radiusKm))}` : lead.locations?.length ? lead.locations.join(' · ') : lead.preferredLocation || c.unspecifiedArea],
-                [c.moveInPlan, lead.moveInPlan || c.unknown],
-              ].map(([label, value]) => (
-                <View key={label} style={styles.factRow}>
-                  <Text style={[styles.factLabel, styles.label, { color: theme.textSecondary }]}>{label}</Text>
-                  <Text style={[styles.factValue, styles.bodyText, { color: theme.textHeading }]}>{value}</Text>
-                </View>
-              ))}
-            </View>
-            <View style={[styles.cardFooter, { borderColor: theme.border }]}>
-              <Text style={[styles.detailLink, { color: agentColor }]}>{c.details}</Text>
-              <MobileIcon name="chevron-right" size={18} color={agentColor} />
-            </View>
-          </Pressable>
-        ))
-      )}
+            <MobileButton onPress={() => setCreating(true)}>＋ {c.create}</MobileButton>
+          </View>
 
-      {!loading && !error && total > 20 && (
-        <View style={styles.menu}>
-          <MobileButton variant="outline" disabled={page === 1} onPress={() => setPage((n) => n - 1)}>
-            {c.previous}
-          </MobileButton>
-          <Text style={{ color: theme.textHeading }}>
-            {page} / {Math.ceil(total / 20)}
-          </Text>
-          <MobileButton variant="outline" disabled={page * 20 >= total} onPress={() => setPage((n) => n + 1)}>
-            {c.next}
-          </MobileButton>
-        </View>
+          {hasFilters && !searchOpen && (
+            <Pressable accessibilityRole="button" onPress={toggleSearch} style={styles.activeSummary}>
+              <MobileIcon name="search" size={14} color={agentColor} />
+              <Text numberOfLines={2} style={[styles.label, { color: theme.textSecondary, flex: 1 }]}>
+                {[query.trim(), province, ...locations, locations.length && includeUnspecified ? c.includeUnspecified : '']
+                  .filter(Boolean)
+                  .join(' · ')}
+              </Text>
+            </Pressable>
+          )}
+
+          {searchOpen && (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, gap: 14 }]}>
+              <Text style={[styles.heading, { color: theme.textHeading }]}>{c.searchFilters}</Text>
+              <MobileInput
+                placeholder={c.search}
+                value={draft.query}
+                onChangeText={(value) => setDraft((current) => ({ ...current, query: value }))}
+                returnKeyType="search"
+                onSubmitEditing={applySearch}
+              />
+              <LeadLocationPicker
+                filter
+                province={draft.province}
+                locations={draft.locations}
+                onChange={(p, areas) =>
+                  setDraft((current) => ({
+                    ...current,
+                    province: p,
+                    locations: areas,
+                    includeUnspecified: areas.length > 0 && current.includeUnspecified,
+                  }))
+                }
+              />
+              {draft.locations.length > 0 && (
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: draft.includeUnspecified }}
+                  onPress={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      includeUnspecified: !current.includeUnspecified,
+                    }))
+                  }
+                  style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                >
+                  <Text style={{ color: agentColor }}>{draft.includeUnspecified ? '☑' : '☐'}</Text>
+                  <Text style={[styles.bodyText, { color: theme.textHeading, flex: 1 }]}>
+                    {c.includeUnspecified}
+                  </Text>
+                </Pressable>
+              )}
+              <MobileButton onPress={applySearch}>{c.applyFilters}</MobileButton>
+              {!!(draft.query || draft.province || hasFilters) && (
+                <MobileButton
+                  variant="outline"
+                  onPress={() => {
+                    setDraft({ query: '', province: '', locations: [], includeUnspecified: false });
+                    setQuery('');
+                    setProvince('');
+                    setLocations([]);
+                    setIncludeUnspecified(false);
+                    setPage(1);
+                  }}
+                >
+                  {c.clearFilters}
+                </MobileButton>
+              )}
+            </View>
+          )}
+
+          {error && items.length > 0 && (
+            <View
+              style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}
+              accessibilityLiveRegion="polite"
+            >
+              <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
+              <Text style={{ color: theme.textSecondary }}>{error}</Text>
+              <MobileButton variant="outline" onPress={() => setRefresh((n) => n + 1)}>
+                {c.retry}
+              </MobileButton>
+            </View>
+          )}
+          {error && !items.length ? (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
+              <Text style={{ color: theme.textSecondary }}>{error}</Text>
+              <MobileButton onPress={() => setRefresh((n) => n + 1)}>{c.retry}</MobileButton>
+            </View>
+          ) : !items.length ? (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={{ color: theme.textSecondary }}>
+                {query.trim() || province ? c.noMatches : c.empty}
+              </Text>
+            </View>
+          ) : (
+            items.map((lead) => (
+              <Pressable
+                key={lead.id}
+                accessibilityRole="button"
+                accessibilityLabel={`${c.details}: ${lead.name}`}
+                onPress={() => void openLead(lead)}
+                android_ripple={{ color: `${agentColor}22` }}
+                style={({ pressed }) => [
+                  styles.card,
+                  { backgroundColor: theme.surface, borderColor: theme.border },
+                  pressed && Platform.OS === 'ios' ? { opacity: 0.88 } : null,
+                ]}
+              >
+                <View style={styles.menu}>
+                  <Text numberOfLines={2} style={[styles.heading, { color: theme.textHeading, flex: 1 }]}>
+                    {lead.name}
+                  </Text>
+                  <LeadStatusBadge status={lead.status} />
+                </View>
+                <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{lead.phone}</Text>
+                <View style={[styles.budgetPanel, { backgroundColor: theme.background }]}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>{c.budget}</Text>
+                  <Text style={[styles.budgetValue, { color: agentColor }]}>{budget(lead)}</Text>
+                </View>
+                <View style={styles.facts}>
+                  {[
+                    [c.roomType, roomType(lead)],
+                    [c.province, lead.province || c.unknown],
+                    [
+                      c.preferredLocation,
+                      lead.locationName
+                        ? `${lead.locationName} · ${c.mapWithin.replace('{km}', String(lead.radiusKm))}`
+                        : lead.locations?.length
+                          ? lead.locations.join(' · ')
+                          : lead.preferredLocation || c.unspecifiedArea,
+                    ],
+                    [c.moveInPlan, lead.moveInPlan || c.unknown],
+                  ].map(([label, value]) => (
+                    <View key={label} style={styles.factRow}>
+                      <Text style={[styles.factLabel, styles.label, { color: theme.textSecondary }]}>
+                        {label}
+                      </Text>
+                      <Text style={[styles.factValue, styles.bodyText, { color: theme.textHeading }]}>
+                        {value}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={[styles.cardFooter, { borderColor: theme.border }]}>
+                  <Text style={[styles.detailLink, { color: agentColor }]}>{c.details}</Text>
+                  <MobileIcon name="chevron-right" size={18} color={agentColor} />
+                </View>
+              </Pressable>
+            ))
+          )}
+
+          {!loading && !error && total > 20 && (
+            <View style={styles.menu}>
+              <MobileButton variant="outline" disabled={page === 1} onPress={() => setPage((n) => n - 1)}>
+                {c.previous}
+              </MobileButton>
+              <Text style={{ color: theme.textHeading }}>
+                {page} / {Math.ceil(total / 20)}
+              </Text>
+              <MobileButton
+                variant="outline"
+                disabled={page * 20 >= total}
+                onPress={() => setPage((n) => n + 1)}
+              >
+                {c.next}
+              </MobileButton>
+            </View>
+          )}
+        </>
       )}
 
       <Modal
@@ -283,14 +369,28 @@ export function AgentLeadsScreen({
                   {`‹ ${editing ? t.agent.listings.cancelEdit : creating ? c.cancel : c.back}`}
                 </MobileButton>
               </View>
-              {selected && !editing && !creating && <MobileButton disabled={busy || detailLoading || !!detailError} onPress={() => setEditing(true)}>แก้ไข Lead</MobileButton>}
+              {selected && !editing && !creating && (
+                <MobileButton
+                  disabled={busy || detailLoading || !!detailError}
+                  onPress={() => setEditing(true)}
+                >
+                  แก้ไข Lead
+                </MobileButton>
+              )}
             </View>
             {editing && selected ? (
-              <CreateLeadForm key={selected.id} initialLead={selected} onBusy={setBusy} onSaved={(lead) => {
-                setSelected(lead); setEditing(false); setDetailError(null);
-                setItems(current => current.map(item => item.id === lead.id ? lead : item));
-                setRefresh(n => n + 1);
-              }} />
+              <CreateLeadForm
+                key={selected.id}
+                initialLead={selected}
+                onBusy={setBusy}
+                onSaved={(lead) => {
+                  setSelected(lead);
+                  setEditing(false);
+                  setDetailError(null);
+                  setItems((current) => current.map((item) => (item.id === lead.id ? lead : item)));
+                  setRefresh((n) => n + 1);
+                }}
+              />
             ) : creating ? (
               <CreateLeadForm
                 onBusy={setBusy}
@@ -305,7 +405,12 @@ export function AgentLeadsScreen({
             ) : selected ? (
               <>
                 {detailError ? (
-                  <View style={[styles.detailBanner, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+                  <View
+                    style={[
+                      styles.detailBanner,
+                      { borderColor: theme.border, backgroundColor: theme.surface },
+                    ]}
+                  >
                     <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
                     <Text style={{ color: theme.textSecondary }}>{detailError}</Text>
                     <MobileButton onPress={() => void openLead(selected)}>{c.retry}</MobileButton>

@@ -13,7 +13,7 @@ export type AgentRoomDetail = {
   roomTypeCode: string | null; roomTypeId: number | null; listingSourceCode: string | null; availableFromDate: string;
   property: { id: number; propertyTypeId: number | null; latitude: string | null; longitude: string | null; name: string; address: string; subdistrict: string; district: string; province: string; postalCode: string; propertyTypeCode: string | null } | null;
   latitude: string | null; longitude: string | null;
-  prices: { contractTypeId?: number; contractTypeCode: string; termMonths: number | null; price: number }[];
+  prices: { contractTypeId?: number; contractTypeCode: string; termMonths: number | null; price: number; advanceRentMonths?: number; depositMonths?: number }[];
   advanceRentMonths: number; depositMonths: number; waterRatePerUnit: string | null; electricRatePerUnit: string | null;
   medias: { id: number; mediaUrl: string; mediaType: string; isCover: boolean }[];
   layout: { code: string; value: string }[]; facilities: string[]; nearbyOther: string | null;
@@ -71,10 +71,12 @@ export function MobileAgentRoomBody({ room, mapsApiKey }: { room: AgentRoomDetai
       {room.description ? <Text selectable style={{ color: theme.textHeading }}>{room.description}</Text> : null}
     </>)}
     {section(cr.steps.pricing, <>
-      {room.prices.map((price) => row(price.termMonths ? copy.months.replace('{count}', String(price.termMonths)) : price.contractTypeCode, t.agent.listings.rentPerMonth.replace('{price}', price.price.toLocaleString())))}
+      {room.prices.map((price) => <View key={price.contractTypeId ?? price.contractTypeCode}>
+        {row(price.termMonths ? copy.months.replace('{count}', String(price.termMonths)) : price.contractTypeCode, t.agent.listings.rentPerMonth.replace('{price}', price.price.toLocaleString()))}
+        {row(cr.advanceRent, copy.months.replace('{count}', String(price.advanceRentMonths ?? room.advanceRentMonths)))}
+        {row(cr.deposit, copy.months.replace('{count}', String(price.depositMonths ?? room.depositMonths)))}
+      </View>)}
       {!room.prices.length ? row(cr.monthlyRent, null) : null}
-      {row(cr.advanceRent, copy.months.replace('{count}', String(room.advanceRentMonths)))}
-      {row(cr.deposit, copy.months.replace('{count}', String(room.depositMonths)))}
       {row(cr.waterRate, room.waterRatePerUnit)}{row(cr.electricRate, room.electricRatePerUnit)}
     </>)}
     {section(cr.address, <><Text selectable style={{ color: theme.textHeading }}>{address}</Text>{room.latitude != null && room.longitude != null && <MobileButton variant="outline" onPress={() => { void Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${room.latitude},${room.longitude}`)}`); }}>{copy.openMap}</MobileButton>}</>)}

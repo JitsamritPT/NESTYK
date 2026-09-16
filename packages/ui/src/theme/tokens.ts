@@ -12,6 +12,8 @@ export const tokens = {
       600: '#f8b615',
       700: '#d99a0d',
     },
+    /** Selection mark (outline check) — deeper amber than chip/CTA yellow. */
+    selectionMark: '#ca8a04',
     white: '#ffffff',
     onBrand: '#211e1e',
 

@@ -406,6 +406,21 @@ nestiq/
 
 ## 9. ระบบสีอัตลักษณ์, UI Components, Icons และ Typography (CI Brand Guide & Tokens)
 
+### 9.0 Brand Logo & Icon Assets (โลโก้และสัญลักษณ์)
+
+**แหล่งไฟล์มาตรฐาน:** `packages/ui/assets/nestyk/` (svg · png · ai)
+
+| ประเภท | Prefix | Component หลัก | Variant / Import |
+|---|---|---|---|
+| **Mark** (รังนก) | `icon-nestyk-*` | `NestykLogo` / `MobileNestykLogo` | `mark` · `markOnDark` · `markOnBrand` · `markSecondary` |
+| **Wordmark** (รังนก + ชื่อ) | `logo-nestyk-*` | เหมือนกัน | `wordmark` · `wordmarkOnDark` · `wordmarkOnYellow` · `wordmarkOnBlack` |
+| **Lockup พิเศษ** | `grey` · `black` | `brandAssets` โดยตรง | `brandLogoGrey` ฯลฯ |
+
+**กฎสำคัญ**
+- Runtime ใช้ `@nestyk/ui` (`brandAssets`, `NestykLogo`, `MobileNestykLogo`) — **ห้าม** copy ไฟล์ไปแต่ละ app
+- Mobile (Expo) → `png/` · Web/Marketing → `svg/` · App Store icons → `assets/logo/IconApp/`
+- คู่มือเลือกไฟล์ตามพื้นหลัง: [`docs/NESTYK/brand-assets.md`](./NESTYK/brand-assets.md)
+
 ### 9.1 Corporate Color Palette & Semantic Tokens (ระบบสีทางการ)
 
 | หมวดหมู่ | Token | Hex Code | บทบาท / การใช้งาน |

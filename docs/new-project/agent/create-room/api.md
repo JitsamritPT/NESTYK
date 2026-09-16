@@ -19,7 +19,7 @@ Base: `/agent/rooms` · role `agent`
   "availableFromDate": "2026-04-01",
   "waterRatePerUnit": 18,
   "electricRatePerUnit": 7,
-  "prices": [{ "contractTypeId": 1, "price": 12000 }],
+  "prices": [{ "contractTypeId": 1, "price": 12000, "advanceRentMonths": 1, "depositMonths": 2 }],
   "layout": [
     { "code": "bedroom", "value": "1" },
     { "code": "bathroom", "value": "1" }

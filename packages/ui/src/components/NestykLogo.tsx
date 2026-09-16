@@ -1,5 +1,17 @@
 import React from 'react';
-import { brandIcon, brandLogo, brandLogoWhite, NestykLogoVariant } from '../assets/brandAssets';
+import {
+  brandIcon,
+  brandIconBlack,
+  brandIconSecondary,
+  brandIconWhite,
+  brandLogo,
+  brandLogoOnBlack,
+  brandLogoOnYellow,
+  brandLogoWhite,
+  NESTYK_MARK_ASPECT,
+  NESTYK_WORDMARK_ASPECT,
+  NestykLogoVariant,
+} from '../assets/brandAssets';
 
 export interface NestykLogoProps {
   variant?: NestykLogoVariant;
@@ -12,14 +24,24 @@ type ImageModule = string | number | { src: string; default?: string };
 
 const SOURCE: Record<NestykLogoVariant, ImageModule> = {
   mark: brandIcon as ImageModule,
+  markOnDark: brandIconWhite as ImageModule,
+  markOnBrand: brandIconBlack as ImageModule,
+  markSecondary: brandIconSecondary as ImageModule,
   wordmark: brandLogo as ImageModule,
   wordmarkOnDark: brandLogoWhite as ImageModule,
+  wordmarkOnYellow: brandLogoOnYellow as ImageModule,
+  wordmarkOnBlack: brandLogoOnBlack as ImageModule,
 };
 
 const ASPECT: Record<NestykLogoVariant, number> = {
-  mark: 1,
-  wordmark: 393 / 131,
-  wordmarkOnDark: 497 / 171,
+  mark: NESTYK_MARK_ASPECT,
+  markOnDark: NESTYK_MARK_ASPECT,
+  markOnBrand: NESTYK_MARK_ASPECT,
+  markSecondary: NESTYK_MARK_ASPECT,
+  wordmark: NESTYK_WORDMARK_ASPECT,
+  wordmarkOnDark: NESTYK_WORDMARK_ASPECT,
+  wordmarkOnYellow: NESTYK_WORDMARK_ASPECT,
+  wordmarkOnBlack: NESTYK_WORDMARK_ASPECT,
 };
 
 function resolveSrc(source: ImageModule): string {

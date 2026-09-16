@@ -2,6 +2,7 @@ export * from './icons/types';
 export * from './icons/AppIcon';
 export * from './theme/tokens';
 export * from './theme/elevation';
+export * from './theme/selection';
 export * from './assets/brandAssets';
 export * from './components/NestykLogo';
 export * from './components/AppButton';

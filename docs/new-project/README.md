@@ -19,7 +19,7 @@ cp -R docs/new-project /path/to/new-repo/docs/
 | Agent — calendar | `new-project/agent/calendar/` |
 | Agent — leads | `new-project/agent/leads/` |
 | Agent — contracts | `new-project/agent/contracts/` |
-| Docker / local Supabase | `new-project/docker/` + root `docker-compose.yml` |
+| Docker / local Supabase | `new-project/docker/` + root `supabase/config.toml` |
 
 ---
 
@@ -30,7 +30,7 @@ cp -R docs/new-project /path/to/new-repo/docs/
 3. [agent/leads/schema.sql](./agent/leads/schema.sql)
 4. [agent/contracts/schema.sql](./agent/contracts/schema.sql)
 
-Local Docker: ดู [docker/CHECKLIST.md](./docker/CHECKLIST.md) · จาก root รัน `docker compose up -d` แล้ว [docker/apply-schema.sh](./docker/apply-schema.sh)
+Local Docker: ดู [docker/CHECKLIST.md](./docker/CHECKLIST.md) · จาก root รัน [docker/start-supabase-local.sh](./docker/start-supabase-local.sh) แล้ว [docker/apply-schema.sh](./docker/apply-schema.sh)
 
 ---
 

@@ -8,6 +8,7 @@ import {
   ViewStyle,
   BackHandler,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import Animated, {
   Easing,
@@ -35,6 +36,7 @@ export interface MobileBottomSheetProps {
   /** Dimmed backdrop press closes (default true). */
   closeOnBackdropPress?: boolean;
   testID?: string;
+  avoidKeyboard?: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ export const MobileBottomSheet: React.FC<MobileBottomSheetProps> = ({
   showHandle = true,
   closeOnBackdropPress = true,
   testID,
+  avoidKeyboard = false,
 }) => {
   const { theme } = useMobileTheme();
   const insets = useSafeAreaInsets();
@@ -105,7 +108,7 @@ export const MobileBottomSheet: React.FC<MobileBottomSheetProps> = ({
 
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose} testID={testID}>
-      <View style={styles.root} pointerEvents="box-none">
+      <KeyboardAvoidingView style={styles.root} pointerEvents="box-none" enabled={avoidKeyboard} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <Animated.View
           pointerEvents="none"
           style={[StyleSheet.absoluteFill, scrimStyle, { backgroundColor: theme.overlay }]}
@@ -136,7 +139,7 @@ export const MobileBottomSheet: React.FC<MobileBottomSheetProps> = ({
           ) : null}
           {children}
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };

@@ -236,7 +236,7 @@ Sidebar ย่อได้เมื่อพื้นที่จำกัด �
 
 ## 12. ระบบดีไซน์และ Accessibility
 
-- ใช้โลโก้จริงจาก `packages/ui/assets/logo/` ไม่ใช้โลโก้ที่ AI วาดเป็น production asset
+- ใช้โลโก้จริงจาก `packages/ui/assets/nestyk/` ผ่าน `NestykLogo` / `MobileNestykLogo` หรือ `brandAssets` — ดูคู่มือ [`docs/NESTYK/brand-assets.md`](../../NESTYK/brand-assets.md)
 - ใช้ design tokens จาก `packages/ui/src/theme/tokens.ts`
 - Brand amber `#F8B615`, Agent role `#FF0052`, background `#F8FAFC`, primary text `#211E1E`
 - ใช้สีแดงเฉพาะข้อผิดพลาด/เกินกำหนด สีเขียวจ่ายแล้ว/ยืนยันแล้ว สีเหลืองเพื่อการกระทำหลักและการเตือนที่ไม่ใช่ error

@@ -3,20 +3,48 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { RentRoomEntity } from '../../entities/rent-room.entity';
 
+export type ListingsSort = 'updated_desc' | 'updated_asc' | 'price_asc' | 'price_desc';
+
 export type ListingsQuery = {
   page?: number;
   limit?: number;
   q?: string;
   visibility?: string;
+  roomStatus?: string;
+  listingSource?: string;
+  sort?: string;
 };
 
+const MIN_PRICE_SUBQUERY =
+  '(SELECT MIN(CAST(sortPrice.price AS DECIMAL)) FROM rent_room_prices sortPrice WHERE sortPrice.rent_room_id = room.id)';
+
+function normalizeSort(raw: string | undefined): ListingsSort {
+  if (raw === 'updated_asc' || raw === 'price_asc' || raw === 'price_desc') return raw;
+  return 'updated_desc';
+}
+
+function layoutValue(room: RentRoomEntity, code: string): string | null {
+  return room.layout_values?.find((row) => row.layout?.code === code)?.value?.trim() ?? null;
+}
+
 function roomPrices(room: RentRoomEntity) {
+  // Lease-specific conditions live beside prices in the existing JSON column.
+  // Old rooms remain compatible through their room-level defaults.
+  const terms = (id: number | undefined, code: string) => {
+    const saved = (room.prices ?? []).find((item) =>
+      (id != null && Number(item.contractTypeId) === id) || item.contractTypeCode === code);
+    return {
+      advanceRentMonths: Number(saved?.advanceRentMonths ?? room.advance_rent_months ?? 1),
+      depositMonths: Number(saved?.depositMonths ?? room.deposit_months ?? 2),
+    };
+  };
   if (room.price_rows?.length) {
     return [...room.price_rows].sort((a, b) => (a.contract_type?.term_months ?? 0) - (b.contract_type?.term_months ?? 0)).map((row) => ({
       contractTypeId: row.contract_type_id,
       contractTypeCode: row.contract_type.code,
       termMonths: row.contract_type.term_months,
       price: Number(row.price),
+      ...terms(row.contract_type_id, row.contract_type.code),
     }));
   }
   return (room.prices ?? []).filter((row) => typeof row.contractTypeCode === 'string' && Number.isFinite(Number(row.price))).map((row) => ({
@@ -24,6 +52,7 @@ function roomPrices(room: RentRoomEntity) {
     contractTypeCode: String(row.contractTypeCode),
     termMonths: Number(String(row.contractTypeCode).replace('monthly_', '')) || null,
     price: Number(row.price),
+    ...terms(Number(row.contractTypeId) || undefined, String(row.contractTypeCode)),
   }));
 }
 
@@ -43,11 +72,23 @@ export class AgentListingsService {
       .leftJoin('room.property', 'property')
       .leftJoin('room.room_contacts', 'roomContact')
       .leftJoin('roomContact.contact', 'contact')
+      .leftJoin('room.room_status', 'roomStatus')
+      .leftJoin('room.listing_source', 'listingSource')
       .where('room.is_scout_room = TRUE')
       .andWhere('room.created_by_user_id = :agentId', { agentId });
 
     if (query.visibility === 'private' || query.visibility === 'published') {
       countQb.andWhere('room.visibility = :visibility', { visibility: query.visibility });
+    }
+
+    const statusCode = query.roomStatus?.trim();
+    if (statusCode) {
+      countQb.andWhere('roomStatus.code = :roomStatus', { roomStatus: statusCode });
+    }
+
+    const sourceCode = query.listingSource?.trim();
+    if (sourceCode === 'owner' || sourceCode === 'co_agent') {
+      countQb.andWhere('listingSource.code = :listingSource', { listingSource: sourceCode });
     }
 
     const search = query.q?.trim();
@@ -59,12 +100,32 @@ export class AgentListingsService {
     }
 
     const total = await countQb.getCount();
+    const sort = normalizeSort(query.sort);
+    const idQb = countQb.clone().select('room.id', 'id');
+    if (sort === 'price_asc' || sort === 'price_desc') {
+      idQb.addSelect(MIN_PRICE_SUBQUERY, 'sort_key');
+    } else {
+      idQb.addSelect('MAX(room.updated_at)', 'sort_key');
+    }
+    idQb.groupBy('room.id');
 
-    const idRows = await countQb
-      .clone()
-      .select('room.id', 'id')
-      .distinct(true)
-      .orderBy('room.id', 'DESC')
+    if (sort === 'updated_asc' || sort === 'price_asc') {
+      idQb.orderBy(
+        'sort_key',
+        'ASC',
+        sort.startsWith('price') ? 'NULLS LAST' : undefined,
+      );
+      idQb.addOrderBy('room.id', 'ASC');
+    } else {
+      idQb.orderBy(
+        'sort_key',
+        'DESC',
+        sort.startsWith('price') ? 'NULLS LAST' : undefined,
+      );
+      idQb.addOrderBy('room.id', 'DESC');
+    }
+
+    const idRows = await idQb
       .offset((page - 1) * limit)
       .limit(limit)
       .getRawMany<{ id: number }>();
@@ -84,6 +145,8 @@ export class AgentListingsService {
         room_contacts: { contact: true },
         medias: true,
         room_status: true,
+        room_type: true,
+        layout_values: { layout: true },
       },
     });
     const byId = new Map(found.map((room) => [room.id, room]));
@@ -129,6 +192,11 @@ export class AgentListingsService {
             : null,
           prices: roomPrices(room),
           coverMediaUrl: cover?.media_url ?? null,
+          bedroomCount:
+            layoutValue(room, 'bedroom') ??
+            (room.room_type?.bedroom_count != null ? String(room.room_type.bedroom_count) : null),
+          roomSizeSqm: layoutValue(room, 'room_size'),
+          updatedAt: room.updated_at?.toISOString?.() ?? null,
         };
       }),
       total,

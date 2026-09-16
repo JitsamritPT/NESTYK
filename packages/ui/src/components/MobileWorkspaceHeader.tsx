@@ -42,7 +42,9 @@ export const MobileWorkspaceHeader: React.FC<MobileWorkspaceHeaderProps> = ({
       </TouchableOpacity>
 
       <View style={styles.brandBlock} accessibilityRole="header">
-        <MobileNestykLogo variant="wordmark" height={22} />
+        <View style={styles.primaryLine}>
+          <MobileNestykLogo variant="wordmark" height={24} />
+        </View>
         <View style={styles.workspaceRow}>
           <View style={[styles.rule, { backgroundColor: accentColor }]} />
           <Text
@@ -55,20 +57,22 @@ export const MobileWorkspaceHeader: React.FC<MobileWorkspaceHeaderProps> = ({
         </View>
       </View>
 
-      <TouchableOpacity
-        style={styles.iconBtn}
-        onPress={onNotificationsPress}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityLabel="Notifications"
-      >
-        <MobileIcon name="bell" size={22} color={theme.screenTitle || tokens.colors.primary} />
-        {notificationCount > 0 ? (
-          <View style={[styles.badge, { borderColor: theme.card }]}>
-            <Text style={styles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
-          </View>
-        ) : null}
-      </TouchableOpacity>
+      <View style={styles.trailingSlot}>
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={onNotificationsPress}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Notifications"
+        >
+          <MobileIcon name="bell" size={22} color={theme.screenTitle || tokens.colors.primary} />
+          {notificationCount > 0 ? (
+            <View style={[styles.badge, { borderColor: theme.card }]}>
+              <Text style={styles.badgeText}>{notificationCount > 9 ? '9+' : notificationCount}</Text>
+            </View>
+          ) : null}
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
@@ -78,18 +82,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
-    minHeight: 44,
+    minHeight: 52,
     gap: 8,
   },
   brandBlock: {
     flex: 1,
     minWidth: 0,
-    gap: 3,
+    gap: 4,
+    justifyContent: 'center',
+  },
+  primaryLine: {
+    height: 24,
+    justifyContent: 'center',
   },
   workspaceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    height: 18,
   },
   rule: {
     width: 2,
@@ -104,6 +114,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: 'uppercase',
     flexShrink: 1,
+  },
+  trailingSlot: {
+    minWidth: 44,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   iconBtn: {
     width: 44,

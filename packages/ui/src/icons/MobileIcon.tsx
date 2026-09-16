@@ -1,4 +1,5 @@
 import React from 'react';
+import Svg, { Path } from 'react-native-svg';
 import {
   MagnifyingGlass,
   House,
@@ -25,14 +26,18 @@ import {
   Handshake,
   Shield,
   User,
+  UserPlus,
   CreditCard,
   Gear,
   Globe,
-  CheckCircle,
+  Check,
   CalendarPlus,
   QrCode,
   Buildings,
   Bed,
+  Bathtub,
+  Stairs,
+  FrameCorners,
   Camera,
   Coins,
   MapPin,
@@ -44,16 +49,20 @@ import {
   FacebookLogo,
   AppleLogo,
   ArrowsLeftRight,
+  Funnel,
+  LockSimple,
+  Plus,
   IconProps,
 } from 'phosphor-react-native';
 import { tokens } from '../theme/tokens';
 import { AppIconName, AppIconTone } from './types';
 
-const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
+const ICON_MAP: Record<Exclude<AppIconName, 'house-plus'>, React.ComponentType<IconProps>> = {
   search: MagnifyingGlass,
   home: House,
   key: Key,
   grid: SquaresFour,
+  'list-rows': List,
   menu: List,
   bell: Bell,
   moon: Moon,
@@ -75,14 +84,18 @@ const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
   handshake: Handshake,
   shield: Shield,
   user: User,
+  'user-plus': UserPlus,
   'credit-card': CreditCard,
   gear: Gear,
   globe: Globe,
-  check: CheckCircle,
+  check: Check,
   'calendar-plus': CalendarPlus,
   'qr-code': QrCode,
   buildings: Buildings,
   bed: Bed,
+  bath: Bathtub,
+  stairs: Stairs,
+  'room-size': FrameCorners,
   camera: Camera,
   coins: Coins,
   'map-pin': MapPin,
@@ -94,6 +107,9 @@ const ICON_MAP: Record<AppIconName, React.ComponentType<IconProps>> = {
   facebook: FacebookLogo,
   apple: AppleLogo,
   swap: ArrowsLeftRight,
+  funnel: Funnel,
+  lock: LockSimple,
+  plus: Plus,
 };
 
 const TONE_COLORS: Record<AppIconTone, string> = {
@@ -123,6 +139,19 @@ export const MobileIcon: React.FC<MobileIconProps> = ({
   color,
   weight = 'regular',
 }) => {
+  if (name === 'house-plus') {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" accessible={false}>
+        <Path
+          d="M12 20H3V10L12 2L20 9M19 13V21M15 17H23"
+          stroke={color ?? TONE_COLORS[tone]}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </Svg>
+    );
+  }
   const Icon = ICON_MAP[name];
   if (!Icon) return null;
   return <Icon size={size} color={color ?? TONE_COLORS[tone]} weight={weight} />;
