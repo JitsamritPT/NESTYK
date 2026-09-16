@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { AppButton, AppInput, AppBadge, AppIcon, tokens } from '@nestyk/ui';
-import { SmartAppBanner } from './components/SmartAppBanner';
+import { SmartAppBanner } from '../components/SmartAppBanner';
 import { MOCK_LISTINGS, MOCK_HERO, MOCK_FEATURED } from '../lib/mock-data';
 
 export default function HomePage() {

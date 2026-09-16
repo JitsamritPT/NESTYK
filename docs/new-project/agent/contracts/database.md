@@ -68,6 +68,9 @@ Partial unique: ห้องละ 1 `active`
 | `tenant_id` | denormalize |
 | **`lead_id`** | denormalize — อ้าง lead ที่ booked |
 | `status` | ดู flow.md |
+| `document_url`, `invoice_url`, `receipt_url` | path ใน storage ส่วนตัวของใบจอง / ใบแจ้งหนี้ / ใบเสร็จ |
+| `owner_signed_at`, `tenant_signed_at`, `agent_signed_at` | เวลาลงนามของคู่สัญญา |
+| `owner_signature_url`, `tenant_signature_url`, `agent_signature_url` | path รูปลายเซ็น (นายหน้าเซ็นแทนได้) |
 
 ---
 

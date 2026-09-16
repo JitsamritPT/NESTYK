@@ -1,7 +1,5 @@
 import React from 'react';
 import { Mitr, Baloo_2, Noto_Sans_Thai } from 'next/font/google';
-import { WebPageLayout } from '@nestyk/ui';
-import { MOCK_NAV_LINKS, MOCK_USER } from '../lib/mock-data';
 
 const mitr = Mitr({
   subsets: ['thai', 'latin'],
@@ -61,13 +59,7 @@ export default function RootLayout({
         `}} />
       </head>
       <body style={{ margin: 0, padding: 0, backgroundColor: '#F8FAFC' }}>
-        <WebPageLayout
-          role="guest"
-          navLinks={[...MOCK_NAV_LINKS]}
-          userProfile={{ name: MOCK_USER.name }}
-        >
-          {children}
-        </WebPageLayout>
+        {children}
       </body>
     </html>
   );

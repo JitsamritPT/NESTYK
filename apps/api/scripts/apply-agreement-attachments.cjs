@@ -1,0 +1,27 @@
+const path = require('node:path');
+const fs = require('node:fs');
+const { Client } = require('pg');
+require('dotenv').config({ path: path.resolve(__dirname, '../../../.env.api'), quiet: true });
+async function main() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error('DATABASE_URL missing');
+  const schema = process.env.DB_SCHEMA || 'public';
+  const db = new Client({ connectionString: url, ssl: /localhost|127\.0\.0\.1/.test(url) ? false : { rejectUnauthorized: false } });
+  await db.connect();
+  try {
+    await db.query('BEGIN');
+    await db.query("SET LOCAL lock_timeout = '5s'");
+    await db.query("SET LOCAL statement_timeout = '30s'");
+    await db.query('SELECT set_config($1, $2, true)', ['search_path', '"' + schema.replace(/"/g, '""') + '"']);
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260915-agreement-attachments.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260915-ownership-proof-reservation.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260915-attachment-removal.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260915-attachments-without-review.sql'), 'utf8'));
+    const rows = await db.query('SELECT id, agreement_type_code, version, form_kind FROM agreement_templates ORDER BY id');
+    if (process.argv.includes('--check')) { await db.query('ROLLBACK'); console.log('Migration validated and rolled back.'); }
+    else { await db.query('COMMIT'); console.log('Migration applied.'); }
+    console.log(JSON.stringify(rows.rows));
+  } catch (error) { await db.query('ROLLBACK'); throw error; }
+  finally { await db.end(); }
+}
+main().catch(error => { console.error('Agreement migration failed:', error.code || error.name); process.exitCode = 1; });

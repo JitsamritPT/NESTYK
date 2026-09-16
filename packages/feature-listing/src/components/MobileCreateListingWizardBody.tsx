@@ -437,7 +437,7 @@ export const MobileCreateListingWizardBody: React.FC<
     setWaterRate(initialData.waterRatePerUnit == null ? '' : String(initialData.waterRatePerUnit));
     setElectricRate(initialData.electricRatePerUnit == null ? '' : String(initialData.electricRatePerUnit));
     setPhotos(initialData.medias.map((media) => ({ uri: media.mediaUrl, mediaUrl: media.mediaUrl, name: 'room.jpg', mimeType: 'image/jpeg' })));
-    const seeded =
+    const seeded: { id?: number; name: string; phone: string; roomCount?: number }[] =
       initialData.selectedContacts?.length
         ? initialData.selectedContacts
         : initialData.contactId || initialData.contact

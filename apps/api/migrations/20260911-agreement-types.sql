@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS master_agreement_types (
   CONSTRAINT chk_agreement_form_kind CHECK (form_kind IN ('reservation', 'lease'))
 );
 INSERT INTO master_agreement_types (code, name_th, name_en, icon, form_kind, sort_order)
-VALUES ('reservation', 'สัญญาจองห้อง', 'Room reservation agreement', 'calendar', 'reservation', 10),
+VALUES ('reservation', 'หนังสือจองห้อง', 'Room reservation agreement', 'calendar', 'reservation', 10),
        ('lease', 'สัญญาเช่า', 'Lease agreement', 'key', 'lease', 20)
 ON CONFLICT (code) DO NOTHING;
 ALTER TABLE lease_contracts ADD COLUMN IF NOT EXISTS agreement_type_code VARCHAR(64) NOT NULL DEFAULT 'lease';

@@ -25,8 +25,12 @@ loadApiEnv();
 async function bootstrap() {
   const { NestFactory } = await import('@nestjs/core');
   const { AppModule } = await import('./app.module');
+  type NestExpressApplication =
+    import('@nestjs/platform-express').NestExpressApplication;
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // Signature PNGs arrive as base64 data URLs — default Express 100kb is too small.
+  app.useBodyParser('json', { limit: '3mb' });
   app.enableCors();
   app.setGlobalPrefix('api/v1');
 
