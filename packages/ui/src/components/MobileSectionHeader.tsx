@@ -21,12 +21,20 @@ export interface MobileSectionHeaderProps {
   leading?: 'menu' | 'back';
   onMenuPress?: () => void;
   onBackPress?: () => void;
+  backDisabled?: boolean;
   /** Compact brand CTA (e.g. Rooms add) */
   onAddPress?: () => void;
   /** `label` = “+ Add”; `room` = house + plus fine-outline icon button */
   addVariant?: 'label' | 'room';
   addLabel?: string;
   addAccessibilityLabel?: string;
+  /**
+   * Secondary solid CTA without “+” prefix (e.g. Edit room).
+   * Prefer this over inventing a second outline/back button row.
+   */
+  onActionPress?: () => void;
+  actionLabel?: string;
+  actionDisabled?: boolean;
   /** When set, shows search affordance on the right */
   onSearchPress?: () => void;
   searchActive?: boolean;
@@ -44,10 +52,14 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
   leading = 'menu',
   onMenuPress,
   onBackPress,
+  backDisabled = false,
   onAddPress,
   addVariant = 'label',
   addLabel = 'Add',
   addAccessibilityLabel,
+  onActionPress,
+  actionLabel,
+  actionDisabled = false,
   onSearchPress,
   searchActive = false,
   searchAccessibilityLabel = 'Search',
@@ -55,17 +67,20 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
   const { theme } = useMobileTheme();
   const ink = theme.screenTitle || tokens.colors.primary;
   const isBack = leading === 'back';
-  const hasTrailing = Boolean(onAddPress || onSearchPress);
+  const showAction = Boolean(onActionPress && actionLabel);
+  const hasTrailing = Boolean(onAddPress || onSearchPress || showAction);
   const isRoomAdd = addVariant === 'room';
 
   return (
     <View style={styles.row}>
       <TouchableOpacity
-        style={styles.iconBtn}
+        style={[styles.iconBtn, backDisabled ? styles.iconBtnDisabled : null]}
         onPress={isBack ? onBackPress : onMenuPress}
+        disabled={isBack ? backDisabled : false}
         activeOpacity={0.7}
         accessibilityRole="button"
         accessibilityLabel={isBack ? 'Back' : 'Menu'}
+        accessibilityState={{ disabled: isBack ? backDisabled : false }}
         {...(Platform.OS === 'android'
           ? { android_ripple: { color: 'rgba(0,0,0,0.08)', borderless: true, radius: 22 } }
           : {})}
@@ -117,6 +132,27 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
                     {`+ ${addLabel}`}
                   </Text>
                 )}
+              </Pressable>
+            ) : null}
+            {showAction ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  actionDisabled ? styles.actionBtnDisabled : null,
+                  pressed && !actionDisabled ? { opacity: 0.85 } : null,
+                ]}
+                onPress={onActionPress}
+                disabled={actionDisabled}
+                accessibilityRole="button"
+                accessibilityLabel={actionLabel}
+                accessibilityState={{ disabled: actionDisabled }}
+                {...(Platform.OS === 'android'
+                  ? { android_ripple: actionDisabled ? undefined : { color: 'rgba(33,30,30,0.12)' } }
+                  : {})}
+              >
+                <Text style={styles.actionLabel} numberOfLines={1}>
+                  {actionLabel}
+                </Text>
               </Pressable>
             ) : null}
             {onSearchPress ? (
@@ -209,6 +245,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconBtnDisabled: {
+    opacity: 0.4,
+  },
   addBtn: {
     minHeight: 36,
     paddingHorizontal: 14,
@@ -231,6 +270,25 @@ const styles = StyleSheet.create({
     backgroundColor: tokens.colors.brand[100],
   },
   addLabel: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '700',
+    color: tokens.colors.primary,
+  },
+  actionBtn: {
+    minHeight: 36,
+    maxWidth: 140,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: tokens.colors.brand[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionBtnDisabled: {
+    opacity: 0.45,
+  },
+  actionLabel: {
     fontFamily: tokens.typography.native.headingTh,
     fontSize: 14,
     lineHeight: 21,

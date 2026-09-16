@@ -2,7 +2,6 @@ import type { FacilityOption, NearbyPlace } from '@nestyk/types';
 import { RoomFacilitiesEditor } from './RoomFacilitiesEditor';
 import { RoomNearbyEditor, type NearbySearch } from './RoomNearbyEditor';
 import { RoomEditSectionList } from './RoomEditSectionList';
-import { RoomPhotoLightbox } from './RoomPhotoLightbox';
 import { RoomPhotoCompareModal } from './RoomPhotoCompareModal';
 import { WizardSheetChrome } from './WizardSheetChrome';
 import { WizardSheetFooter } from './WizardSheetFooter';
@@ -24,6 +23,7 @@ import {
   BackHandler,
   Image,
   TextInput,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { useLocale } from '@nestyk/i18n';
 import {
@@ -31,6 +31,8 @@ import {
   MobileInput,
   MobileIcon,
   MobileBottomSheet,
+  MobileActionSheetBody,
+  MobilePhotoViewer,
   SelectionChip,
   SelectionCheck,
   tokens,
@@ -48,6 +50,7 @@ const OWNER_NOTE_MAX = 200;
 const DEFAULT_MAP = { latitude: 13.7563, longitude: 100.5018 };
 const ADVANCE_MONTH_OPTIONS = [0, 1, 2] as const;
 const DEPOSIT_MONTH_OPTIONS = [1, 2, 3] as const;
+const PHOTO_GRID_GAP = 10;
 /** Suggested only when opening Add lease the first time — not pre-committed on create. */
 const SUGGESTED_ADVANCE_MONTHS = 1;
 const SUGGESTED_DEPOSIT_MONTHS = 2;
@@ -245,6 +248,9 @@ function isFilledCount(value: string) {
   return /^\d+$/.test(value.trim());
 }
 
+/** Dev mock — replace with API quota when backend is ready. */
+const MOCK_AI_ENHANCE_LIMIT = 10;
+
 export const MobileCreateListingWizardBody: React.FC<
   MobileCreateListingWizardBodyProps
 > = ({
@@ -387,12 +393,29 @@ export const MobileCreateListingWizardBody: React.FC<
 
   const [photos, setPhotos] = useState<RoomPhoto[]>([]);
   const photoCount = photos.length;
+  const [photoCellSize, setPhotoCellSize] = useState(0);
   const [pickingPhotos, setPickingPhotos] = useState(false);
   const [enhancingUri, setEnhancingUri] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ uri: string; beforeUri?: string } | null>(null);
+  const [enhanceRemaining, setEnhanceRemaining] = useState(MOCK_AI_ENHANCE_LIMIT);
+  const [galleryPreviewIndex, setGalleryPreviewIndex] = useState<number | null>(null);
+  const [comparePreviewSide, setComparePreviewSide] = useState<'before' | 'after' | null>(null);
   const [compare, setCompare] = useState<{ sourceUri: string; beforeUri: string; after: RoomPhoto } | null>(null);
   const [photoMenuUri, setPhotoMenuUri] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  /** Hub preview card — only updated when user taps Done on a section (not live drafts / auto defaults). */
+  const [hubSnapshot, setHubSnapshot] = useState<{
+    listingTitle: string;
+    propertyName: string;
+    bedroom: string;
+    sizeSqm: string;
+    coverUri: string | null;
+  }>({
+    listingTitle: '',
+    propertyName: '',
+    bedroom: '',
+    sizeSqm: '',
+    coverUri: null,
+  });
   const submitLock = useRef(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -408,6 +431,8 @@ export const MobileCreateListingWizardBody: React.FC<
   const [ownersError, setOwnersError] = useState('');
   const [roomContacts, setRoomContacts] = useState<RoomContactSelection[]>([]);
   const [requiredPrompt, setRequiredPrompt] = useState<string | null>(null);
+  /** Required section steps highlighted on hub after a failed Save room. */
+  const [hubSaveHighlight, setHubSaveHighlight] = useState<number[]>([]);
 
   useEffect(() => {
     if (!initialData) return;
@@ -437,6 +462,13 @@ export const MobileCreateListingWizardBody: React.FC<
     setWaterRate(initialData.waterRatePerUnit == null ? '' : String(initialData.waterRatePerUnit));
     setElectricRate(initialData.electricRatePerUnit == null ? '' : String(initialData.electricRatePerUnit));
     setPhotos(initialData.medias.map((media) => ({ uri: media.mediaUrl, mediaUrl: media.mediaUrl, name: 'room.jpg', mimeType: 'image/jpeg' })));
+    setHubSnapshot({
+      listingTitle: (initialData.listingTitle ?? '').trim(),
+      propertyName: (p.name ?? '').trim(),
+      bedroom: (values.bedroom ?? '').trim(),
+      sizeSqm: (values.room_size ?? '').trim(),
+      coverUri: initialData.medias[0]?.mediaUrl ?? null,
+    });
     const seeded: { id?: number; name: string; phone: string; roomCount?: number }[] =
       initialData.selectedContacts?.length
         ? initialData.selectedContacts
@@ -906,21 +938,7 @@ export const MobileCreateListingWizardBody: React.FC<
         if (cancelled) return;
         setRoomTypes(rows);
         setRoomTypesError('');
-        if (initialData) return;
-        setRoomTypeId((current) => {
-          if (current != null) return current;
-          const def =
-            rows.find((row) => row.code === 'one_bedroom') ??
-            rows.find((row) => row.bedroomCount === 1) ??
-            null;
-          if (!def) return current;
-          if (def.bedroomCount != null) {
-            setBedroom(String(def.bedroomCount));
-          } else {
-            setBedroom('1');
-          }
-          return def.id;
-        });
+        // Do not auto-select room type / bedroom — wait until user picks and taps Done.
       })
       .catch((err) => {
         if (cancelled) return;
@@ -1278,6 +1296,23 @@ export const MobileCreateListingWizardBody: React.FC<
       setRequiredPrompt(requiredMessage(invalid));
       return;
     }
+    setHubSnapshot((prev) => {
+      const next = { ...prev };
+      if (step === 1) {
+        next.propertyName = propertyName.trim();
+      }
+      if (step === 2) {
+        next.listingTitle = listingTitle.trim();
+        next.bedroom = bedroom.trim();
+        next.sizeSqm = sizeSqm.trim();
+      }
+      if (step === 6) {
+        next.coverUri = photos[0]?.uri ?? null;
+      }
+      // Title/property may also change from other sections — keep cover in sync when photos change via Done only.
+      return next;
+    });
+    setHubSaveHighlight((prev) => prev.filter((id) => id !== step));
     backToOverview();
   };
 
@@ -1369,19 +1404,24 @@ export const MobileCreateListingWizardBody: React.FC<
           : 'details'
       ];
       const missing = Object.keys(collectStepErrors(def.step));
-      if (missing.length > 0 && sectionHasData(def.step)) {
+      const isSaveHighlight = hubSaveHighlight.includes(def.step) && !def.optional;
+      const forceHighlight = isSaveHighlight && missing.length > 0;
+      if (forceHighlight || (missing.length > 0 && sectionHasData(def.step))) {
         const fieldKeys = missing.filter((key) => !NON_FIELD_KEYS.includes(key));
         const allFields = fieldKeys.length === missing.length;
+        // Hub stays short after Save; field lists appear inside the section form.
+        const statusLabel = isSaveHighlight
+          ? cr.setupSaveIncomplete
+          : allFields
+            ? interpolate(ov.missingList, { fields: fieldKeys.map(fieldLabel).join(', ') })
+            : requiredMessage(missing[0]);
         return {
           ...def,
           hint,
           status: 'incomplete' as const,
-          statusLabel: allFields
-            ? interpolate(ov.missingList, { fields: fieldKeys.map(fieldLabel).join(', ') })
-            : requiredMessage(missing[0]),
-          detail: allFields
-            ? interpolate(ov.missingList, { fields: fieldKeys.map(fieldLabel).join(', ') })
-            : requiredMessage(missing[0]),
+          statusLabel,
+          detail: statusLabel,
+          highlightError: isSaveHighlight,
         };
       }
       if (!sectionHasData(def.step)) {
@@ -1389,8 +1429,13 @@ export const MobileCreateListingWizardBody: React.FC<
           ...def,
           hint,
           status: 'empty' as const,
-          statusLabel: def.optional ? interpolate(cr.photosOptionalStatus, { count: 0 }) : ov.notAdded,
+          statusLabel: isSaveHighlight
+            ? cr.setupSaveIncomplete
+            : def.optional
+              ? interpolate(cr.photosOptionalStatus, { count: 0 })
+              : ov.notAdded,
           detail: ov.notAdded,
+          highlightError: isSaveHighlight,
         };
       }
       return {
@@ -1399,6 +1444,7 @@ export const MobileCreateListingWizardBody: React.FC<
         status: 'complete' as const,
         statusLabel: ov.complete,
         detail: ov.complete,
+        highlightError: false,
       };
     });
   })();
@@ -1509,22 +1555,27 @@ export const MobileCreateListingWizardBody: React.FC<
 
   const handleSubmit = async () => {
     if (!listingSourceCode) return;
-    const stepsToValidate = initialData ? EDIT_STEPS : CREATE_REQUIRED_STEPS;
-    let invalid: string | null = null;
-    let invalidStep: number | null = null;
+    const stepsToValidate = initialData ? requiredHubSteps : CREATE_REQUIRED_STEPS;
+    const failedSteps: number[] = [];
+    const mergedErrors: Record<string, string> = {};
     for (const current of stepsToValidate) {
-      invalid = validateStep(current);
-      if (invalid) {
-        invalidStep = current;
-        setStep(current);
-        setEditView('section');
-        break;
+      const stepErrors = collectStepErrors(current);
+      const keys = Object.keys(stepErrors);
+      if (keys.length > 0) {
+        failedSteps.push(current);
+        Object.assign(mergedErrors, stepErrors);
       }
     }
-    if (invalid || submitLock.current) {
-      if (invalid) setRequiredPrompt(requiredMessage(invalid));
+    if (failedSteps.length > 0) {
+      setErrors(mergedErrors);
+      setHubSaveHighlight(failedSteps);
+      setEditView('overview');
+      setRequiredPrompt(null);
+      requestAnimationFrame(() => scrollToTop());
       return;
     }
+    if (submitLock.current) return;
+    setHubSaveHighlight([]);
     if (onSubmitListing && (uploadPhoto || photos.every((photo) => photo.mediaUrl))) {
       submitLock.current = true;
       setSubmitting(true);
@@ -1551,6 +1602,35 @@ export const MobileCreateListingWizardBody: React.FC<
     }
     Alert.alert(cr.saveError, cr.photoUnavailable);
   };
+
+  const dismissCompare = useCallback(() => {
+    Alert.alert(
+      cr.enhanceDiscardConfirmTitle,
+      interpolate(cr.enhanceDiscardConfirmBody, {
+        remaining: enhanceRemaining,
+        limit: MOCK_AI_ENHANCE_LIMIT,
+      }),
+      [
+        { text: cr.enhanceDiscardConfirmStay, style: 'cancel' },
+        {
+          text: cr.enhanceDiscardConfirmDiscard,
+          style: 'destructive',
+          onPress: () => setCompare(null),
+        },
+      ],
+    );
+  }, [
+    cr.enhanceDiscardConfirmBody,
+    cr.enhanceDiscardConfirmDiscard,
+    cr.enhanceDiscardConfirmStay,
+    cr.enhanceDiscardConfirmTitle,
+    enhanceRemaining,
+  ]);
+
+  const enhanceQuotaShort = interpolate(cr.enhanceQuotaShort, {
+    remaining: enhanceRemaining,
+    limit: MOCK_AI_ENHANCE_LIMIT,
+  });
 
   const renderNav = () => (
     <View style={styles.footerSolo}>
@@ -1610,22 +1690,12 @@ export const MobileCreateListingWizardBody: React.FC<
             contentContainerStyle={styles.formScrollContent}
             showsVerticalScrollIndicator={false}
           >
-            {(listingTitle.trim() || propertyName.trim() || photos[0]) ? (
-              <Pressable
-                onPress={() => openSection(listingTitle.trim() || propertyName.trim() ? 1 : 2)}
-                disabled={submitting}
-                accessibilityRole="button"
-                accessibilityLabel={listingTitle.trim() || propertyName.trim() || cr.steps.property}
-                android_ripple={{ color: '#00000014' }}
-                style={({ pressed }) => [
-                  styles.hubPreview,
-                  pressed ? { opacity: 0.9 } : null,
-                ]}
-              >
+            {(hubSnapshot.listingTitle || hubSnapshot.propertyName || hubSnapshot.coverUri) ? (
+              <View style={styles.hubPreview}>
                 <View style={styles.hubPreviewThumb}>
-                  {photos[0]?.uri ? (
+                  {hubSnapshot.coverUri ? (
                     <Image
-                      source={{ uri: photos[0].uri, cache: 'reload' }}
+                      source={{ uri: hubSnapshot.coverUri, cache: 'reload' }}
                       style={styles.hubPreviewThumbImg}
                     />
                   ) : (
@@ -1634,21 +1704,24 @@ export const MobileCreateListingWizardBody: React.FC<
                 </View>
                 <View style={styles.hubPreviewCopy}>
                   <Text style={styles.hubPreviewTitle} numberOfLines={1}>
-                    {listingTitle.trim() || propertyName.trim() || cr.steps.property}
+                    {hubSnapshot.listingTitle ||
+                      hubSnapshot.propertyName ||
+                      cr.steps.property}
                   </Text>
                   <Text style={styles.hubPreviewMeta} numberOfLines={1}>
                     {[
-                      bedroom.trim()
-                        ? interpolate(t.agent.listings.specBed, { count: bedroom.trim() })
+                      hubSnapshot.bedroom
+                        ? interpolate(t.agent.listings.specBed, {
+                            count: hubSnapshot.bedroom,
+                          })
                         : null,
-                      sizeSqm.trim() ? `${sizeSqm.trim()} sqm` : null,
+                      hubSnapshot.sizeSqm ? `${hubSnapshot.sizeSqm} sqm` : null,
                     ]
                       .filter(Boolean)
                       .join(' · ') || cr.setupHubHint}
                   </Text>
                 </View>
-                <MobileIcon name="chevron-right" size={18} color={tokens.colors.divider} />
-              </Pressable>
+              </View>
             ) : null}
             <RoomEditSectionList
               sections={editSections}
@@ -1659,9 +1732,11 @@ export const MobileCreateListingWizardBody: React.FC<
                   : 0
               }
               summaryTone={
-                requiredCompleteCount >= requiredHubSteps.length && incompleteSectionCount === 0
-                  ? 'success'
-                  : 'warning'
+                hubSaveHighlight.length > 0
+                  ? 'error'
+                  : requiredCompleteCount >= requiredHubSteps.length && incompleteSectionCount === 0
+                    ? 'success'
+                    : 'warning'
               }
               summaryLabel={interpolate(cr.setupProgress, {
                 done: requiredCompleteCount,
@@ -1669,9 +1744,30 @@ export const MobileCreateListingWizardBody: React.FC<
               })}
               onSelect={openSection}
             />
-            <View style={styles.hubFootnoteRow}>
-              <Text style={styles.hubFootnoteIcon}>ⓘ</Text>
-              <Text style={styles.hubFootnote}>{cr.setupMissingHint}</Text>
+            <View
+              style={[
+                styles.hubFootnoteRow,
+                hubSaveHighlight.length > 0 ? styles.hubSaveBanner : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.hubFootnoteIcon,
+                  hubSaveHighlight.length > 0 ? styles.hubSaveBannerIcon : null,
+                ]}
+              >
+                {hubSaveHighlight.length > 0 ? '!' : 'ⓘ'}
+              </Text>
+              <Text
+                style={[
+                  styles.hubFootnote,
+                  hubSaveHighlight.length > 0 ? styles.hubSaveBannerText : null,
+                ]}
+              >
+                {hubSaveHighlight.length > 0
+                  ? cr.setupSaveMissingBanner
+                  : cr.setupMissingHint}
+              </Text>
             </View>
           </ScrollView>
           <View style={styles.footer}>
@@ -2307,42 +2403,79 @@ export const MobileCreateListingWizardBody: React.FC<
               {errors.photos ? (
                 <Text style={styles.errorText}>{errors.photos}</Text>
               ) : null}
-              <View style={styles.photoGrid}>
-                {photos.map((photo, i) => (
-                  <View key={photo.uri} style={styles.photoTile}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={cr.viewPhoto}
-                      disabled={submitting || !!enhancingUri}
-                      onPress={() => setPreview({ uri: photo.uri, beforeUri: photo.originalUri })}
+              <View
+                style={styles.photoGrid}
+                onLayout={(e: LayoutChangeEvent) => {
+                  const w = e.nativeEvent.layout.width;
+                  if (w <= 0) return;
+                  const next = Math.floor((w - PHOTO_GRID_GAP) / 2);
+                  setPhotoCellSize((prev) => (prev === next ? prev : next));
+                }}
+              >
+                {photos.map((photo, i) => {
+                  const enhancing = enhancingUri === photo.uri;
+                  return (
+                    <View
+                      key={photo.uri}
+                      style={[
+                        styles.photoTile,
+                        photoCellSize > 0
+                          ? { width: photoCellSize, height: photoCellSize }
+                          : null,
+                      ]}
                     >
-                      <Image source={{ uri: photo.uri, cache: 'reload' }} style={styles.photoTileImg} />
-                      {i === 0 ? (
-                        <View style={[styles.coverBadge, { backgroundColor: accent }]}>
-                          <Text style={[styles.coverBadgeText, { color: accentInk }]}>
-                            {cr.coverBadge}
-                          </Text>
-                        </View>
-                      ) : null}
-                      {photo.originalUri ? (
-                        <View style={[styles.aiBadge, { backgroundColor: accent }]}>
-                          <Text style={[styles.aiBadgeText, { color: accentInk }]}>AI</Text>
-                        </View>
-                      ) : null}
-                    </Pressable>
-                    <Pressable
-                      style={styles.photoMenuBtn}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      onPress={() => setPhotoMenuUri(photo.uri)}
-                    >
-                      <MobileIcon name="dots-vertical" size={18} color={tokens.colors.white} />
-                    </Pressable>
-                  </View>
-                ))}
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={cr.viewPhoto}
+                        disabled={submitting || enhancing}
+                        onPress={() => setGalleryPreviewIndex(i)}
+                        style={styles.photoTileHit}
+                      >
+                        <Image source={{ uri: photo.uri, cache: 'reload' }} style={styles.photoTileImg} />
+                        {i === 0 ? (
+                          <View style={[styles.coverBadge, { backgroundColor: accent }]}>
+                            <Text style={[styles.coverBadgeText, { color: accentInk }]}>
+                              {cr.coverBadge}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {photo.originalUri ? (
+                          <View style={[styles.aiBadge, { backgroundColor: accent }]}>
+                            <Text style={[styles.aiBadgeText, { color: accentInk }]}>AI</Text>
+                          </View>
+                        ) : null}
+                      </Pressable>
+                      {enhancing ? (
+                        <Animated.View
+                          entering={FadeIn.duration(150)}
+                          style={styles.photoEnhanceOverlay}
+                          accessibilityRole="progressbar"
+                          accessibilityLabel={cr.enhancePhotoLoading}
+                        >
+                          <ActivityIndicator color={accent} size="small" />
+                          <Text style={styles.photoEnhanceLabel}>{cr.enhancePhotoLoading}</Text>
+                        </Animated.View>
+                      ) : (
+                        <Pressable
+                          style={styles.photoMenuBtn}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          onPress={() => setPhotoMenuUri(photo.uri)}
+                        >
+                          <MobileIcon name="dots-vertical" size={18} color={tokens.colors.white} />
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                })}
                 {photoCount < 12 && pickPhotos ? (
                   <Pressable
-                    style={styles.photoAddTile}
+                    style={[
+                      styles.photoAddTile,
+                      photoCellSize > 0
+                        ? { width: photoCellSize, height: photoCellSize }
+                        : null,
+                    ]}
                     disabled={submitting || pickingPhotos || !!enhancingUri}
                     onPress={async () => {
                       if (!pickPhotos || pickingPhotos) return;
@@ -2384,15 +2517,9 @@ export const MobileCreateListingWizardBody: React.FC<
                   {photoCount < 5 ? cr.photosPublishMinHint : cr.sessionSaveNote}
                 </Text>
               </View>
-              <RoomPhotoLightbox
-                visible={preview != null}
-                uri={preview?.uri ?? ''}
-                beforeUri={preview?.beforeUri}
-                labels={{ before: cr.photoBefore, after: cr.photoAfter, close: cr.closePhotoPreview }}
-                onClose={() => setPreview(null)}
-              />
               <RoomPhotoCompareModal
-                visible={compare != null}
+                // Hide while photo viewer is open — RN cannot reliably stack two Modals.
+                visible={compare != null && comparePreviewSide == null && galleryPreviewIndex == null}
                 beforeUri={compare?.beforeUri ?? ''}
                 afterUri={compare?.after.uri ?? ''}
                 labels={{
@@ -2401,8 +2528,16 @@ export const MobileCreateListingWizardBody: React.FC<
                   after: cr.photoAfter,
                   useEnhanced: cr.useEnhancedPhoto,
                   keepOriginal: cr.keepOriginalPhoto,
+                  viewPhoto: cr.viewPhoto,
                 }}
-                onKeepOriginal={() => setCompare(null)}
+                quotaNote={interpolate(cr.enhanceQuotaUsedNote, {
+                  remaining: enhanceRemaining,
+                  limit: MOCK_AI_ENHANCE_LIMIT,
+                })}
+                onDismiss={dismissCompare}
+                onPreview={(params) =>
+                  setComparePreviewSide(params.uri === compare?.beforeUri ? 'before' : 'after')
+                }
                 onUseEnhanced={() => {
                   if (!compare) return;
                   const { sourceUri, after } = compare;
@@ -2410,73 +2545,134 @@ export const MobileCreateListingWizardBody: React.FC<
                   setCompare(null);
                 }}
               />
+              <MobilePhotoViewer
+                visible={galleryPreviewIndex != null}
+                mode="gallery"
+                items={photos.map((photo) => ({
+                  uri: photo.uri,
+                  beforeUri: photo.originalUri,
+                  enhanced: !!photo.originalUri,
+                }))}
+                index={galleryPreviewIndex ?? 0}
+                onIndexChange={setGalleryPreviewIndex}
+                labels={{
+                  titlePreview: cr.photoViewerTitle,
+                  titleCompare: cr.photoViewerCompareTitle,
+                  before: cr.photoBefore,
+                  after: cr.photoAfter,
+                  enhancedBadge: cr.photoViewerEnhancedBadge,
+                  enhancedCaption: cr.photoViewerEnhancedCaption,
+                  hintZoom: cr.photoViewerHintZoom,
+                  hintCompareSwitch: cr.photoViewerHintCompareSwitch,
+                  hintCompareClose: cr.photoViewerHintCompareClose,
+                  closeA11y: cr.closePhotoPreview,
+                }}
+                onClose={() => setGalleryPreviewIndex(null)}
+              />
+              <MobilePhotoViewer
+                visible={comparePreviewSide != null && compare != null}
+                mode="compare"
+                beforeUri={compare?.beforeUri}
+                afterUri={compare?.after.uri}
+                initialSide={comparePreviewSide ?? 'after'}
+                labels={{
+                  titlePreview: cr.photoViewerTitle,
+                  titleCompare: cr.photoViewerCompareTitle,
+                  before: cr.photoBefore,
+                  after: cr.photoAfter,
+                  enhancedBadge: cr.photoViewerEnhancedBadge,
+                  enhancedCaption: cr.photoViewerEnhancedCaption,
+                  hintZoom: cr.photoViewerHintZoom,
+                  hintCompareSwitch: cr.photoViewerHintCompareSwitch,
+                  hintCompareClose: cr.photoViewerHintCompareClose,
+                  closeA11y: cr.closePhotoPreview,
+                }}
+                onClose={() => setComparePreviewSide(null)}
+              />
               <MobileBottomSheet visible={photoMenuUri != null} onClose={() => setPhotoMenuUri(null)}>
-                <View style={styles.photoSheet}>
-                  <MobileButton
-                    variant="outline"
-                    disabled={!photoMenuUri || photos[0]?.uri === photoMenuUri}
-                    onPress={() => {
-                      const uri = photoMenuUri;
-                      if (!uri) return;
-                      setPhotos((current) => {
-                        const target = current.find((p) => p.uri === uri);
-                        if (!target) return current;
-                        return [target, ...current.filter((p) => p.uri !== uri)];
-                      });
-                      setPhotoMenuUri(null);
-                    }}
-                  >
-                    {cr.setCover}
-                  </MobileButton>
-                  {enhancePhoto ? (
-                    <MobileButton
-                      variant="outline"
-                      disabled={!photoMenuUri || !!enhancingUri}
-                      isLoading={!!photoMenuUri && enhancingUri === photoMenuUri}
-                      onPress={async () => {
-                        const uri = photoMenuUri;
-                        if (!uri || !enhancePhoto || enhancingUri) return;
-                        const photo = photos.find((p) => p.uri === uri);
-                        if (!photo) return;
-                        setEnhancingUri(uri);
-                        setPhotoMenuUri(null);
-                        try {
-                          const enhanced = await enhancePhoto(photo);
-                          setCompare({
-                            sourceUri: photo.uri,
-                            beforeUri: photo.originalUri ?? photo.uri,
-                            after: {
-                              ...enhanced,
-                              originalUri: photo.originalUri ?? photo.uri,
+                <MobileActionSheetBody
+                  title={cr.steps.photos}
+                  cancelLabel={t.common.cancel}
+                  onCancel={() => setPhotoMenuUri(null)}
+                  actions={[
+                    ...(photoMenuUri && photos[0]?.uri !== photoMenuUri
+                      ? [
+                          {
+                            key: 'cover',
+                            label: cr.setCover,
+                            onPress: () => {
+                              const uri = photoMenuUri;
+                              if (!uri) return;
+                              setPhotos((current) => {
+                                const target = current.find((p) => p.uri === uri);
+                                if (!target) return current;
+                                return [target, ...current.filter((p) => p.uri !== uri)];
+                              });
+                              setPhotoMenuUri(null);
                             },
-                          });
-                        } catch (err) {
-                          Alert.alert(cr.enhancePhotoError, err instanceof Error ? err.message : String(err));
-                        } finally {
-                          setEnhancingUri(null);
-                        }
-                      }}
-                    >
-                      {cr.enhancePhoto}
-                    </MobileButton>
-                  ) : null}
-                  <MobileButton
-                    variant="outline"
-                    disabled={!photoMenuUri}
-                    onPress={() => {
-                      const uri = photoMenuUri;
-                      if (!uri) return;
-                      setPhotos((current) => current.filter((item) => item.uri !== uri));
-                      setPhotoMenuUri(null);
-                    }}
-                    textStyle={{ color: tokens.colors.error }}
-                  >
-                    {cr.removePhoto}
-                  </MobileButton>
-                  <MobileButton variant="outline" onPress={() => setPhotoMenuUri(null)}>
-                    {t.common.cancel}
-                  </MobileButton>
-                </View>
+                          },
+                        ]
+                      : []),
+                    ...(enhancePhoto
+                      ? [
+                          {
+                            key: 'enhance',
+                            label:
+                              enhanceRemaining > 0
+                                ? `${cr.enhancePhoto} · ${enhanceQuotaShort}`
+                                : cr.enhanceQuotaExhausted,
+                            disabled: !photoMenuUri || !!enhancingUri || enhanceRemaining <= 0,
+                            loading: !!photoMenuUri && enhancingUri === photoMenuUri,
+                            onPress: () => {
+                              const uri = photoMenuUri;
+                              if (!uri || !enhancePhoto || enhancingUri) return;
+                              if (enhanceRemaining <= 0) {
+                                Alert.alert(cr.enhanceQuotaExhausted, enhanceQuotaShort);
+                                return;
+                              }
+                              const photo = photos.find((p) => p.uri === uri);
+                              if (!photo) return;
+                              setEnhancingUri(uri);
+                              setPhotoMenuUri(null);
+                              void (async () => {
+                                try {
+                                  const enhanced = await enhancePhoto(photo);
+                                  setEnhanceRemaining((current) => Math.max(0, current - 1));
+                                  setCompare({
+                                    sourceUri: photo.uri,
+                                    beforeUri: photo.originalUri ?? photo.uri,
+                                    after: {
+                                      ...enhanced,
+                                      originalUri: photo.originalUri ?? photo.uri,
+                                    },
+                                  });
+                                } catch (err) {
+                                  Alert.alert(
+                                    cr.enhancePhotoError,
+                                    err instanceof Error ? err.message : String(err),
+                                  );
+                                } finally {
+                                  setEnhancingUri(null);
+                                }
+                              })();
+                            },
+                          },
+                        ]
+                      : []),
+                    {
+                      key: 'remove',
+                      label: cr.removePhoto,
+                      danger: true,
+                      disabled: !photoMenuUri,
+                      onPress: () => {
+                        const uri = photoMenuUri;
+                        if (!uri) return;
+                        setPhotos((current) => current.filter((item) => item.uri !== uri));
+                        setPhotoMenuUri(null);
+                      },
+                    },
+                  ]}
+                />
               </MobileBottomSheet>
             </>
           )}
@@ -3074,6 +3270,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: tokens.colors.textSecondary,
+  },
+  hubSaveBanner: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: tokens.colors.error,
+    backgroundColor: '#FEF2F2',
+  },
+  hubSaveBannerIcon: {
+    color: tokens.colors.error,
+    fontWeight: '700',
+  },
+  hubSaveBannerText: {
+    color: tokens.colors.error,
+    fontWeight: '600',
   },
   formScroll: {
     flex: 1,
@@ -3689,7 +3902,7 @@ const styles = StyleSheet.create({
   photoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: PHOTO_GRID_GAP,
   },
   photosMetaRow: {
     flexDirection: 'row',
@@ -3709,13 +3922,15 @@ const styles = StyleSheet.create({
     color: tokens.colors.textHeading,
   },
   photoTile: {
-    flexGrow: 0,
-    flexShrink: 0,
-    flexBasis: '47%',
-    aspectRatio: 1,
+    width: 140,
+    height: 140,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#F1F5F9',
+  },
+  photoTileHit: {
+    width: '100%',
+    height: '100%',
   },
   photoTileImg: {
     width: '100%',
@@ -3732,6 +3947,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
+  photoEnhanceOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.52)',
+  },
+  photoEnhanceLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: tokens.colors.white,
+  },
   coverBadge: {
     position: 'absolute',
     left: 8,
@@ -3747,10 +3976,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   photoAddTile: {
-    flexGrow: 0,
-    flexShrink: 0,
-    flexBasis: '47%',
-    aspectRatio: 1,
+    width: 140,
+    height: 140,
     borderRadius: 12,
     borderWidth: 1.5,
     borderStyle: 'dashed',
@@ -3766,10 +3993,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: tokens.colors.textSecondary,
     fontWeight: '600',
-  },
-  photoSheet: {
-    gap: 10,
-    paddingBottom: 8,
   },
   photoCard: {
     width: 108,

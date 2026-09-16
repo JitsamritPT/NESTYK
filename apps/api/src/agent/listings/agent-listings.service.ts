@@ -196,6 +196,7 @@ export class AgentListingsService {
             layoutValue(room, 'bedroom') ??
             (room.room_type?.bedroom_count != null ? String(room.room_type.bedroom_count) : null),
           roomSizeSqm: layoutValue(room, 'room_size'),
+          floor: layoutValue(room, 'floor'),
           updatedAt: room.updated_at?.toISOString?.() ?? null,
         };
       }),

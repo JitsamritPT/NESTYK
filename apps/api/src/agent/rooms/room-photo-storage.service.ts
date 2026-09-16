@@ -75,10 +75,28 @@ export class RoomPhotoStorageService {
   }
 
   async enhance(agentId: number, file: { buffer: Buffer; size: number } | undefined, _baseUrl: string) {
-    const apiKey = process.env.CLAID_API_KEY?.trim().replace(/^['"]|['"]$/g, '');
-    if (!apiKey) throw new ServiceUnavailableException('AI photo enhance is not configured — set CLAID_API_KEY in .env.api and restart the API');
-
+    const mock =
+      /^(1|true|yes)$/i.test(String(process.env.CLAID_MOCK ?? '').trim());
     const image = await this.normalizeJpeg(file);
+
+    if (mock) {
+      // Dev/demo: skip Claid — mild local enhance so Before/After is visible.
+      await new Promise((r) => setTimeout(r, 700));
+      const enhanced = await sharp(image)
+        .modulate({ brightness: 1.06, saturation: 1.08 })
+        .sharpen({ sigma: 0.8 })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+      return this.storeJpeg(agentId, enhanced);
+    }
+
+    const apiKey = process.env.CLAID_API_KEY?.trim().replace(/^['"]|['"]$/g, '');
+    if (!apiKey) {
+      throw new ServiceUnavailableException(
+        'AI photo enhance is not configured — set CLAID_MOCK=true or CLAID_API_KEY in .env.api and restart the API',
+      );
+    }
+
     const claidBase = (process.env.CLAID_API_URL?.trim().replace(/^['"]|['"]$/g, '') || 'https://api.claid.ai').replace(/\/$/, '');
 
     // Upload bytes directly to Claid — do not pass local Supabase URLs (Claid cannot reach 127.0.0.1).

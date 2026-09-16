@@ -39,6 +39,7 @@ export type AgentListingCard = {
   coverMediaUrl: string | null;
   bedroomCount?: string | null;
   roomSizeSqm?: string | null;
+  floor?: string | null;
   updatedAt?: string | null;
 };
 
@@ -145,19 +146,12 @@ function useListingLabels(item: AgentListingCard) {
         ? cr.sourceCoAgent
         : copy.notSpecified;
 
-  const beds = item.bedroomCount?.trim();
-  let bedsLabel: string | null = null;
-  if (beds) {
-    const n = Number(beds);
-    bedsLabel =
-      Number.isFinite(n) && n !== 1
-        ? interpolate(copy.specBeds, { count: beds })
-        : interpolate(copy.specBed, { count: beds });
-  }
-  const sqm = item.roomSizeSqm?.trim();
-  const sqmLabel = sqm ? interpolate(copy.specSqm, { size: sqm }) : null;
+  // Icons convey meaning — show bare numbers (no bed/sqm/floor unit text).
+  const bedsLabel = item.bedroomCount?.trim() || null;
+  const sqmLabel = item.roomSizeSqm?.trim() || null;
+  const floorLabel = item.floor?.trim() || null;
 
-  return { title, location, priceLabel, statusLabel, sourceLabel, bedsLabel, sqmLabel };
+  return { title, location, priceLabel, statusLabel, sourceLabel, bedsLabel, sqmLabel, floorLabel };
 }
 
 function MetaRow({
@@ -165,7 +159,7 @@ function MetaRow({
   label,
   color,
 }: {
-  icon: 'map-pin' | 'bed' | 'room-size';
+  icon: 'map-pin' | 'bed' | 'room-size' | 'stairs';
   label: string;
   color: string;
 }) {
@@ -179,38 +173,34 @@ function MetaRow({
   );
 }
 
-/** Beds + sqm on one line: 🛏 2 beds · ▢ 52 sqm */
+/** Specs on one line: beds · size · floor (icons only; no unit suffixes). */
 function SpecsMetaRow({
   bedsLabel,
   sqmLabel,
+  floorLabel,
   color,
 }: {
   bedsLabel: string | null;
   sqmLabel: string | null;
+  floorLabel: string | null;
   color: string;
 }) {
-  if (!bedsLabel && !sqmLabel) return null;
+  const parts: Array<{ key: string; icon: 'bed' | 'room-size' | 'stairs'; label: string }> = [];
+  if (bedsLabel) parts.push({ key: 'bed', icon: 'bed', label: bedsLabel });
+  if (sqmLabel) parts.push({ key: 'sqm', icon: 'room-size', label: sqmLabel });
+  if (floorLabel) parts.push({ key: 'floor', icon: 'stairs', label: floorLabel });
+  if (!parts.length) return null;
   return (
     <View style={styles.metaRow}>
-      {bedsLabel ? (
-        <>
-          <MobileIcon name="bed" size={13} color={color} />
+      {parts.map((part, index) => (
+        <React.Fragment key={part.key}>
+          {index > 0 ? <Text style={[styles.metaDot, { color }]}>·</Text> : null}
+          <MobileIcon name={part.icon} size={13} color={color} />
           <Text style={[styles.metaText, { color }]} numberOfLines={1}>
-            {bedsLabel}
+            {part.label}
           </Text>
-        </>
-      ) : null}
-      {bedsLabel && sqmLabel ? (
-        <Text style={[styles.metaDot, { color }]}>·</Text>
-      ) : null}
-      {sqmLabel ? (
-        <>
-          <MobileIcon name="room-size" size={13} color={color} />
-          <Text style={[styles.metaText, { color }]} numberOfLines={1}>
-            {sqmLabel}
-          </Text>
-        </>
-      ) : null}
+        </React.Fragment>
+      ))}
     </View>
   );
 }
@@ -307,6 +297,7 @@ function GridCard({
         <SpecsMetaRow
           bedsLabel={labels.bedsLabel}
           sqmLabel={labels.sqmLabel}
+          floorLabel={labels.floorLabel}
           color={theme.textSecondary}
         />
         {labels.priceLabel ? (
@@ -363,6 +354,7 @@ function RowItem({
         <SpecsMetaRow
           bedsLabel={labels.bedsLabel}
           sqmLabel={labels.sqmLabel}
+          floorLabel={labels.floorLabel}
           color={theme.textSecondary}
         />
         <View style={styles.rowStatus}>
