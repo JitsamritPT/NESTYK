@@ -2294,11 +2294,16 @@ export const MobileCreateListingWizardBody: React.FC<
 
           {step === 6 && (
             <>
-              <Text style={styles.sourceLead}>
-                {initialData?.visibility === 'published' ? cr.photosHint : cr.optionalPhotosHint}
-                {' · '}
-                {interpolate(cr.photosCount, { count: photoCount })}
-              </Text>
+              <View style={styles.photosMetaRow}>
+                <Text style={[styles.sourceLead, styles.photosMetaLead]} numberOfLines={2}>
+                  {initialData?.visibility === 'published'
+                    ? cr.photosHint
+                    : cr.photosOptionalLead}
+                </Text>
+                <Text style={styles.photosMetaCount}>
+                  {interpolate(cr.photosOfMax, { count: photoCount })}
+                </Text>
+              </View>
               {errors.photos ? (
                 <Text style={styles.errorText}>{errors.photos}</Text>
               ) : null}
@@ -2314,7 +2319,9 @@ export const MobileCreateListingWizardBody: React.FC<
                       <Image source={{ uri: photo.uri, cache: 'reload' }} style={styles.photoTileImg} />
                       {i === 0 ? (
                         <View style={[styles.coverBadge, { backgroundColor: accent }]}>
-                          <Text style={[styles.coverBadgeText, { color: accentInk }]}>{cr.coverPhoto}</Text>
+                          <Text style={[styles.coverBadgeText, { color: accentInk }]}>
+                            {cr.coverBadge}
+                          </Text>
                         </View>
                       ) : null}
                       {photo.originalUri ? (
@@ -2371,7 +2378,12 @@ export const MobileCreateListingWizardBody: React.FC<
                   </Pressable>
                 ) : null}
               </View>
-              <Text style={styles.hubFootnote}>{cr.optionalPhotosHint}</Text>
+              <View style={styles.hubFootnoteRow}>
+                <Text style={styles.hubFootnoteIcon}>ⓘ</Text>
+                <Text style={styles.hubFootnote}>
+                  {photoCount < 5 ? cr.photosPublishMinHint : cr.sessionSaveNote}
+                </Text>
+              </View>
               <RoomPhotoLightbox
                 visible={preview != null}
                 uri={preview?.uri ?? ''}
@@ -3679,11 +3691,27 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
+  photosMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  photosMetaLead: {
+    flex: 1,
+    minWidth: 0,
+  },
+  photosMetaCount: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
   photoTile: {
-    flexGrow: 1,
-    flexBasis: '46%',
+    flexGrow: 0,
     flexShrink: 0,
-    maxWidth: '48%',
+    flexBasis: '47%',
     aspectRatio: 1,
     borderRadius: 12,
     overflow: 'hidden',
@@ -3707,7 +3735,7 @@ const styles = StyleSheet.create({
   coverBadge: {
     position: 'absolute',
     left: 8,
-    bottom: 8,
+    top: 8,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -3719,10 +3747,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   photoAddTile: {
-    flexGrow: 1,
-    flexBasis: '46%',
+    flexGrow: 0,
     flexShrink: 0,
-    maxWidth: '48%',
+    flexBasis: '47%',
     aspectRatio: 1,
     borderRadius: 12,
     borderWidth: 1.5,
@@ -3756,7 +3783,7 @@ const styles = StyleSheet.create({
   },
   aiBadge: {
     position: 'absolute',
-    top: 8,
+    bottom: 8,
     left: 8,
     borderRadius: 6,
     paddingHorizontal: 6,

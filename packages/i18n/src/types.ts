@@ -460,6 +460,10 @@ export interface TranslationSchema {
       };
       quickCreateHint: string;
       optionalPhotosHint: string;
+      photosOptionalLead: string;
+      photosOfMax: string;
+      photosPublishMinHint: string;
+      coverBadge: string;
       detailsTitle: string;
       detailsHint: string;
       listingDescription: string;
