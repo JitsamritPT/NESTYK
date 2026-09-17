@@ -589,22 +589,22 @@ export class AgentContractsService {
           ...((existing.documentFileNames as object) ?? {}),
           [kind]: `${kind}-${data.documentNo.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`,
         } as Record<string, string>;
-        const patch: Partial<LeaseContractEntity> & {
-          data: Record<string, unknown>;
-        } = {
-          [DOCUMENT_COLUMNS[kind]]: stored.path,
-          data: {
-            ...existing,
-            financialDocuments,
-            documentFileNames,
-          },
-        };
         if (kind === "invoice") {
           delete financialDocuments.receipt;
           delete documentFileNames.receipt;
-          patch.receipt_url = null;
         }
-        await repo.update({ id, created_by_user_id: agentId }, patch);
+        await repo.update(
+          { id, created_by_user_id: agentId },
+          {
+            [DOCUMENT_COLUMNS[kind]]: stored.path,
+            ...(kind === "invoice" ? { receipt_url: null } : {}),
+            data: {
+              ...existing,
+              financialDocuments,
+              documentFileNames,
+            },
+          },
+        );
       });
     } catch (error) {
       await this.documents.remove(stored.path).catch(() => undefined);
