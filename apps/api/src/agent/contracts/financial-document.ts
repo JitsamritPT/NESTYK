@@ -172,6 +172,34 @@ export function validateFinancialDocument(
   return data;
 }
 
+/** Receipt money/parties/items always follow the invoice; only payment fields are free. */
+export function buildReceiptFromInvoice(
+  invoice: FinancialDocumentInput,
+  overrides: Partial<FinancialDocumentInput>,
+  defaults: { documentNo: string; issueDate: string },
+): FinancialDocumentInput {
+  return validateFinancialDocument(
+    {
+      ...invoice,
+      documentNo:
+        String(overrides.documentNo ?? defaults.documentNo).trim() ||
+        defaults.documentNo,
+      issueDate:
+        String(overrides.issueDate ?? defaults.issueDate).trim() ||
+        defaults.issueDate,
+      reference: invoice.documentNo,
+      paymentMethod: String(overrides.paymentMethod ?? "").trim(),
+      paymentDetails: String(overrides.paymentDetails ?? "").trim(),
+      receiverName: String(overrides.receiverName ?? "").trim(),
+      notes: String(overrides.notes ?? "").trim(),
+      items: invoice.items,
+      discount: invoice.discount,
+      vatRate: invoice.vatRate,
+    },
+    "receipt",
+  );
+}
+
 export function bahtText(amount: number): string {
   const digits = [
     "ศูนย์",

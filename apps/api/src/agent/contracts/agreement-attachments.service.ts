@@ -19,12 +19,17 @@ import { LeaseContractEntity } from "../../entities/lease-contract.entity";
 import { ContractDocumentStorageService } from "./contract-document-storage.service";
 
 const subjects = ["tenant", "owner", "property", "representative"];
+/** True once the stamped reservation letter PDF has been written. */
+export function reservationLetterFinalized(c: LeaseContractEntity) {
+  return !!(
+    c.document_url?.includes("/generated/reservation_letter/") &&
+    c.document_url.endsWith(".pdf")
+  );
+}
 export function documentsEditable(c: LeaseContractEntity) {
-  return (
-    ["draft", "awaiting_signatures"].includes(c.status) &&
-    !c.owner_signed_at &&
-    !c.tenant_signed_at &&
-    !c.agent_signed_at
+  if (reservationLetterFinalized(c)) return false;
+  return ["draft", "awaiting_signatures", "awaiting_agent_review"].includes(
+    c.status,
   );
 }
 export function attachmentChecklist(
@@ -103,7 +108,7 @@ export class AgreementAttachmentsService {
   private mutable(c: LeaseContractEntity) {
     if (!documentsEditable(c))
       throw new BadRequestException(
-        "เอกสารถูกล็อกแล้วหลังเริ่มลงนามหรือปิดสัญญา",
+        "สร้างเอกสารหรือปิดสัญญาแล้ว จึงแก้ไขเอกสารแนบไม่ได้",
       );
   }
   private rows(id: number, manager = this.db.manager) {

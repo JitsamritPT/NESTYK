@@ -249,8 +249,13 @@ test('mock preview works before signing, generation stamps three images and pers
     h.row[`${party}_signature_url`] = path;
     h.objects.set(path, { buffer: png });
   }
+  await assert.rejects(() => h.service.reservationPdf(7, 11, true), error =>
+    error.getStatus() === 400 && /ใบแจ้งหนี้|ใบเสร็จ/.test(error.message));
+  h.row.invoice_url = '7/11/invoice/test.pdf';
+  h.row.receipt_url = '7/11/receipt/test.pdf';
   const result = await h.service.reservationPdf(7, 11, true);
   assert.equal(result.reservationLetterStatus, 'ready');
+  assert.equal(h.row.status, 'active');
   assert.match(result.reservationLetterUrl, /generated\/reservation_letter/);
   const pdf = await PDFDocument.load(h.objects.get(h.row.document_url).buffer);
   const resources = pdf.getPages()[0].node.Resources().lookup(PDFName.of('XObject'), PDFDict);
@@ -274,7 +279,10 @@ test('PDF writes reject inaccessible or non-reservation contracts and clean up f
 });
 
 test('invalid signature leaves the original preview unchanged', async () => {
-  const h = pdfHarness();
+  const h = pdfHarness({
+    invoice_url: '7/11/invoice/test.pdf',
+    receipt_url: '7/11/receipt/test.pdf',
+  });
   await h.service.reservationPdf(7, 11, false);
   const original = h.row.document_url;
   for (const party of ['owner', 'tenant', 'agent']) {

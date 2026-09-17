@@ -36,10 +36,33 @@ const subjects: Record<AgreementDocumentSubject, string> = {
   property: "ห้อง / ทรัพย์สิน",
   representative: "ผู้รับมอบอำนาจ",
 };
+
+const EXTRA_SLOTS = [
+  {
+    code: "power_of_attorney",
+    label: "มอบอำนาจ / แต่งตั้งนายหน้า",
+    hint: "หนังสือมอบอำนาจหรือเอกสารแต่งตั้งนายหน้า",
+    defaultSubject: "representative" as AgreementDocumentSubject,
+  },
+  {
+    code: "payment_proof",
+    label: "หลักฐานการจ่ายเงิน",
+    hint: "สลิปโอนหรือหลักฐานการชำระเงินจอง",
+    defaultSubject: "tenant" as AgreementDocumentSubject,
+  },
+  {
+    code: "other",
+    label: "อื่นๆ",
+    hint: "เอกสารประกอบเพิ่มเติมตามดีล",
+    defaultSubject: "tenant" as AgreementDocumentSubject,
+  },
+] as const;
+
+type ExtraSlotCode = (typeof EXTRA_SLOTS)[number]["code"];
 type Requirement = AgreementAttachmentChecklist["requirements"][number];
 type Sheet =
   | { kind: "pickType"; requirement: Requirement }
-  | { kind: "extraUpload" }
+  | { kind: "extraUpload"; slot: ExtraSlotCode }
   | { kind: "reuse"; document: AgreementAttachment }
   | null;
 
@@ -155,6 +178,24 @@ export function AgreementAttachments({
     const matched = matchedCurrentIds(state.requirements, state.documents);
     return state.documents.filter((d) => d.isCurrent && !matched.has(d.id));
   }, [state]);
+
+  function docsForExtraSlot(code: ExtraSlotCode) {
+    if (code === "other") {
+      return extraDocs.filter(
+        (d) =>
+          d.documentTypeCode !== "power_of_attorney" &&
+          d.documentTypeCode !== "payment_proof",
+      );
+    }
+    return extraDocs.filter((d) => d.documentTypeCode === code);
+  }
+
+  function openExtraUpload(slot: ExtraSlotCode) {
+    const meta = EXTRA_SLOTS.find((row) => row.code === slot)!;
+    setExtraSubject(meta.defaultSubject);
+    setExtraType(slot);
+    setSheet({ kind: "extraUpload", slot });
+  }
 
   async function load() {
     const n = ++request.current;
@@ -356,151 +397,217 @@ export function AgreementAttachments({
     );
   }
 
-  function renderExtraDoc(document: AgreementAttachment) {
-    if (!state) return null;
-    return (
-      <View
-        key={document.id}
-        style={[s.extraFileRow, { backgroundColor: theme.background }]}
-      >
-          <Text style={[s.extraFileName, ink]} numberOfLines={1} ellipsizeMode="middle">
-            {document.fileName}
-          </Text>
-
-          {state.editable && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`เอาไฟล์ ${document.fileName} ออก`}
-              disabled={busy}
-              style={({ pressed }) => [s.removeFileButton, { opacity: busy || pressed ? 0.5 : 1 }]}
-              onPress={() => {
-                void act(async () => {
-                  setState(await removeAgreementAttachment(contractId, document.id));
-                });
-              }}
-            >
-              <Svg width={18} height={18} viewBox="0 0 24 24">
-                <Path d="M6 6L18 18M18 6L6 18" stroke={theme.textSecondary} strokeWidth={2} strokeLinecap="round" />
-              </Svg>
-            </Pressable>
-          )}
-      </View>
-    );
-  }
-
   return (
-    <View
-      style={[
-        s.card,
-        { backgroundColor: theme.surface, borderColor: theme.border },
-      ]}
-    >
-      <View style={s.header}>
-        <Text style={[s.heading, ink]}>เอกสารประกอบสัญญา</Text>
-        {progress && (
-          <View style={[s.progressPill, { backgroundColor: "#FFE29A" }]}>
-            <Text style={s.progressText}>
-              {progress.done}/{progress.total} แนบแล้ว
+    <View style={s.stack}>
+      <View
+        style={[
+          s.card,
+          { backgroundColor: theme.surface, borderColor: theme.border },
+        ]}
+      >
+        <View style={s.header}>
+          <Text style={[s.heading, ink]}>เอกสารที่จำเป็น</Text>
+          {progress && (
+            <View style={[s.progressPill, { backgroundColor: "#FFE29A" }]}>
+              <Text style={s.progressText}>
+                {progress.done}/{progress.total} แนบแล้ว
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {busy && !state && <ActivityIndicator />}
+        {!!error && (
+          <Text accessibilityRole="alert" style={{ color: "#C43D4C" }}>
+            {error}
+          </Text>
+        )}
+
+        {!state ? (
+          <MobileButton
+            variant="outline"
+            disabled={busy}
+            onPress={() => {
+              void load();
+            }}
+          >
+            โหลดเอกสารอีกครั้ง
+          </MobileButton>
+        ) : (
+          <>
+            <Text style={[s.summary, muted]}>
+              {!state.editable
+                ? state.requirements.length
+                  ? "สร้างเอกสารแล้ว จึงแนบหรือแก้ไขไม่ได้ สามารถเปิดดูไฟล์ที่แนบไว้ได้"
+                  : "แม่แบบนี้ไม่มีเอกสารบังคับ"
+                : state.readyToSign
+                  ? "เอกสารที่จำเป็นครบแล้ว พร้อมลงนาม"
+                  : state.requirements.length
+                    ? "แนบเอกสารที่จำเป็นให้ครบก่อนลงนาม"
+                    : "แม่แบบนี้ไม่บังคับเอกสารประกอบ"}
             </Text>
-          </View>
+            {state.requirements.length === 0 ? (
+              <Text style={[s.requirementHint, muted]}>
+                ไม่มีรายการเอกสารบังคับสำหรับแม่แบบนี้
+              </Text>
+            ) : (
+              state.requirements.map(renderRequirement)
+            )}
+            {state.editable && state.reusableDocuments.length > 0 && (
+              <View style={s.section}>
+                <Text style={[s.sectionTitle, ink]}>ใช้จากสัญญาก่อนหน้า</Text>
+                <Text style={[s.requirementHint, muted]}>
+                  เลือกเอกสารที่ยังเป็นปัจจุบันเพื่อแนบในสัญญานี้
+                </Text>
+                {state.reusableDocuments.map((document) => (
+                  <View
+                    key={document.id}
+                    style={[s.reuseRow, { borderColor: theme.border }]}
+                  >
+                    <View style={s.grow}>
+                      <Text style={[s.docName, ink]} numberOfLines={1}>
+                        {document.fileName}
+                      </Text>
+                      <Text style={[s.docMeta, muted]}>
+                        {subjects[document.subject]} ·{" "}
+                        {typeName(document.documentTypeCode, state.documentTypes)}
+                      </Text>
+                    </View>
+                    <MobileButton
+                      variant="outline"
+                      disabled={busy}
+                      onPress={() => setSheet({ kind: "reuse", document })}
+                    >
+                      ใช้เอกสารนี้
+                    </MobileButton>
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
         )}
       </View>
 
-      {busy && !state && <ActivityIndicator />}
-      {!!error && (
-        <Text accessibilityRole="alert" style={{ color: "#C43D4C" }}>
-          {error}
-        </Text>
-      )}
-
-      {!state ? (
-        <MobileButton
-          variant="outline"
-          disabled={busy}
-          onPress={() => {
-            void load();
-          }}
+      {!!state && (
+        <View
+          style={[
+            s.card,
+            { backgroundColor: theme.surface, borderColor: theme.border },
+          ]}
         >
-          โหลดเอกสารอีกครั้ง
-        </MobileButton>
-      ) : (
-        <>
+          <View style={s.header}>
+            <Text style={[s.heading, ink]}>เอกสารเพิ่มเติม</Text>
+          </View>
           <Text style={[s.summary, muted]}>
             {!state.editable
-              ? state.documents.length
-                ? "เริ่มลงนามหรือปิดสัญญาแล้ว จึงแนบหรือแก้ไขเอกสารไม่ได้ สามารถเปิดดูไฟล์ที่แนบไว้ได้"
-                : "ฉบับนี้ไม่มีเอกสารแนบ และเริ่มลงนามหรือปิดสัญญาแล้ว จึงแนบเพิ่มไม่ได้ ต้องแนบเอกสารก่อนเริ่มลงนาม"
-              : state.readyToSign
-                ? "เอกสารที่จำเป็นครบแล้ว พร้อมลงนาม"
-                : progress && progress.done === progress.total
-                  ? "แนบเอกสารที่จำเป็นครบแล้ว"
-                : state.requirements.length
-                  ? "แนบเอกสารที่จำเป็นให้ครบก่อนลงนาม"
-                  : "แม่แบบนี้ไม่บังคับเอกสาร สามารถแนบเพิ่มได้ตามต้องการ"}
+              ? "สร้างเอกสารแล้ว จึงแนบหรือแก้ไขไม่ได้ สามารถเปิดดูไฟล์ที่แนบไว้ได้"
+              : "ไม่บังคับ — แนบได้จนกว่าจะกดสร้างเอกสาร"}
           </Text>
-
-          {state.requirements.map(renderRequirement)}
-
-          {(extraDocs.length > 0 || state.editable) && (
-            <View style={s.section}>
-              <Text style={[s.sectionTitle, ink]}>เอกสารเพิ่มเติม</Text>
-              {extraDocs.length === 0 ? (
-                <Text style={[s.requirementHint, muted]}>
-                  ยังไม่มีเอกสารเพิ่มเติม
-                </Text>
-              ) : (
-                extraDocs.map(renderExtraDoc)
-              )}
-              {state.editable && (
-                <MobileButton
-                  variant="outline"
-                  disabled={busy}
-                  onPress={() => {
-                    setExtraSubject("tenant");
-                    setExtraType(state.documentTypes.some((t) => t.code === "other") ? "other" : state.documentTypes[0]?.code ?? "national_id");
-                    setSheet({ kind: "extraUpload" });
-                  }}
-                >
-                  แนบเอกสารเพิ่ม
-                </MobileButton>
-              )}
-            </View>
-          )}
-
-          {state.editable && state.reusableDocuments.length > 0 && (
-            <View style={s.section}>
-              <Text style={[s.sectionTitle, ink]}>ใช้จากสัญญาก่อนหน้า</Text>
-              <Text style={[s.requirementHint, muted]}>
-                เลือกเอกสารที่ยังเป็นปัจจุบันเพื่อแนบในสัญญานี้
-              </Text>
-              {state.reusableDocuments.map((document) => (
-                <View
-                  key={document.id}
-                  style={[s.reuseRow, { borderColor: theme.border }]}
-                >
-                  <View style={s.grow}>
-                    <Text style={[s.docName, ink]} numberOfLines={1}>
-                      {document.fileName}
-                    </Text>
-                    <Text style={[s.docMeta, muted]}>
-                      {subjects[document.subject]} ·{" "}
-                      {typeName(document.documentTypeCode, state.documentTypes)}
+          {EXTRA_SLOTS.map((slot) => {
+            const files = docsForExtraSlot(slot.code);
+            const hasFile = files.length > 0;
+            const statusColor = hasFile ? "#198460" : theme.textSecondary;
+            const typeAvailable =
+              slot.code === "other" ||
+              state.documentTypes.some((t) => t.code === slot.code);
+            return (
+              <View
+                key={slot.code}
+                style={[s.requirement, { borderColor: theme.border }]}
+              >
+                <View style={s.requirementHead}>
+                  <View
+                    style={[
+                      s.statusDot,
+                      {
+                        backgroundColor: `${statusColor}18`,
+                        borderColor: statusColor,
+                      },
+                    ]}
+                  >
+                    <Text style={[s.statusMark, { color: statusColor }]}>
+                      {hasFile ? "✓" : "○"}
                     </Text>
                   </View>
+                  <View style={s.requirementCopy}>
+                    <Text style={[s.requirementTitle, ink]}>{slot.label}</Text>
+                    <Text style={[s.requirementHint, muted]}>{slot.hint}</Text>
+                  </View>
+                </View>
+                {files.length > 0 ? (
+                  files.map((document) => (
+                    <View
+                      key={document.id}
+                      style={[s.docBox, { backgroundColor: theme.background }]}
+                    >
+                      <Text style={[s.docName, ink]} numberOfLines={2}>
+                        {document.fileName}
+                      </Text>
+                      <Text style={[s.docMeta, muted]}>
+                        {subjects[document.subject]} ·{" "}
+                        {typeName(document.documentTypeCode, state.documentTypes)}
+                      </Text>
+                      <View style={s.extraActions}>
+                        <MobileButton
+                          variant="outline"
+                          disabled={busy}
+                          onPress={() => {
+                            void openDoc(document);
+                          }}
+                        >
+                          ดู
+                        </MobileButton>
+                        {state.editable && (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`เอาไฟล์ ${document.fileName} ออก`}
+                            disabled={busy}
+                            style={({ pressed }) => [
+                              s.removeFileButton,
+                              { opacity: busy || pressed ? 0.5 : 1 },
+                            ]}
+                            onPress={() => {
+                              void act(async () => {
+                                setState(
+                                  await removeAgreementAttachment(
+                                    contractId,
+                                    document.id,
+                                  ),
+                                );
+                              });
+                            }}
+                          >
+                            <Svg width={18} height={18} viewBox="0 0 24 24">
+                              <Path
+                                d="M6 6L18 18M18 6L6 18"
+                                stroke={theme.textSecondary}
+                                strokeWidth={2}
+                                strokeLinecap="round"
+                              />
+                            </Svg>
+                          </Pressable>
+                        )}
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={[s.requirementHint, muted]}>
+                    ยังไม่ได้แนบ
+                  </Text>
+                )}
+                {state.editable && typeAvailable && (
                   <MobileButton
                     variant="outline"
                     disabled={busy}
-                    onPress={() => setSheet({ kind: "reuse", document })}
+                    onPress={() => openExtraUpload(slot.code)}
                   >
-                    ใช้เอกสารนี้
+                    แนบเอกสาร
                   </MobileButton>
-                </View>
-              ))}
-            </View>
-          )}
-
-
-        </>
+                )}
+              </View>
+            );
+          })}
+        </View>
       )}
 
       <MobileBottomSheet
@@ -545,7 +652,12 @@ export function AgreementAttachments({
         onClose={() => setSheet(null)}
       >
         <ScrollView style={s.sheet} contentContainerStyle={{ gap: 12 }}>
-          <Text style={[s.sheetTitle, ink]}>แนบเอกสารเพิ่ม</Text>
+          <Text style={[s.sheetTitle, ink]}>
+            {sheet?.kind === "extraUpload"
+              ? EXTRA_SLOTS.find((row) => row.code === sheet.slot)?.label ??
+                "แนบเอกสารเพิ่ม"
+              : "แนบเอกสารเพิ่ม"}
+          </Text>
           <Text style={[s.requirementHint, muted]}>เอกสารของ</Text>
           <View style={s.chips}>
             {(Object.keys(subjects) as AgreementDocumentSubject[]).map(
@@ -559,27 +671,50 @@ export function AgreementAttachments({
               ),
             )}
           </View>
-          <Text style={[s.requirementHint, muted]}>ประเภทเอกสาร</Text>
-          <View style={s.chips}>
-            {state?.documentTypes.map((t) => (
-              <Chip
-                key={t.code}
-                label={t.nameTh}
-                selected={extraType === t.code}
-                onPress={() => setExtraType(t.code)}
-              />
-            ))}
-          </View>
+          {sheet?.kind === "extraUpload" && sheet.slot === "other" ? (
+            <>
+              <Text style={[s.requirementHint, muted]}>ประเภทเอกสาร</Text>
+              <View style={s.chips}>
+                {(state?.documentTypes ?? [])
+                  .filter(
+                    (t) =>
+                      t.code === "other" ||
+                      (t.code !== "power_of_attorney" &&
+                        t.code !== "payment_proof" &&
+                        t.code !== "ownership_proof"),
+                  )
+                  .map((t) => (
+                    <Chip
+                      key={t.code}
+                      label={t.nameTh}
+                      selected={extraType === t.code}
+                      onPress={() => setExtraType(t.code)}
+                    />
+                  ))}
+              </View>
+            </>
+          ) : (
+            <Text style={[s.requirementHint, muted]}>
+              ประเภท:{" "}
+              {typeName(
+                sheet?.kind === "extraUpload" ? sheet.slot : extraType,
+                state?.documentTypes ?? [],
+              )}
+            </Text>
+          )}
           <Text style={[s.requirementHint, muted]}>
             PDF, JPEG หรือ PNG · ไม่เกิน 10 MB
           </Text>
           <MobileButton
             disabled={busy}
             onPress={() => {
+              const slot =
+                sheet?.kind === "extraUpload" ? sheet.slot : "other";
               queuePickAndUpload(
                 {
                   subject: extraSubject,
-                  documentTypeCode: extraType,
+                  documentTypeCode:
+                    slot === "other" ? extraType || "other" : slot,
                 },
                 true,
               );
@@ -672,6 +807,7 @@ export function AgreementAttachments({
 }
 
 const s = StyleSheet.create({
+  stack: { gap: 12 },
   card: { padding: 16, gap: 14, borderWidth: 1, borderRadius: 16 },
   header: {
     flexDirection: "row",
@@ -757,6 +893,12 @@ const s = StyleSheet.create({
     fontFamily: tokens.typography.native.body,
     fontSize: 14,
     lineHeight: 22,
+  },
+  extraActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 0,
+    gap: 4,
   },
   removeFileButton: {
     width: 44,

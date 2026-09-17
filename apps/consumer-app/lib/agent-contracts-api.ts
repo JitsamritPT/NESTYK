@@ -194,7 +194,11 @@ export async function getFinancialDocumentDefaults(id: number, kind: import('@ne
   await ensureAgentSession();
   return apiGet(`/agent/contracts/${id}/financial-documents/${kind}`);
 }
-export async function generateFinancialDocument(id: number, kind: import('@nestyk/types').FinancialDocumentKind, input: import('@nestyk/types').FinancialDocumentInput): Promise<AgentContract> {
+export async function generateFinancialDocument(
+  id: number,
+  kind: import("@nestyk/types").FinancialDocumentKind,
+  input: Partial<import("@nestyk/types").FinancialDocumentInput>,
+): Promise<AgentContract> {
   await ensureAgentSession();
   return apiPost(`/agent/contracts/${id}/financial-documents/${kind}`, input);
 }

@@ -17,6 +17,10 @@ async function main() {
     await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260915-ownership-proof-reservation.sql'), 'utf8'));
     await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260915-attachment-removal.sql'), 'utf8'));
     await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260915-attachments-without-review.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260917-attachments-editable-until-active.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260917-payment-proof-document-type.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260917-optional-attachment-signing.sql'), 'utf8'));
+    await db.query(fs.readFileSync(path.resolve(__dirname, '../migrations/20260917-restore-required-attachment-signing.sql'), 'utf8'));
     const rows = await db.query('SELECT id, agreement_type_code, version, form_kind FROM agreement_templates ORDER BY id');
     if (process.argv.includes('--check')) { await db.query('ROLLBACK'); console.log('Migration validated and rolled back.'); }
     else { await db.query('COMMIT'); console.log('Migration applied.'); }

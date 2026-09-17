@@ -16,6 +16,15 @@ type TextField = Exclude<
   keyof FinancialDocumentInput,
   "items" | "vatRate" | "discount"
 >;
+
+const RECEIPT_FIELDS: TextField[] = [
+  "documentNo",
+  "issueDate",
+  "receiverName",
+  "paymentDetails",
+  "notes",
+];
+
 export function FinancialDocumentForm({
   contractId,
   kind,
@@ -40,6 +49,7 @@ export function FinancialDocumentForm({
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
   const saving = useRef(false);
+  const isReceipt = kind === "receipt";
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (!saving.current) onBack();
@@ -74,20 +84,24 @@ export function FinancialDocumentForm({
       active = false;
     };
   }, [contractId, kind, retry]);
-  const required: TextField[] = [
-    "documentNo",
-    "issueDate",
-    "customerName",
-    "customerAddress",
-    "issuerName",
-    "issuerAddress",
-    ...(kind === "invoice" ? ["dueDate" as const] : ["receiverName" as const]),
-    ...(kind === "receipt" &&
-    form?.paymentMethod &&
-    form.paymentMethod !== "cash"
-      ? ["paymentDetails" as const]
-      : []),
-  ];
+  const required: TextField[] = isReceipt
+    ? [
+        "documentNo",
+        "issueDate",
+        "receiverName",
+        ...(form?.paymentMethod && form.paymentMethod !== "cash"
+          ? (["paymentDetails"] as const)
+          : []),
+      ]
+    : [
+        "documentNo",
+        "issueDate",
+        "customerName",
+        "customerAddress",
+        "issuerName",
+        "issuerAddress",
+        "dueDate",
+      ];
   const decimal = (value: string) =>
     /^\d+(\.\d{1,2})?$/.test(value.trim()) ? Number(value) : NaN;
   const parsedItems = items.map((item) => ({
@@ -95,22 +109,58 @@ export function FinancialDocumentForm({
     quantity: decimal(item.quantity),
     unitPrice: decimal(item.unitPrice),
   }));
-  const subtotal = parsedItems.reduce(
-    (sum, item) =>
-      sum + Math.round(item.quantity * Math.round(item.unitPrice * 100)),
-    0,
-  );
-  const taxable = subtotal - Math.round(decimal(discount) * 100);
+  const subtotal = (form?.items ?? parsedItems).reduce((sum, item) => {
+    const quantity =
+      typeof item.quantity === "number" ? item.quantity : decimal(String(item.quantity));
+    const unitPrice =
+      typeof item.unitPrice === "number"
+        ? item.unitPrice
+        : decimal(String(item.unitPrice));
+    return sum + Math.round(quantity * Math.round(unitPrice * 100));
+  }, 0);
+  const discountValue = isReceipt
+    ? form?.discount ?? 0
+    : decimal(discount);
+  const taxable = subtotal - Math.round(discountValue * 100);
+  const vatRate = form?.vatRate ?? 0;
   const total =
-    (taxable + Math.round((taxable * (form?.vatRate ?? 0)) / 100)) / 100;
+    (taxable + Math.round((taxable * vatRate) / 100)) / 100;
   async function submit() {
     if (!form || saving.current) return;
+    if (isReceipt) {
+      if (
+        required.some((key) => !form[key].trim()) ||
+        !form.paymentMethod ||
+        (form.paymentMethod !== "cash" && !form.paymentDetails.trim())
+      ) {
+        setError(labels.required);
+        return;
+      }
+      saving.current = true;
+      setBusy(true);
+      setError("");
+      try {
+        onCreated(
+          await generateFinancialDocument(contractId, kind, {
+            documentNo: form.documentNo,
+            issueDate: form.issueDate,
+            paymentMethod: form.paymentMethod,
+            paymentDetails: form.paymentDetails,
+            receiverName: form.receiverName,
+            notes: form.notes,
+          }),
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : labels.invalid);
+      } finally {
+        saving.current = false;
+        setBusy(false);
+      }
+      return;
+    }
     if (
       required.some((key) => !form[key].trim()) ||
-      items.some((item) => !item.description.trim()) ||
-      (kind === "receipt" &&
-        (!form.paymentMethod ||
-          (form.paymentMethod !== "cash" && !form.paymentDetails.trim())))
+      items.some((item) => !item.description.trim())
     ) {
       setError(labels.required);
       return;
@@ -192,7 +242,7 @@ export function FinancialDocumentForm({
       <Text
         style={{ fontSize: 14, lineHeight: 22, color: theme.textSecondary }}
       >
-        {labels.hint}
+        {isReceipt ? labels.receiptHint : labels.hint}
       </Text>
       {!!error && (
         <Text
@@ -208,11 +258,61 @@ export function FinancialDocumentForm({
         <MobileButton onPress={() => setRetry((n) => n + 1)}>
           {labels.retry}
         </MobileButton>
+      ) : isReceipt ? (
+        <>
+          {RECEIPT_FIELDS.filter((key) => key !== "paymentDetails" && key !== "notes").map(
+            (key) => input(key, key === "documentNo" ? 40 : key === "issueDate" ? 10 : 120),
+          )}
+          <Text style={{ color: theme.textHeading, lineHeight: 24 }}>
+            {labels.paymentMethod} *
+          </Text>
+          {(["cash", "transfer", "cheque", "other"] as const).map((method) => (
+            <MobileButton
+              key={method}
+              variant={form.paymentMethod === method ? "primary" : "outline"}
+              disabled={busy}
+              onPress={() => setForm({ ...form, paymentMethod: method })}
+            >
+              {labels[method]}
+            </MobileButton>
+          ))}
+          {input("paymentDetails", 200, true)}
+          {input("notes", 300, true)}
+          <Text
+            style={{ fontSize: 20, lineHeight: 30, color: theme.textHeading }}
+          >
+            {labels.total}:{" "}
+            {Number.isFinite(total)
+              ? total.toLocaleString("th-TH", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })
+              : "—"}
+          </Text>
+          <Text style={{ fontSize: 13, lineHeight: 20, color: theme.textSecondary }}>
+            {labels.receiptTotalHint}
+          </Text>
+          {!!error && (
+            <Text
+              accessibilityRole="alert"
+              style={{ color: "#DC2626", lineHeight: 24 }}
+            >
+              {error}
+            </Text>
+          )}
+          <MobileButton
+            disabled={busy}
+            isLoading={busy}
+            onPress={() => void submit()}
+          >
+            {labels.confirm}
+          </MobileButton>
+        </>
       ) : (
         <>
           {input("documentNo", 40)}
           {input("issueDate", 10)}
-          {kind === "invoice" && input("dueDate", 10)}
+          {input("dueDate", 10)}
           {input("reference", 60)}
           {input("customerName")}
           {input("customerAddress", 240, true)}
@@ -322,28 +422,6 @@ export function FinancialDocumentForm({
                 })
               : "—"}
           </Text>
-          {kind === "receipt" && (
-            <>
-              <Text style={{ color: theme.textHeading, lineHeight: 24 }}>
-                {labels.paymentMethod} *
-              </Text>
-              {(["cash", "transfer", "cheque", "other"] as const).map(
-                (method) => (
-                  <MobileButton
-                    key={method}
-                    variant={
-                      form.paymentMethod === method ? "primary" : "outline"
-                    }
-                    disabled={busy}
-                    onPress={() => setForm({ ...form, paymentMethod: method })}
-                  >
-                    {labels[method]}
-                  </MobileButton>
-                ),
-              )}
-              {input("receiverName")}
-            </>
-          )}
           {input("paymentDetails", 200, true)}
           {input("notes", 300, true)}
           {!!error && (

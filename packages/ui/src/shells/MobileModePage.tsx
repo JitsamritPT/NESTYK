@@ -1,5 +1,15 @@
-import React from 'react';
-import { View, Text, StyleSheet, StatusBar, RefreshControl, Platform } from 'react-native';
+import React, { useMemo, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  RefreshControl,
+  Platform,
+  findNodeHandle,
+  UIManager,
+  type View as RNView,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Extrapolation,
@@ -11,6 +21,16 @@ import Animated, {
 import { UserRole } from '@nestyk/types';
 import { useMobileTheme } from '../theme/ThemeContext';
 import { tokens } from '../theme/tokens';
+
+export type ModePageScrollApi = {
+  scrollTo: (options?: { y?: number; animated?: boolean }) => void;
+  scrollToView: (
+    target: React.RefObject<RNView | null> | RNView | null,
+    options?: { offset?: number; animated?: boolean },
+  ) => void;
+};
+
+export const ModePageScrollContext = React.createContext<ModePageScrollApi | null>(null);
 
 export interface MobileModePageProps {
   role?: UserRole | 'services';
@@ -36,6 +56,38 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
   const insets = useSafeAreaInsets();
   const { theme } = useMobileTheme();
   const scrollY = useSharedValue(0);
+  const scrollRef = useRef<Animated.ScrollView>(null);
+  const scrollApi = useMemo<ModePageScrollApi>(
+    () => ({
+      scrollTo: (options) => {
+        scrollRef.current?.scrollTo({
+          y: options?.y ?? 0,
+          animated: options?.animated ?? true,
+        });
+      },
+      scrollToView: (target, options) => {
+        const node =
+          target && 'current' in (target as object)
+            ? (target as React.RefObject<RNView | null>).current
+            : (target as RNView | null);
+        const scrollNode = findNodeHandle(scrollRef.current);
+        const targetNode = findNodeHandle(node);
+        if (!scrollNode || !targetNode) return;
+        UIManager.measureLayout(
+          targetNode,
+          scrollNode,
+          () => undefined,
+          (_x, y) => {
+            scrollRef.current?.scrollTo({
+              y: Math.max(0, y - (options?.offset ?? 12)),
+              animated: options?.animated ?? true,
+            });
+          },
+        );
+      },
+    }),
+    [],
+  );
 
   const onScroll = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -74,6 +126,7 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
 
   if (!scrollable) {
     return (
+      <ModePageScrollContext.Provider value={null}>
       <View style={[styles.root, { backgroundColor: theme.background }]}>
         <StatusBar barStyle={theme.statusBarStyle} backgroundColor={theme.header} />
         <View
@@ -98,10 +151,12 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
           <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>{bottomBar}</View>
         ) : null}
       </View>
+      </ModePageScrollContext.Provider>
     );
   }
 
   return (
+    <ModePageScrollContext.Provider value={scrollApi}>
     <View style={[styles.root, { backgroundColor: theme.background }]}>
       <StatusBar barStyle={theme.statusBarStyle} translucent backgroundColor="transparent" />
 
@@ -122,6 +177,7 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
 
       <View style={[styles.body, { backgroundColor: theme.background }]}>
         <Animated.ScrollView
+          ref={scrollRef}
           contentContainerStyle={[styles.scrollContent, { paddingTop: 8 }]}
           contentInsetAdjustmentBehavior="never"
           alwaysBounceVertical={Boolean(onRefresh)}
@@ -151,6 +207,7 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
         </View>
       ) : null}
     </View>
+    </ModePageScrollContext.Provider>
   );
 };
 

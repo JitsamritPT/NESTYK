@@ -1,7 +1,7 @@
 import { FinancialDocumentForm } from "./FinancialDocumentForm";
 import { AgreementAttachments } from "./AgreementAttachments";
 import { ContractTypePicker } from "./ContractTypePicker";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ import {
   MobileButton,
   MobileIcon,
   MobileInput,
+  ModePageScrollContext,
   tokens,
   useMobileTheme,
 } from "@nestyk/ui/native";
@@ -159,6 +160,20 @@ export function ContractsScreen({
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [financialKind, setFinancialKind] = useState<"invoice" | "receipt" | null>(null);
+  const [focusDocuments, setFocusDocuments] = useState(false);
+  const [attachmentReadiness, setAttachmentReadiness] = useState<{
+    contractId: number;
+    ready: boolean;
+  } | null>(null);
+  const pageScroll = useContext(ModePageScrollContext);
+  const documentsAnchorRef = useRef<View>(null);
+  useEffect(() => {
+    if (!focusDocuments || financialKind) return;
+    const id = requestAnimationFrame(() => {
+      pageScroll?.scrollToView(documentsAnchorRef, { offset: 8, animated: true });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [focusDocuments, pageScroll, selected?.id, financialKind]);
   const [uploadingKind, setUploadingKind] =
     useState<AgentContractDocumentKind | null>(null);
   const [pickKind, setPickKind] = useState<AgentContractDocumentKind | null>(
@@ -409,6 +424,10 @@ export function ContractsScreen({
     status === "active" ||
     status === "awaiting_payment" ||
     status === "awaiting_payment_verification";
+  const reservationLocked =
+    !!selected &&
+    selected.formKind === "reservation" &&
+    selected.reservationLetterStatus === "ready";
   function signSheetTitle(parties: AgentContractSignParty[]) {
     const names = partyMeta(selected!).filter((row) =>
       parties.includes(row.key),
@@ -419,13 +438,13 @@ export function ContractsScreen({
     );
   }
   function openSignSheet(parties: AgentContractSignParty[]) {
-    if (!parties.length || busy || signing.current) return;
+    if (!parties.length || busy || signing.current || reservationLocked) return;
     setError("");
     setSignPadKey((key) => key + 1);
     setSignParties(parties);
   }
   async function shareSignInvite(party: "owner" | "tenant") {
-    if (!selected || busy) return;
+    if (!selected || busy || reservationLocked) return;
     setBusy(true);
     setError("");
     setNotice("");
@@ -455,7 +474,6 @@ export function ContractsScreen({
     return () => clearTimeout(timer);
   }, [signParties, signPadKey]);
   const reservationRequest = useRef(false);
-  const [attachmentReadiness, setAttachmentReadiness] = useState<{ contractId: number; ready: boolean } | null>(null);
   const [pdfAction, setPdfAction] = useState<"preview" | "generate" | null>(
     null,
   );
@@ -712,6 +730,7 @@ export function ContractsScreen({
     setSelected(null);
     setRenewing(null);
     setCreating(false);
+    setFocusDocuments(false);
     setError("");
     setNotice("");
   };
@@ -895,13 +914,14 @@ export function ContractsScreen({
         </View>
       </View>
     );
-  if (selected && financialKind)
+  if (selected && financialKind && !reservationLocked)
     return <FinancialDocumentForm key={`${selected.id}:${financialKind}`} contractId={selected.id} kind={financialKind}
       onBack={() => setFinancialKind(null)}
       onCreated={row => {
         setSelected(row);
         setContracts(rows => rows.map(existing => existing.id === row.id ? row : existing));
         setFinancialKind(null);
+        setFocusDocuments(true);
         setNotice(docs.financial.success);
         onChanged?.();
       }} />;
@@ -985,7 +1005,7 @@ export function ContractsScreen({
         )}
         {(selected.formKind === "reservation" ||
           selected.formKind === "lease") && (
-          <View style={[s.card, card]}>
+          <View ref={documentsAnchorRef} collapsable={false} style={[s.card, card]}>
             <Text style={[s.subtitle, title]}>
               {selected.formKind === "lease"
                 ? docs.leaseDocuments
@@ -1015,11 +1035,11 @@ export function ContractsScreen({
                       isLoading={pdfAction === "preview"}
                       onPress={() => void openReservation(false)}
                     >
-                      ดูเอกสารจอง
+                      ดูหนังสือจอง
                     </MobileButton>
                     <Text style={[s.small, muted]}>
                       {generated
-                        ? "สร้างเอกสารพร้อมลายเซ็นครบ 3 ฝ่ายแล้ว"
+                        ? "สร้างเอกสารพร้อมลายเซ็นครบ 3 ฝ่ายแล้ว — ดูได้อย่างเดียว แก้ไขไม่ได้"
                         : complete
                           ? "ลงนามครบแล้ว ยืนยันและสร้างเอกสารได้ที่ด้านล่าง"
                           : "เอกสารตัวอย่างเปิดดูได้ก่อนลงนาม เมื่อเซ็นครบ 3 ฝ่ายจึงสร้างเอกสารพร้อมลายเซ็นได้"}
@@ -1035,56 +1055,60 @@ export function ContractsScreen({
                 ? originalName
                 : `${slot.name}${extension}`;
               const statusColor = hasFile ? "#198460" : theme.textSecondary;
+              const financialSlot =
+                slot.kind === "invoice" || slot.kind === "receipt";
               return (
                 <View key={slot.kind} style={[s.documentItem, { borderColor: theme.border }]}>
                   <View style={s.documentHead}>
                     <View style={[s.documentStatus, { borderColor: statusColor, backgroundColor: `${statusColor}18` }]}>
                       <Text style={[s.body, { color: statusColor }]}>{hasFile ? "✓" : "○"}</Text>
                     </View>
-                    <Text style={[s.documentTitle, title]}>{slot.name}</Text>
+                    <Text style={[s.documentTitle, title]}>
+                      {slot.name}
+                      {financialSlot && selected.formKind === "reservation" ? " *" : ""}
+                    </Text>
                   </View>
                   {hasFile && slot.url ? (
                     <>
                       <View style={[s.documentFile, { backgroundColor: theme.background }]}>
                         <Text style={[s.body, title]} numberOfLines={2}>{fileName}</Text>
                       </View>
-                      {(slot.kind === "invoice" || slot.kind === "receipt") ? (
-                        <View style={s.documentActions}>
-                          <MobileButton
-                            disabled={busy}
-                            onPress={() =>
-                              openDocumentPreview(fileName, slot.url!, slot.kind)
-                            }
-                          >
-                            ดู
-                          </MobileButton>
-                          <MobileButton
-                            variant="outline"
-                            disabled={busy}
-                            onPress={() =>
-                              setFinancialKind(slot.kind as "invoice" | "receipt")
-                            }
-                          >
-                            {docs.financial.edit}
-                          </MobileButton>
-                        </View>
-                      ) : (
-                        <MobileButton
-                          variant="outline"
-                          disabled={busy}
-                          onPress={() =>
-                            openDocumentPreview(fileName, slot.url!, slot.kind)
-                          }
-                        >
-                          ดู
-                        </MobileButton>
-                      )}
+                      <MobileButton
+                        variant="outline"
+                        disabled={busy}
+                        onPress={() =>
+                          openDocumentPreview(fileName, slot.url!, slot.kind)
+                        }
+                      >
+                        ดู
+                      </MobileButton>
+                    </>
+                  ) : reservationLocked ? (
+                    <Text style={[s.small, muted]}>
+                      {financialSlot
+                        ? docs.financial.empty
+                        : "ยังไม่ได้แนบเอกสารสำหรับรายการนี้"}
+                    </Text>
+                  ) : slot.kind === "receipt" && !selected.invoiceUrl ? (
+                    <>
+                      <Text style={[s.small, muted]}>
+                        {docs.financial.needInvoiceFirst}
+                      </Text>
+                      <MobileButton disabled>
+                        {docs.financial.create}
+                      </MobileButton>
                     </>
                   ) : (
                     <>
-                      <Text style={[s.small, muted]}>{slot.kind === "invoice" || slot.kind === "receipt" ? docs.financial.empty : "ยังไม่ได้แนบเอกสารสำหรับรายการนี้"}</Text>
-                      <MobileButton disabled={busy} isLoading={uploadingKind === slot.kind} onPress={() => slot.kind === "invoice" || slot.kind === "receipt" ? setFinancialKind(slot.kind) : setPickKind(slot.kind)}>
-                        {slot.kind === "invoice" || slot.kind === "receipt" ? docs.financial.create : "แนบเอกสาร"}
+                      <Text style={[s.small, muted]}>
+                        {financialSlot
+                          ? selected.formKind === "reservation"
+                            ? "จำเป็น — ยังไม่ได้สร้างเอกสาร"
+                            : docs.financial.empty
+                          : "ยังไม่ได้แนบเอกสารสำหรับรายการนี้"}
+                      </Text>
+                      <MobileButton disabled={busy} isLoading={uploadingKind === slot.kind} onPress={() => financialSlot ? setFinancialKind(slot.kind) : setPickKind(slot.kind)}>
+                        {financialSlot ? docs.financial.create : "แนบเอกสาร"}
                       </MobileButton>
                     </>
                   )}
@@ -1097,7 +1121,7 @@ export function ContractsScreen({
           key={selected.id}
           contractId={selected.id}
           onReadinessChange={setAttachmentReadiness}
-          refreshKey={`${selected.status}:${selected.ownerSignedAt}:${selected.tenantSignedAt}:${selected.agentSignedAt}`}
+          refreshKey={`${selected.status}:${selected.ownerSignedAt}:${selected.tenantSignedAt}:${selected.agentSignedAt}:${selected.reservationLetterStatus}`}
         />
         <View style={[s.card, card]}>
           <Text style={[s.subtitle, title]}>{docs.signatories}</Text>
@@ -1126,7 +1150,9 @@ export function ContractsScreen({
                   {docs.viewSignature}
                 </MobileButton>
               ) : null}
-              {!party.signed && !signingLocked(selected.status) ? (
+              {!party.signed &&
+              !signingLocked(selected.status) &&
+              !reservationLocked ? (
                 <View style={s.partyActions}>
                   {(party.key === "owner" || party.key === "tenant") && (
                     <MobileButton
@@ -1157,21 +1183,32 @@ export function ContractsScreen({
         {selected.formKind === "reservation" && (
           <View style={[s.card, card]}>
             {selected.reservationLetterStatus === "ready" ? (
-              <MobileButton
-                disabled={busy}
-                isLoading={pdfAction === "preview"}
-                onPress={() => void openReservation(false)}
-              >
-                ดูเอกสารฉบับสมบูรณ์
-              </MobileButton>
+              <>
+                <Text style={[s.small, muted]}>
+                  สร้างเอกสารหนังสือจองแล้ว — ดูได้อย่างเดียว แก้ไขไม่ได้
+                </Text>
+                <MobileButton
+                  disabled={busy}
+                  isLoading={pdfAction === "preview"}
+                  onPress={() => void openReservation(false)}
+                >
+                  ดูเอกสารฉบับสมบูรณ์
+                </MobileButton>
+              </>
             ) : (
               <>
                 <Text style={[s.small, muted]}>
-                  แนบเอกสารที่จำเป็นและลงนามครบทั้ง 3 ฝ่าย แล้วกดยืนยันเพื่อสร้างเอกสาร
+                  แนบหลักฐานกรรมสิทธิ์ สร้างใบแจ้งหนี้กับใบเสร็จ และลงนามครบทั้ง 3 ฝ่าย แล้วกดยืนยันเพื่อสร้างเอกสาร
                 </Text>
                 <MobileButton
-                  disabled={busy || selected.reservationLetterStatus !== "ready_to_generate" ||
-                    attachmentReadiness?.contractId !== selected.id || !attachmentReadiness.ready}
+                  disabled={
+                    busy ||
+                    selected.reservationLetterStatus !== "ready_to_generate" ||
+                    !selected.invoiceUrl ||
+                    !selected.receiptUrl ||
+                    attachmentReadiness?.contractId !== selected.id ||
+                    !attachmentReadiness.ready
+                  }
                   isLoading={pdfAction === "generate"}
                   onPress={() => void openReservation(true)}
                 >
@@ -1231,6 +1268,20 @@ export function ContractsScreen({
                       อัพโหลดใหม่
                     </MobileButton>
                   )}
+                  {(previewDoc.kind === "invoice" ||
+                    previewDoc.kind === "receipt") &&
+                    !reservationLocked && (
+                      <MobileButton
+                        disabled={busy}
+                        onPress={() => {
+                          const kind = previewDoc.kind as "invoice" | "receipt";
+                          setPreviewDoc(null);
+                          setFinancialKind(kind);
+                        }}
+                      >
+                        {docs.financial.edit}
+                      </MobileButton>
+                    )}
                   <MobileButton
                     variant="outline"
                     disabled={busy}
@@ -1451,6 +1502,7 @@ export function ContractsScreen({
               setBusy(true);
               setError("");
               setNotice("");
+              setFocusDocuments(false);
               try {
                 const latest = await getAgentContract(contract.id);
                 setSelected(latest);

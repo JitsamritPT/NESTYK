@@ -166,27 +166,88 @@ test("defaults prefill known values; receipt reuses invoice; generation preserve
   assert.equal(defaults.customerName, "Tenant");
   assert.equal(defaults.customerPhone, "0812345678");
   assert.equal(defaults.items[0].unitPrice, 20000);
+  await assert.rejects(
+    () => service.financialDocumentDefaults(7, 11, "receipt"),
+    /ใบแจ้งหนี้/,
+  );
   await service.generateFinancialDocument(7, 11, "invoice", {
     ...sample,
     documentNo: "INV-test",
+    paymentMethod: "",
+    receiverName: "",
   });
   assert.equal(row.data.untouched, true);
   assert.equal(row.data.financialDocuments.invoice.documentNo, "INV-test");
+  row.invoice_url = "7/11/invoice/test.pdf";
   const receipt = await service.financialDocumentDefaults(7, 11, "receipt");
   assert.equal(receipt.reference, "INV-test");
   assert.equal(receipt.customerAddress, sample.customerAddress);
   assert.equal(receipt.paymentMethod, "");
+  await service.generateFinancialDocument(7, 11, "receipt", {
+    documentNo: "REC-test",
+    issueDate: "2026-09-16",
+    paymentMethod: "transfer",
+    paymentDetails: "bank",
+    receiverName: "Receiver",
+    notes: "",
+    customerName: "HACKED",
+    items: [{ description: "hack", quantity: 1, unitPrice: 1 }],
+    discount: 0,
+    vatRate: 0,
+  });
+  assert.equal(row.data.financialDocuments.receipt.customerName, sample.customerName);
+  assert.equal(row.data.financialDocuments.receipt.items[0].unitPrice, 20000);
+  assert.equal(row.data.financialDocuments.receipt.reference, "INV-test");
+  row.receipt_url = "7/11/receipt/old.pdf";
+  await service.generateFinancialDocument(7, 11, "invoice", {
+    ...sample,
+    documentNo: "INV-new",
+    paymentMethod: "",
+    receiverName: "",
+  });
+  assert.equal(row.receipt_url, null);
+  assert.equal(row.data.financialDocuments.receipt, undefined);
 });
 test("inaccessible contract uploads nothing and failed persistence cleans uploaded PDF", async () => {
   const denied = serviceFixture({ denied: true });
   await assert.rejects(() =>
-    denied.service.generateFinancialDocument(8, 11, "receipt", sample),
+    denied.service.generateFinancialDocument(8, 11, "invoice", {
+      ...sample,
+      paymentMethod: "",
+      receiverName: "",
+    }),
   );
   assert.equal(denied.counts().uploads, 0);
   const failed = serviceFixture({ failUpdate: true });
   await assert.rejects(
-    () => failed.service.generateFinancialDocument(7, 11, "receipt", sample),
+    () =>
+      failed.service.generateFinancialDocument(7, 11, "invoice", {
+        ...sample,
+        paymentMethod: "",
+        receiverName: "",
+      }),
     /DB failure/,
   );
   assert.deepEqual(failed.counts(), { uploads: 1, removed: 1 });
+});
+test("finalized reservation letter rejects financial create/edit", async () => {
+  const { service, row, counts } = serviceFixture();
+  row.document_url =
+    "7/11/generated/reservation_letter/mock-v2/reservation.pdf";
+  row.owner_signed_at = new Date();
+  row.tenant_signed_at = new Date();
+  row.agent_signed_at = new Date();
+  row.owner_signature_url = "7/11/signatures/o.png";
+  row.tenant_signature_url = "7/11/signatures/t.png";
+  row.agent_signature_url = "7/11/signatures/a.png";
+  await assert.rejects(
+    () =>
+      service.generateFinancialDocument(7, 11, "invoice", {
+        ...sample,
+        paymentMethod: "",
+        receiverName: "",
+      }),
+    /สร้างเอกสารหนังสือจองแล้ว/,
+  );
+  assert.equal(counts().uploads, 0);
 });

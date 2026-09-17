@@ -16,9 +16,29 @@ test('document checklist accepts current files without review and excludes missi
  for(const review_status of ['pending','accepted','rejected']) assert.equal(attachmentChecklist(requirements,[{...d,review_status}])[0].complete,true);
  for(const docs of [[],[{...d,subject:'owner'}],[d,{id:2,supersedes_document_id:1,review_status:'pending'}]])assert.equal(attachmentChecklist(requirements,docs)[0].complete,false);
 });
-test('attachments freeze on any first signature and on closed contracts',()=>{
+test('assertReady blocks signing when required checklist documents are missing',async()=>{
+ const rows=[];
+ const service=new AgreementAttachmentsService({
+  manager:{
+   find:async()=>[{group_key:'id',subject:'tenant',document_type_code:'passport'}],
+   findOne:async()=>null,
+  },
+ }, {});
+ service.rows=async()=>rows;
+ await assert.rejects(()=>service.assertReady({id:11,template_id:1}),e=>e.getStatus()===400);
+ rows.push({id:1,subject:'tenant',document_type_code:'passport',removed_at:null});
+ await service.assertReady({id:11,template_id:1});
+});
+test('attachments stay editable until contract is active or reservation letter is finalized',()=>{
  assert.equal(documentsEditable({status:'draft'}),true);
- for(const patch of [{owner_signed_at:new Date()},{tenant_signed_at:new Date()},{agent_signed_at:new Date()},{status:'active'},{status:'cancelled'},{status:'expired'}])assert.equal(documentsEditable({status:'draft',...patch}),false);
+ assert.equal(documentsEditable({status:'awaiting_signatures',owner_signed_at:new Date()}),true);
+ assert.equal(documentsEditable({status:'awaiting_agent_review',owner_signed_at:new Date(),tenant_signed_at:new Date(),agent_signed_at:new Date()}),true);
+ for(const status of ['active','cancelled','expired','terminated','awaiting_payment','awaiting_payment_verification'])
+  assert.equal(documentsEditable({status}),false);
+ assert.equal(documentsEditable({
+  status:'awaiting_agent_review',
+  document_url:'7/11/generated/reservation_letter/mock-v2/letter.pdf',
+ }),false);
 });
 test('multipart document metadata rejects invalid subjects, type codes and replacement IDs',()=>{
  const good={subject:'tenant',documentTypeCode:'passport'};
@@ -74,7 +94,7 @@ test('removed current files never satisfy a requirement or revive an old version
  assert.equal(attachmentChecklist(requirements,[old,{...old,id:2,supersedes_document_id:1,removed_at:new Date()}])[0].complete,false);
 });
 
-test('removal scopes ownership, locks signed contracts, protects required files and removes just one extra',async()=>{
+test('removal scopes ownership, locks closed contracts, protects required files and removes just one extra',async()=>{
  const {LeaseContractEntity}=require('../src/entities/lease-contract.entity.ts');
  const {AgreementDocumentEntity,AgreementDocumentRequirementEntity}=require('../src/entities/agreement-document.entity.ts');
  const current={id:1,subject:'tenant',document_type_code:'passport'};
@@ -90,10 +110,14 @@ test('removal scopes ownership, locks signed contracts, protects required files 
  await assert.rejects(()=>service.remove(8,11,2),e=>e.getStatus()===404);
  await assert.rejects(()=>service.remove(7,11,1),e=>e.getStatus()===400);
  await assert.rejects(()=>service.remove(7,11,99),e=>e.getStatus()===404);
- contract={...contract,tenant_signed_at:new Date()};
+ contract={...contract,tenant_signed_at:new Date(),status:'awaiting_signatures'};
+ assert.deepEqual(await service.remove(7,11,2),{ok:true});
+ assert.equal(writes.length,1);
+ writes=[];
+ contract={...contract,status:'active'};
  await assert.rejects(()=>service.remove(7,11,2),e=>e.getStatus()===400);
  assert.equal(writes.length,0);
- contract={...contract,tenant_signed_at:null};
+ contract={...contract,status:'awaiting_agent_review',tenant_signed_at:null};
  assert.deepEqual(await service.remove(7,11,2),{ok:true});
  assert.equal(writes.length,1);assert.deepEqual(writes[0].where,{id:2,agreement_id:11});assert.ok(writes[0].values.removed_at instanceof Date);
 });
