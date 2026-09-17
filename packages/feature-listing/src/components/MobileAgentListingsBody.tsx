@@ -7,9 +7,14 @@ import {
   Pressable,
   Platform,
   useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { useLocale } from '@nestyk/i18n';
 import { MobileBrandLoader, MobileButton, MobileIcon, tokens, useMobileTheme } from '@nestyk/ui/native';
+import { listingSourceStyle } from '../listing-source';
+import { formatBedroomDisplay } from '../bedroom-label';
+import type { AppIconName } from '@nestyk/ui/native';
 
 export type AgentListingsViewMode = 'grid' | 'row';
 
@@ -87,14 +92,25 @@ function Cover({ uri, fallback, style }: { uri: string | null; fallback: string;
   );
 }
 
-/** Hybrid 06 Airy outline — white pill + semantic stroke (readable on photo). */
-function statusTone(code: string | null): {
+/** Soft fill on photo (row overlay) vs white outline on grid. */
+function statusTone(
+  code: string | null,
+  variant: 'outline' | 'soft' = 'outline',
+): {
   dot: string;
   badgeBg: string;
   badgeBorder: string;
   badgeText: string;
 } {
   if (code === 'available') {
+    if (variant === 'soft') {
+      return {
+        dot: tokens.colors.success,
+        badgeBg: tokens.colors.subtle.successBg,
+        badgeBorder: tokens.colors.subtle.successBg,
+        badgeText: tokens.colors.subtle.successFg,
+      };
+    }
     return {
       dot: tokens.colors.success,
       badgeBg: tokens.colors.white,
@@ -103,6 +119,14 @@ function statusTone(code: string | null): {
     };
   }
   if (code === 'rented') {
+    if (variant === 'soft') {
+      return {
+        dot: tokens.colors.icon.secondary,
+        badgeBg: tokens.colors.subtle.neutralBg,
+        badgeBorder: tokens.colors.subtle.neutralBg,
+        badgeText: tokens.colors.icon.secondary,
+      };
+    }
     return {
       dot: tokens.colors.icon.secondary,
       badgeBg: tokens.colors.white,
@@ -111,6 +135,14 @@ function statusTone(code: string | null): {
     };
   }
   if (code === 'needs_edit') {
+    if (variant === 'soft') {
+      return {
+        dot: tokens.colors.danger,
+        badgeBg: tokens.colors.subtle.dangerBg,
+        badgeBorder: tokens.colors.subtle.dangerBg,
+        badgeText: tokens.colors.subtle.dangerFg,
+      };
+    }
     return {
       dot: tokens.colors.danger,
       badgeBg: tokens.colors.white,
@@ -118,7 +150,14 @@ function statusTone(code: string | null): {
       badgeText: tokens.colors.subtle.dangerFg,
     };
   }
-  // pending_verification and other pending states
+  if (variant === 'soft') {
+    return {
+      dot: tokens.colors.warning,
+      badgeBg: tokens.colors.subtle.warningBg,
+      badgeBorder: tokens.colors.subtle.warningBg,
+      badgeText: tokens.colors.subtle.warningFg,
+    };
+  }
   return {
     dot: tokens.colors.warning,
     badgeBg: tokens.colors.white,
@@ -135,36 +174,70 @@ function useListingLabels(item: AgentListingCard) {
   const title = item.listingTitle || item.property?.name || `#${item.id}`;
   const location = item.property?.district || item.property?.province || '';
   const price = minPrice(item.prices);
+  const priceAmount =
+    price != null ? interpolate(copy.rentAmount, { price: price.toLocaleString() }) : null;
+  const pricePeriod = price != null ? copy.rentPeriod : null;
   const priceLabel =
     price != null ? interpolate(copy.rentPerMonthShort, { price: price.toLocaleString() }) : null;
   const statusLabel =
     copy[item.roomStatusCode as keyof typeof copy] || item.roomStatusCode || copy.notSpecified;
+  const sourceStyle = listingSourceStyle(item.listingSourceCode);
   const sourceLabel =
     item.listingSourceCode === 'owner'
       ? cr.sourceOwner
       : item.listingSourceCode === 'co_agent'
         ? cr.sourceCoAgent
         : copy.notSpecified;
+  const sourceLabelShort =
+    item.listingSourceCode === 'owner'
+      ? cr.sourceOwnerShort
+      : item.listingSourceCode === 'co_agent'
+        ? cr.sourceCoAgentShort
+        : null;
+  const sourceIcon: AppIconName | null = sourceStyle?.icon ?? null;
+  const sourceIconColor = sourceStyle?.iconColor ?? null;
+  const sourceIconBg = sourceStyle?.iconBg ?? null;
 
-  // Icons convey meaning — show bare numbers (no bed/sqm/floor unit text).
-  const bedsLabel = item.bedroomCount?.trim() || null;
-  const sqmLabel = item.roomSizeSqm?.trim() || null;
-  const floorLabel = item.floor?.trim() || null;
+  const bedsLabel = formatBedroomDisplay(
+    item.bedroomCount,
+    t.masters.roomTypes.studio,
+  );
+  const sqmRaw = item.roomSizeSqm?.trim() || null;
+  const floorRaw = item.floor?.trim() || null;
+  const sqmLabel = sqmRaw ? interpolate(copy.specSqm, { size: sqmRaw }) : null;
+  const floorLabel = floorRaw ? interpolate(copy.specFloor, { floor: floorRaw }) : null;
 
-  return { title, location, priceLabel, statusLabel, sourceLabel, bedsLabel, sqmLabel, floorLabel };
+  return {
+    title,
+    location,
+    priceLabel,
+    priceAmount,
+    pricePeriod,
+    statusLabel,
+    sourceLabel,
+    sourceLabelShort,
+    sourceIcon,
+    sourceIconColor,
+    sourceIconBg,
+    bedsLabel,
+    sqmLabel,
+    floorLabel,
+  };
 }
 
 function MetaRow({
   icon,
   label,
   color,
+  style,
 }: {
   icon: 'map-pin' | 'bed' | 'room-size' | 'stairs';
   label: string;
   color: string;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.metaRow}>
+    <View style={[styles.metaRow, style]}>
       <MobileIcon name={icon} size={13} color={color} />
       <Text style={[styles.metaText, { color }]} numberOfLines={1}>
         {label}
@@ -173,34 +246,41 @@ function MetaRow({
   );
 }
 
-/** Specs on one line: beds · size · floor (icons only; no unit suffixes). */
+/** Specs: beds · size · floor with vertical rules and unit labels. */
 function SpecsMetaRow({
   bedsLabel,
   sqmLabel,
   floorLabel,
   color,
+  hideFloor = false,
 }: {
   bedsLabel: string | null;
   sqmLabel: string | null;
   floorLabel: string | null;
   color: string;
+  hideFloor?: boolean;
 }) {
   const parts: Array<{ key: string; icon: 'bed' | 'room-size' | 'stairs'; label: string }> = [];
   if (bedsLabel) parts.push({ key: 'bed', icon: 'bed', label: bedsLabel });
   if (sqmLabel) parts.push({ key: 'sqm', icon: 'room-size', label: sqmLabel });
-  if (floorLabel) parts.push({ key: 'floor', icon: 'stairs', label: floorLabel });
-  if (!parts.length) return null;
+  if (floorLabel && !hideFloor) parts.push({ key: 'floor', icon: 'stairs', label: floorLabel });
   return (
-    <View style={styles.metaRow}>
-      {parts.map((part, index) => (
-        <React.Fragment key={part.key}>
-          {index > 0 ? <Text style={[styles.metaDot, { color }]}>·</Text> : null}
-          <MobileIcon name={part.icon} size={13} color={color} />
-          <Text style={[styles.metaText, { color }]} numberOfLines={1}>
-            {part.label}
-          </Text>
-        </React.Fragment>
-      ))}
+    <View style={styles.specsRow}>
+      {parts.length ? (
+        parts.map((part, index) => (
+          <React.Fragment key={part.key}>
+            {index > 0 ? <View style={styles.specDivider} /> : null}
+            <View style={styles.specPart}>
+              <MobileIcon name={part.icon} size={13} color={color} />
+              <Text style={[styles.specText, { color }]} numberOfLines={1}>
+                {part.label}
+              </Text>
+            </View>
+          </React.Fragment>
+        ))
+      ) : (
+        <Text style={[styles.specText, { color }]}>{' '}</Text>
+      )}
     </View>
   );
 }
@@ -209,12 +289,14 @@ function StatusBadge({
   label,
   code,
   compact = false,
+  variant = 'outline',
 }: {
   label: string;
   code: string | null;
   compact?: boolean;
+  variant?: 'outline' | 'soft';
 }) {
-  const tone = statusTone(code);
+  const tone = statusTone(code, variant);
   return (
     <View
       style={[
@@ -231,18 +313,6 @@ function StatusBadge({
         style={[styles.statusBadgeText, compact && styles.statusBadgeTextCompact, { color: tone.badgeText }]}
         numberOfLines={1}
       >
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-/** Hybrid 06 + 01 — white pill, amber outline, ink label (brand cue). */
-function SourceChip({ label, compact = false }: { label: string; compact?: boolean }) {
-  return (
-    <View style={[styles.sourceChip, compact && styles.sourceChipCompact]}>
-      <MobileIcon name="user" size={compact ? 11 : 12} color={tokens.colors.primary} />
-      <Text style={[styles.sourceChipText, compact && styles.sourceChipTextCompact]} numberOfLines={1}>
         {label}
       </Text>
     </View>
@@ -280,31 +350,64 @@ function GridCard({
           fallback={item.property?.name?.slice(0, 1) ?? 'R'}
           style={styles.gridCover}
         />
-        <View style={styles.gridBadgeSlot}>
-          <StatusBadge label={String(labels.statusLabel)} code={item.roomStatusCode} />
-        </View>
-        <View style={styles.gridSourceSlot}>
-          <SourceChip label={labels.sourceLabel} />
+        <View style={styles.gridStatusSlot}>
+          <StatusBadge
+            label={String(labels.statusLabel)}
+            code={item.roomStatusCode}
+            compact
+            variant="soft"
+          />
         </View>
       </View>
       <View style={styles.gridBody}>
         <Text style={[styles.gridTitle, { color: theme.textHeading }]} numberOfLines={1}>
           {labels.title}
         </Text>
-        {labels.location ? (
-          <MetaRow icon="map-pin" label={labels.location} color={theme.textSecondary} />
-        ) : null}
+        <View style={styles.gridLocationSlot}>
+          {labels.location ? (
+            <MetaRow icon="map-pin" label={labels.location} color={theme.textSecondary} />
+          ) : null}
+        </View>
         <SpecsMetaRow
           bedsLabel={labels.bedsLabel}
           sqmLabel={labels.sqmLabel}
           floorLabel={labels.floorLabel}
           color={theme.textSecondary}
+          hideFloor
         />
-        {labels.priceLabel ? (
-          <Text style={[styles.gridPrice, { color: theme.textHeading }]} numberOfLines={1}>
-            {labels.priceLabel}
-          </Text>
-        ) : null}
+        <View style={styles.gridFooter}>
+          {labels.sourceIcon ? (
+            <View
+              style={[
+                styles.rowSourceIcon,
+                labels.sourceIconBg ? { backgroundColor: labels.sourceIconBg } : null,
+              ]}
+              accessibilityLabel={labels.sourceLabelShort ?? labels.sourceLabel}
+            >
+              <MobileIcon
+                name={labels.sourceIcon}
+                size={12}
+                color={labels.sourceIconColor ?? theme.textSecondary}
+              />
+            </View>
+          ) : (
+            <View style={styles.rowSourceIcon} />
+          )}
+          {labels.priceAmount ? (
+            <View style={styles.rowPriceRow}>
+              <Text style={[styles.gridPriceAmount, { color: theme.textHeading }]} numberOfLines={1}>
+                {labels.priceAmount}
+              </Text>
+              {labels.pricePeriod ? (
+                <Text style={[styles.rowPricePeriod, { color: theme.textSecondary }]} numberOfLines={1}>
+                  {` ${labels.pricePeriod}`}
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <View style={styles.rowPriceRow} />
+          )}
+        </View>
       </View>
     </Pressable>
   );
@@ -343,8 +446,16 @@ function RowItem({
           fallback={item.property?.name?.slice(0, 1) ?? 'R'}
           style={styles.rowThumb}
         />
+        <View style={styles.rowStatusSlot}>
+          <StatusBadge
+            label={String(labels.statusLabel)}
+            code={item.roomStatusCode}
+            compact
+            variant="soft"
+          />
+        </View>
       </View>
-      <View style={styles.rowMain}>
+      <View style={styles.rowBody}>
         <Text style={[styles.rowTitle, { color: theme.textHeading }]} numberOfLines={1}>
           {labels.title}
         </Text>
@@ -357,21 +468,47 @@ function RowItem({
           floorLabel={labels.floorLabel}
           color={theme.textSecondary}
         />
-        <View style={styles.rowStatus}>
-          <StatusBadge
-            label={String(labels.statusLabel)}
-            code={item.roomStatusCode}
-            compact
-          />
+        <View style={styles.rowFooter}>
+          {labels.sourceLabelShort && labels.sourceIcon ? (
+            <View style={styles.rowSource}>
+              <View
+                style={[
+                  styles.rowSourceIcon,
+                  labels.sourceIconBg ? { backgroundColor: labels.sourceIconBg } : null,
+                ]}
+              >
+                <MobileIcon
+                  name={labels.sourceIcon}
+                  size={12}
+                  color={labels.sourceIconColor ?? theme.textSecondary}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.rowSourceText,
+                  { color: labels.sourceIconColor ?? theme.textSecondary },
+                ]}
+                numberOfLines={1}
+              >
+                {labels.sourceLabelShort}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.rowSource} />
+          )}
+          {labels.priceAmount ? (
+            <View style={styles.rowPriceRow}>
+              <Text style={[styles.rowPriceAmount, { color: theme.textHeading }]}>
+                {labels.priceAmount}
+              </Text>
+              {labels.pricePeriod ? (
+                <Text style={[styles.rowPricePeriod, { color: theme.textSecondary }]}>
+                  {` ${labels.pricePeriod}`}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
-      </View>
-      <View style={styles.rowAside}>
-        {labels.priceLabel ? (
-          <Text style={[styles.rowPrice, { color: theme.textHeading }]} numberOfLines={1}>
-            {labels.priceLabel}
-          </Text>
-        ) : null}
-        <SourceChip label={labels.sourceLabel} compact />
       </View>
     </Pressable>
   );
@@ -518,15 +655,10 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 13,
     borderTopRightRadius: 13,
   },
-  gridBadgeSlot: {
+  gridStatusSlot: {
     position: 'absolute',
-    top: 8,
-    left: 8,
-  },
-  gridSourceSlot: {
-    position: 'absolute',
-    right: 8,
-    bottom: 8,
+    left: 6,
+    bottom: 6,
   },
   statusBadge: {
     flexDirection: 'row',
@@ -553,46 +685,35 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 15,
   },
-  sourceChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: tokens.colors.white,
-    borderWidth: 1,
-    borderColor: tokens.colors.brand[500],
-    maxWidth: 120,
-  },
-  sourceChipCompact: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    gap: 3,
-    maxWidth: 110,
-  },
-  sourceChipText: {
-    fontFamily: tokens.typography.native.body,
-    fontSize: 11,
-    lineHeight: 16,
-    fontWeight: '700',
-    color: tokens.colors.primary,
-    flexShrink: 1,
-  },
-  sourceChipTextCompact: {
-    fontSize: 10,
-    lineHeight: 15,
-  },
   gridBody: {
     paddingHorizontal: 10,
     paddingVertical: 10,
-    gap: 3,
+    gap: 4,
   },
   gridTitle: {
     fontFamily: tokens.typography.native.headingTh,
     fontSize: 14,
     lineHeight: 21,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  gridLocationSlot: {
+    minHeight: 18,
+    justifyContent: 'center',
+  },
+  gridFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 2,
+    minHeight: 22,
+    minWidth: 0,
+  },
+  gridPriceAmount: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '700',
   },
   metaRow: {
     flexDirection: 'row',
@@ -607,18 +728,40 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     flexShrink: 1,
   },
+  specsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+    gap: 0,
+    minWidth: 0,
+    minHeight: 18,
+  },
+  specPart: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  specDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 12,
+    backgroundColor: tokens.colors.divider,
+    marginHorizontal: 8,
+    flexShrink: 0,
+  },
+  specText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    flexShrink: 1,
+  },
   metaDot: {
     fontFamily: tokens.typography.native.body,
     fontSize: 12,
     lineHeight: 18,
     marginHorizontal: 1,
-  },
-  gridPrice: {
-    fontFamily: tokens.typography.native.headingTh,
-    fontSize: 14,
-    lineHeight: 21,
-    fontWeight: '700',
-    marginTop: 4,
+    flexShrink: 0,
   },
   rowList: {
     gap: 12,
@@ -626,7 +769,7 @@ const styles = StyleSheet.create({
   },
   rowCard: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
     gap: 12,
     padding: 12,
     borderRadius: 14,
@@ -634,29 +777,79 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   rowThumbWrap: {
-    width: 88,
-    height: 88,
+    width: 96,
+    height: 96,
     borderRadius: 12,
     overflow: 'hidden',
     flexShrink: 0,
+    alignSelf: 'center',
   },
   rowThumb: {
     borderRadius: 12,
   },
-  rowMain: {
+  rowStatusSlot: {
+    position: 'absolute',
+    left: 6,
+    bottom: 6,
+  },
+  rowBody: {
     flex: 1,
     minWidth: 0,
-    gap: 3,
-    paddingTop: 1,
+    gap: 4,
+    justifyContent: 'center',
   },
   rowTitle: {
     fontFamily: tokens.typography.native.headingTh,
     fontSize: 15,
     lineHeight: 22,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  rowStatus: {
-    marginTop: 4,
+  rowFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 2,
+    minWidth: 0,
+  },
+  rowSource: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  rowSourceIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  rowSourceText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  rowPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexShrink: 0,
+  },
+  rowPriceAmount: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '700',
+  },
+  rowPricePeriod: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '400',
   },
   statusDot: {
     width: 7,
@@ -667,19 +860,5 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-  },
-  rowAside: {
-    alignItems: 'flex-end',
-    gap: 6,
-    flexShrink: 0,
-    maxWidth: 128,
-    paddingTop: 2,
-  },
-  rowPrice: {
-    fontFamily: tokens.typography.native.headingTh,
-    fontSize: 14,
-    lineHeight: 21,
-    fontWeight: '700',
-    textAlign: 'right',
   },
 });

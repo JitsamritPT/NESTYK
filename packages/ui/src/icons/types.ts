@@ -26,6 +26,7 @@ export type AppIconName =
   | 'handshake'
   | 'shield'
   | 'user'
+  | 'users'
   | 'user-plus'
   | 'credit-card'
   | 'gear'

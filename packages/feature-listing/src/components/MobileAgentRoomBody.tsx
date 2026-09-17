@@ -1,3 +1,4 @@
+import { formatBedroomSpec } from '../bedroom-label';
 import { NearbyPlacesMap } from './NearbyPlacesMap';
 import type { NearbyPlace } from '@nestyk/types';
 import { Image } from 'expo-image';
@@ -382,9 +383,15 @@ export function MobileAgentRoomBody({
   const statusColors = statusTone(room.roomStatusCode);
   const availableLabel = formatDisplayDate(room.availableFromDate, locale) || copy.notSpecified;
 
-  const bedSpec = bedroom
-    ? interpolate(Number(bedroom) === 1 ? copy.specBed : copy.specBeds, { count: bedroom })
-    : null;
+  const bedSpec = formatBedroomSpec(
+    bedroom,
+    {
+      studio: t.masters.roomTypes.studio,
+      one: copy.specBed,
+      many: copy.specBeds,
+    },
+    room.roomTypeCode,
+  );
   const bathSpec = bathroom
     ? interpolate(Number(bathroom) === 1 ? copy.specBath : copy.specBaths, { count: bathroom })
     : null;

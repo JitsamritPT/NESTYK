@@ -184,16 +184,17 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingTop: 4,
+    paddingBottom: 2,
     paddingHorizontal: 4,
   },
   tabItem: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 4,
+    gap: 2,
+    paddingVertical: 2,
+    minHeight: 48,
     minWidth: 0,
   },
   iconSlot: {
@@ -212,12 +213,12 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontFamily: tokens.typography.native.body,
-    fontSize: 10,
-    lineHeight: 15,
+    fontSize: 11,
+    lineHeight: 17,
     fontWeight: '400',
   },
   indicator: {
-    marginTop: 2,
+    marginTop: 0,
     height: 3,
     width: 22,
     borderRadius: 2,

@@ -405,6 +405,8 @@ export interface TranslationSchema {
       sourceNote: string;
       sourceCoAgent: string;
       sourceOwner: string;
+      sourceCoAgentShort: string;
+      sourceOwnerShort: string;
       sourceCoAgentHint: string;
       sourceOwnerHint: string;
       setupHubTitle: string;
@@ -679,6 +681,8 @@ export interface TranslationSchema {
       addRoom: string;
       rentPerMonth: string;
       rentPerMonthShort: string;
+      rentAmount: string;
+      rentPeriod: string;
       specBed: string;
       specBeds: string;
       specSqm: string;

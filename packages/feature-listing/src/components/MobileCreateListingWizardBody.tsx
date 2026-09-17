@@ -39,8 +39,18 @@ import {
   getCardElevation,
 } from '@nestyk/ui/native';
 import { ListingEngineConfig } from '../config';
+import {
+  LISTING_SOURCE_OPTIONS,
+  SOURCE_IDLE_BORDER,
+  SOURCE_SELECT_BG,
+  SOURCE_SELECT_BORDER,
+  type ListingSourceCode,
+} from '../listing-source';
+import { formatBedroomSpec } from '../bedroom-label';
 import { PlaceDetails, PlaceSuggestion } from '../places';
 import { PropertyPlaceMap } from './PropertyPlaceMap';
+
+export type { ListingSourceCode };
 
 const CREATE_STEPS = [1, 2, 5, 8, 6];
 const EDIT_STEPS = [1, 2, 5, 8, 6, 3, 4, 7];
@@ -68,22 +78,6 @@ function roomContactKey(id?: number, phone?: string) {
   if (id != null) return `id:${id}`;
   return `new:${String(phone ?? '').replace(/\D/g, '')}`;
 }
-const LISTING_SOURCE_OPTIONS = [
-  {
-    code: 'owner' as const,
-    icon: 'user' as const,
-    iconColor: '#926515',
-    iconBg: '#FFF3D6',
-  },
-  {
-    code: 'co_agent' as const,
-    icon: 'handshake' as const,
-    iconColor: '#52647A',
-    iconBg: '#EEF2F6',
-  },
-];
-const SOURCE_SELECT_BORDER = tokens.colors.brand[500];
-const SOURCE_IDLE_BORDER = tokens.colors.border;
 
 export type ContactOption = {
   id: number;
@@ -112,8 +106,6 @@ export type RoomTypeOption = {
   code: string;
   bedroomCount: number | null;
 };
-
-export type ListingSourceCode = 'co_agent' | 'owner';
 
 export type CreateRoomWizardSubmitData = {
   visibility: 'private' | 'published';
@@ -1339,7 +1331,15 @@ export const MobileCreateListingWizardBody: React.FC<
     }
     if (current === 2) {
       const bits = [
-        bedroom.trim() ? interpolate(t.agent.listings.specBed, { count: bedroom.trim() }) : '',
+        formatBedroomSpec(
+          bedroom.trim(),
+          {
+            studio: t.masters.roomTypes.studio,
+            one: t.agent.listings.specBed,
+            many: t.agent.listings.specBeds,
+          },
+          selectedRoomType?.code,
+        ) ?? '',
         sizeSqm.trim() ? `${sizeSqm.trim()} sqm` : '',
       ].filter(Boolean);
       return bits.length ? bits.join(' · ') : ov.sectionHints.layout;
@@ -1710,11 +1710,15 @@ export const MobileCreateListingWizardBody: React.FC<
                   </Text>
                   <Text style={styles.hubPreviewMeta} numberOfLines={1}>
                     {[
-                      hubSnapshot.bedroom
-                        ? interpolate(t.agent.listings.specBed, {
-                            count: hubSnapshot.bedroom,
-                          })
-                        : null,
+                      formatBedroomSpec(
+                        hubSnapshot.bedroom,
+                        {
+                          studio: t.masters.roomTypes.studio,
+                          one: t.agent.listings.specBed,
+                          many: t.agent.listings.specBeds,
+                        },
+                        selectedRoomType?.code,
+                      ),
                       hubSnapshot.sizeSqm ? `${hubSnapshot.sizeSqm} sqm` : null,
                     ]
                       .filter(Boolean)
@@ -1799,14 +1803,19 @@ export const MobileCreateListingWizardBody: React.FC<
                   style={({ pressed }) => [
                     styles.sourceCard,
                     {
-                      borderColor: selected ? accent : SOURCE_IDLE_BORDER,
-                      backgroundColor: tokens.colors.white,
+                      borderColor: selected ? SOURCE_SELECT_BORDER : SOURCE_IDLE_BORDER,
+                      backgroundColor: selected ? SOURCE_SELECT_BG : tokens.colors.white,
                     },
                     pressed ? { opacity: 0.92 } : null,
                   ]}
                 >
                   <View style={[styles.sourceIconWrap, { backgroundColor: opt.iconBg }]}>
-                    <MobileIcon name={opt.icon} size={24} weight="regular" color={opt.iconColor} />
+                    <MobileIcon
+                      name={opt.pickerIcon}
+                      size={24}
+                      weight="regular"
+                      color={opt.iconColor}
+                    />
                   </View>
                   <View style={styles.sourceCopy}>
                     <Text style={styles.sourceTitle}>{sourceLabels[opt.code]}</Text>

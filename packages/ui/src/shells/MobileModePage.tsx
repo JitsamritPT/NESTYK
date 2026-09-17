@@ -95,7 +95,7 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
           <View style={styles.bodyFill}>{children}</View>
         </View>
         {bottomBar ? (
-          <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>{bottomBar}</View>
+          <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: theme.surface }]}>{bottomBar}</View>
         ) : null}
       </View>
     );
@@ -146,7 +146,7 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
       </View>
 
       {bottomBar ? (
-        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: theme.background }]}>
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8), backgroundColor: theme.surface }]}>
           {bottomBar}
         </View>
       ) : null}
