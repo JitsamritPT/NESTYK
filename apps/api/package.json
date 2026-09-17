@@ -12,8 +12,8 @@
     "test:agent-listings": "node --test test/agent-listings.test.cjs",
     "test:agent-leads": "node --test test/agent-leads.test.cjs",
     "test:room-details": "node --test test/room-update.test.cjs test/nearby-places.test.cjs test/agent-listings.test.cjs",
-    "test:agent-contracts": "node --test test/agent-contracts.test.cjs test/agent-contract-documents.test.cjs test/agent-contract-sign.test.cjs test/agreement-attachments.test.cjs test/agreement-sign-invites.test.cjs",
-    "test:agent-tenants": "node --test test/agent-tenants.test.cjs test/agent-contracts.test.cjs test/agent-contract-documents.test.cjs test/agent-contract-sign.test.cjs test/agreement-attachments.test.cjs test/agreement-sign-invites.test.cjs"
+    "test:agent-contracts": "node --test test/agent-contracts.test.cjs test/agent-contract-documents.test.cjs test/agent-contract-sign.test.cjs test/agreement-attachments.test.cjs test/agreement-sign-invites.test.cjs test/financial-documents.test.cjs",
+    "test:agent-tenants": "node --test test/agent-tenants.test.cjs test/agent-contracts.test.cjs test/agent-contract-documents.test.cjs test/agent-contract-sign.test.cjs test/agreement-attachments.test.cjs test/agreement-sign-invites.test.cjs test/financial-documents.test.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

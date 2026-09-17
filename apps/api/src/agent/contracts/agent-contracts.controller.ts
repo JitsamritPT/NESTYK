@@ -88,6 +88,15 @@ export class AgentContractsController {
   ) {
     return this.contracts.createSignInvite(user.id, id, body);
   }
+  @Get(":id/financial-documents/:kind")
+  financialDefaults(@CurrentUser() user: AuthRequestUser, @Param("id", ParseIntPipe) id: number, @Param("kind") kind: string) {
+    return this.contracts.financialDocumentDefaults(user.id, id, kind);
+  }
+  @Post(":id/financial-documents/:kind")
+  @HttpCode(HttpStatus.OK)
+  generateFinancial(@CurrentUser() user: AuthRequestUser, @Param("id", ParseIntPipe) id: number, @Param("kind") kind: string, @Body() body: unknown) {
+    return this.contracts.generateFinancialDocument(user.id, id, kind, body);
+  }
   @Post(":id/documents/:kind")
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(

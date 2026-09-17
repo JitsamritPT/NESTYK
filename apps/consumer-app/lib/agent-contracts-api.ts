@@ -189,3 +189,12 @@ export async function uploadAgreementAttachment(
     clearTimeout(timeout);
   }
 }
+
+export async function getFinancialDocumentDefaults(id: number, kind: import('@nestyk/types').FinancialDocumentKind): Promise<import('@nestyk/types').FinancialDocumentInput> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/${id}/financial-documents/${kind}`);
+}
+export async function generateFinancialDocument(id: number, kind: import('@nestyk/types').FinancialDocumentKind, input: import('@nestyk/types').FinancialDocumentInput): Promise<AgentContract> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/financial-documents/${kind}`, input);
+}

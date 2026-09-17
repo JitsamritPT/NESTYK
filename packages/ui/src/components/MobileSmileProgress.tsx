@@ -9,6 +9,7 @@ import Animated, {
   withSequence,
   withTiming,
   runOnJS,
+  cancelAnimation,
 } from 'react-native-reanimated';
 import { tokens } from '../theme/tokens';
 
@@ -57,18 +58,18 @@ export function MobileSmileProgress({
   gradientId = 'smileGlow',
 }: MobileSmileProgressProps) {
   const dash = useSharedValue(indeterminate ? 0.18 : 0.12);
-  const filledRef = React.useRef(false);
+  const filled = useSharedValue(false);
   const dims = metrics ?? SIZE_MAP[size];
 
   useEffect(() => {
-    filledRef.current = false;
-  }, [indeterminate]);
+    filled.value = false;
+  }, [indeterminate, filled]);
 
   useEffect(() => {
     if (!indeterminate && progress < 0.99) {
-      filledRef.current = false;
+      filled.value = false;
     }
-  }, [progress, indeterminate]);
+  }, [progress, indeterminate, filled]);
 
   useEffect(() => {
     if (indeterminate) {
@@ -81,7 +82,7 @@ export function MobileSmileProgress({
         -1,
         false,
       );
-      return;
+      return () => cancelAnimation(dash);
     }
 
     const target = Math.max(0.04, Math.min(1, progress));
@@ -89,13 +90,14 @@ export function MobileSmileProgress({
       target,
       { duration: target >= 0.99 ? 420 : 700, easing: Easing.out(Easing.cubic) },
       (finished) => {
-        if (finished && target >= 0.99 && onFilled && !filledRef.current) {
-          filledRef.current = true;
+        if (finished && target >= 0.99 && onFilled && !filled.value) {
+          filled.value = true;
           runOnJS(onFilled)();
         }
       },
     );
-  }, [progress, indeterminate, dash, onFilled]);
+    return () => cancelAnimation(dash);
+  }, [progress, indeterminate, dash, filled, onFilled]);
 
   const animatedProps = useAnimatedProps(() => {
     const len = SMILE_LENGTH * dash.value;

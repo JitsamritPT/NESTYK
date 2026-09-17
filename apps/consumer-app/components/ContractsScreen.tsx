@@ -1,3 +1,4 @@
+import { FinancialDocumentForm } from "./FinancialDocumentForm";
 import { AgreementAttachments } from "./AgreementAttachments";
 import { ContractTypePicker } from "./ContractTypePicker";
 import React, { useEffect, useRef, useState } from "react";
@@ -157,6 +158,7 @@ export function ContractsScreen({
   const [choosingType, setChoosingType] = useState(false);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [financialKind, setFinancialKind] = useState<"invoice" | "receipt" | null>(null);
   const [uploadingKind, setUploadingKind] =
     useState<AgentContractDocumentKind | null>(null);
   const [pickKind, setPickKind] = useState<AgentContractDocumentKind | null>(
@@ -893,6 +895,16 @@ export function ContractsScreen({
         </View>
       </View>
     );
+  if (selected && financialKind)
+    return <FinancialDocumentForm key={`${selected.id}:${financialKind}`} contractId={selected.id} kind={financialKind}
+      onBack={() => setFinancialKind(null)}
+      onCreated={row => {
+        setSelected(row);
+        setContracts(rows => rows.map(existing => existing.id === row.id ? row : existing));
+        setFinancialKind(null);
+        setNotice(docs.financial.success);
+        onChanged?.();
+      }} />;
   if (selected)
     return (
       <View style={s.root}>
@@ -1032,17 +1044,47 @@ export function ContractsScreen({
                     <Text style={[s.documentTitle, title]}>{slot.name}</Text>
                   </View>
                   {hasFile && slot.url ? (
-                    <View style={[s.documentFile, { backgroundColor: theme.background }]}>
-                      <Text style={[s.body, title]} numberOfLines={2}>{fileName}</Text>
-                      <MobileButton variant="outline" disabled={busy} onPress={() => openDocumentPreview(fileName, slot.url!, slot.kind)}>
-                        ดู
-                      </MobileButton>
-                    </View>
+                    <>
+                      <View style={[s.documentFile, { backgroundColor: theme.background }]}>
+                        <Text style={[s.body, title]} numberOfLines={2}>{fileName}</Text>
+                      </View>
+                      {(slot.kind === "invoice" || slot.kind === "receipt") ? (
+                        <View style={s.documentActions}>
+                          <MobileButton
+                            disabled={busy}
+                            onPress={() =>
+                              openDocumentPreview(fileName, slot.url!, slot.kind)
+                            }
+                          >
+                            ดู
+                          </MobileButton>
+                          <MobileButton
+                            variant="outline"
+                            disabled={busy}
+                            onPress={() =>
+                              setFinancialKind(slot.kind as "invoice" | "receipt")
+                            }
+                          >
+                            {docs.financial.edit}
+                          </MobileButton>
+                        </View>
+                      ) : (
+                        <MobileButton
+                          variant="outline"
+                          disabled={busy}
+                          onPress={() =>
+                            openDocumentPreview(fileName, slot.url!, slot.kind)
+                          }
+                        >
+                          ดู
+                        </MobileButton>
+                      )}
+                    </>
                   ) : (
                     <>
-                      <Text style={[s.small, muted]}>ยังไม่ได้แนบเอกสารสำหรับรายการนี้</Text>
-                      <MobileButton disabled={busy} isLoading={uploadingKind === slot.kind} onPress={() => setPickKind(slot.kind)}>
-                        แนบเอกสาร
+                      <Text style={[s.small, muted]}>{slot.kind === "invoice" || slot.kind === "receipt" ? docs.financial.empty : "ยังไม่ได้แนบเอกสารสำหรับรายการนี้"}</Text>
+                      <MobileButton disabled={busy} isLoading={uploadingKind === slot.kind} onPress={() => slot.kind === "invoice" || slot.kind === "receipt" ? setFinancialKind(slot.kind) : setPickKind(slot.kind)}>
+                        {slot.kind === "invoice" || slot.kind === "receipt" ? docs.financial.create : "แนบเอกสาร"}
                       </MobileButton>
                     </>
                   )}
@@ -1180,7 +1222,7 @@ export function ContractsScreen({
               ) : null}
               {previewDoc ? (
                 <View style={[s.previewActions, { padding: 12 }]}>
-                  {previewDoc.kind !== "reservation_letter" && (
+                  {previewDoc.kind === "lease_agreement" && (
                     <MobileButton
                       disabled={busy}
                       isLoading={uploadingKind === previewDoc.kind}
@@ -1594,6 +1636,7 @@ const s = StyleSheet.create({
   documentStatus: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   documentTitle: { flex: 1, fontFamily: tokens.typography.native.headingTh, fontSize: 15, lineHeight: 23 },
   documentFile: { gap: 8, padding: 12, borderRadius: 12 },
+  documentActions: { gap: 8 },
   partyActions: {
     flexDirection: "row",
     alignItems: "center",

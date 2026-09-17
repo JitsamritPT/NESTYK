@@ -1,3 +1,6 @@
+import { financialKind, validateFinancialDocument } from "./financial-document";
+import { createFinancialPdf } from "./financial-pdf";
+import type { FinancialDocumentInput } from "@nestyk/types";
 import { AgreementAttachmentsService } from "./agreement-attachments.service";
 import { PropertyEntity } from "../../entities/property.entity";
 import { AgreementTemplateEntity } from "../../entities/agreement-template.entity";
@@ -474,6 +477,71 @@ export class AgentContractsService {
     }
     return this.view(agentId, id);
   }
+  async financialDocumentDefaults(agentId: number, id: number, kindInput: string) {
+    const kind = financialKind(kindInput);
+    const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    if ((c.template?.form_kind ?? c.agreement_type?.form_kind) !== "reservation")
+      throw new BadRequestException("สร้างเอกสารได้เฉพาะหนังสือจองห้อง");
+    const saved = (c.data?.financialDocuments ?? {}) as Partial<Record<string, FinancialDocumentInput>>;
+    if (saved[kind]) return saved[kind];
+    const snapshot = c.party_snapshot ?? {};
+    const owner = c.rent_room?.property_owner_id
+      ? await this.db.getRepository(PropertyOwnerEntity).findOneBy({ id: c.rent_room.property_owner_id }) : null;
+    const ownerUser = c.rent_room?.owner_id
+      ? await this.db.getRepository(UserEntity).findOneBy({ id: c.rent_room.owner_id }) : null;
+    const v = this.serialize(c);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const base: FinancialDocumentInput = {
+      documentNo: `${kind === 'invoice' ? 'INV' : 'REC'}-${v.contractNo}`,
+      issueDate: today, dueDate: today, reference: v.contractNo,
+      customerName: v.tenant, customerAddress: String(snapshot.tenantAddress ?? ''), customerTaxId: String(snapshot.tenantTaxId ?? ''),
+      customerPhone: String(snapshot.tenantPhone ?? c.tenant?.phone ?? ''),
+      customerEmail: String(snapshot.tenantEmail ?? c.tenant?.email ?? ''),
+      issuerName: String(snapshot.ownerName ?? owner?.name ?? (ownerUser ? `${ownerUser.first_name} ${ownerUser.last_name}`.trim() : '')), issuerAddress: String(snapshot.ownerAddress ?? ''), issuerTaxId: String(snapshot.ownerTaxId ?? ''),
+      issuerPhone: String(snapshot.ownerPhone ?? owner?.phone ?? ownerUser?.phone ?? ''), issuerEmail: owner?.email ?? ownerUser?.email ?? '',
+      items: [{ description: `เงินจอง ${v.property}${v.room ? ` ห้อง ${v.room}` : ''}`, quantity: 1, unitPrice: v.reservationFee ?? 0 }],
+      vatRate: 0, discount: 0, paymentMethod: '', paymentDetails: [c.rent_room?.owner_bank_name, c.rent_room?.owner_bank_account].filter(Boolean).join(' '), receiverName: '', notes: '',
+    };
+    if (kind === 'receipt' && saved.invoice) return {
+      ...saved.invoice, documentNo: base.documentNo, issueDate: today,
+      reference: saved.invoice.documentNo, paymentMethod: '', receiverName: '',
+    };
+    return base;
+  }
+
+  async generateFinancialDocument(agentId: number, id: number, kindInput: string, input: unknown) {
+    const kind = financialKind(kindInput);
+    const data = validateFinancialDocument(input, kind);
+    await this.financialDocumentDefaults(agentId, id, kind);
+    if (!this.documents) throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
+    let bytes: Buffer;
+    try { bytes = await createFinancialPdf(kind, data); }
+    catch (error) { throw new BadRequestException(error instanceof Error ? error.message : "สร้าง PDF ไม่สำเร็จ"); }
+    const stored = await this.documents.upload(agentId, id, kind, { buffer: bytes, size: bytes.length });
+    try {
+      await this.db.transaction(async (manager) => {
+        const repo = manager.getRepository(LeaseContractEntity);
+        const current = await repo.findOne({ where: { id, created_by_user_id: agentId }, lock: { mode: 'pessimistic_write' } });
+        if (!current) throw new NotFoundException("ไม่พบสัญญา");
+        if (['cancelled', 'expired', 'terminated'].includes(current.status)) throw new BadRequestException("ไม่สามารถสร้างเอกสารให้สัญญาที่ปิดแล้ว");
+        const existing = current.data ?? {};
+        await repo.update({ id, created_by_user_id: agentId }, {
+          [DOCUMENT_COLUMNS[kind]]: stored.path,
+          data: {
+            ...existing,
+            financialDocuments: { ...(existing.financialDocuments as object ?? {}), [kind]: data },
+            documentFileNames: { ...(existing.documentFileNames as object ?? {}), [kind]: `${kind}-${data.documentNo.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf` },
+          },
+        });
+      });
+    } catch (error) {
+      await this.documents.remove(stored.path).catch(() => undefined);
+      throw error;
+    }
+    return this.view(agentId, id);
+  }
+
   async uploadDocument(
     agentId: number,
     id: number,

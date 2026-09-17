@@ -42,6 +42,7 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
       required = false,
       leadingIcon,
       trailingText,
+      multiline,
       ...props
     },
     ref,
@@ -64,6 +65,7 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
           <View
             style={[
               styles.inputShell,
+              multiline ? styles.inputShellMultiline : null,
               !editable ? styles.inputReadOnly : null,
               error ? { borderColor: tokens.colors.error } : null,
             ]}
@@ -78,8 +80,11 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
             <TextInput
               ref={ref}
               editable={editable}
+              multiline={multiline}
+              textAlignVertical="center"
               style={[
                 styles.inputInner,
+                multiline ? styles.inputInnerMultiline : null,
                 !editable && Platform.OS === 'web' ? readOnlyWebStyle : null,
                 style,
               ]}
@@ -94,8 +99,11 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
           <TextInput
             ref={ref}
             editable={editable}
+            multiline={multiline}
+            textAlignVertical="center"
             style={[
               styles.input,
+              multiline ? styles.inputMultiline : null,
               !editable ? styles.inputReadOnly : null,
               !editable && Platform.OS === 'web' ? readOnlyWebStyle : null,
               error ? { borderColor: tokens.colors.error } : null,
@@ -138,7 +146,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontFamily: tokens.typography.native.body,
     fontSize: 14,
+    lineHeight: 21,
     color: tokens.colors.primary,
+  },
+  inputMultiline: {
+    height: undefined,
+    minHeight: 44,
+    paddingVertical: 11,
+    textAlignVertical: 'center',
   },
   inputShell: {
     minHeight: 44,
@@ -151,14 +166,25 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
   },
+  inputShellMultiline: {
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
   inputInner: {
     flex: 1,
     minWidth: 0,
     height: 44,
     fontFamily: tokens.typography.native.body,
     fontSize: 14,
+    lineHeight: 21,
     color: tokens.colors.primary,
     padding: 0,
+  },
+  inputInnerMultiline: {
+    height: undefined,
+    minHeight: 44,
+    paddingVertical: 11,
+    textAlignVertical: 'center',
   },
   trailingText: {
     fontFamily: tokens.typography.native.body,

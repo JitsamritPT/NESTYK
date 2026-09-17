@@ -9,7 +9,7 @@
 - Incomplete signing returns `awaiting_signatures`; it does not block mock preview.
 - Preview and generation return an `AgentContract`. Both routes require the agent role and scope access to the creator.
 - The app prevents duplicate clicks, shows progress/errors and opens the resulting preview after successful generation.
-- Reservation uploads/replacements remain disabled. Invoice and receipt uploads remain supported.
+- Reservation uploads/replacements remain disabled. Invoice and receipt creation uses the financial-document form described below. Existing uploaded files remain viewable.
 
 ## Storage and concurrency
 
@@ -41,3 +41,13 @@ Reservations have a booking date (`start_date`, exposed additionally as `booking
 Apply `apps/api/scripts/apply-reservation-move-in-date.cjs` before running the updated API. It moves legacy reservation `end_date` values into `move_in_date` and clears the former, leaving leases unchanged. Overlap checks treat reservations as open-ended from move-in, exclude closed records, and preserve the exception for the same tenant converting their reservation to a lease.
 
 The v2 mock labels are วันที่จอง and วันที่เข้าอยู่. Versioned object paths prevent old mock-v1 PDFs from appearing as current previews. Existing files remain in Storage; users with all signatures can generate the new mock using the saved signatures.
+
+## Invoice and receipt creation
+
+- `GET /agent/contracts/:id/financial-documents/:kind` (`invoice` or `receipt`) returns saved document inputs, or defaults from the reservation and party snapshot. Creating a receipt after an invoice reuses customer, issuer, line items, discounts and VAT; payment method and receiver must be confirmed by the user.
+- `POST /agent/contracts/:id/financial-documents/:kind` validates input and generates a complete PDF. Required fields: document number, issue date, customer name/address, issuer name/address, 1–5 items; invoice additionally requires due date; receipt requires payment method and receiver (and payment details for non-cash methods). Tax IDs and emails are optional but validated when present.
+- The server computes cents-based totals and Thai amount words. VAT defaults to 0%; users can select 7%. Discount is applied before VAT. No payment ledger or contract status is changed by document creation.
+- The PDF follows the supplied receipt's bilingual sections, rendered with embedded Noto Sans Thai and fontkit glyph offsets so Thai stacked marks remain separated. It includes entered data rather than blank template placeholders. Long fields wrap or shrink within bounded areas; oversized text is rejected rather than truncated.
+- Private storage paths are saved in the existing `invoice_url`/`receipt_url` columns. The submitted input snapshot is saved in `data.financialDocuments`, and filenames in `data.documentFileNames`. No database migration is needed. Row locking preserves unrelated contract data; failed writes remove the new unreferenced upload. Previous stored files are retained when regenerating.
+- The app returns to the reservation document list after creation and shows the PDF filename and View button. Edit and regenerate reopens the saved values. Legacy lease uploads remain available.
+- Tests: `node --test test/financial-documents.test.cjs`; set `PDF_QA_DIR` to render sample PDFs for visual inspection. Test data is not written to the live database.

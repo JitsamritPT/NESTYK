@@ -130,3 +130,28 @@ export interface AgreementAttachmentChecklist {
   documents: AgreementAttachment[];
   reusableDocuments: AgreementAttachment[];
 }
+
+export type FinancialDocumentKind = "invoice" | "receipt";
+export interface FinancialDocumentInput {
+  documentNo: string;
+  issueDate: string;
+  dueDate: string;
+  reference: string;
+  customerName: string;
+  customerAddress: string;
+  customerTaxId: string;
+  customerPhone: string;
+  customerEmail: string;
+  issuerName: string;
+  issuerAddress: string;
+  issuerTaxId: string;
+  issuerPhone: string;
+  issuerEmail: string;
+  items: { description: string; quantity: number; unitPrice: number }[];
+  vatRate: number;
+  discount: number;
+  paymentMethod: string;
+  paymentDetails: string;
+  receiverName: string;
+  notes: string;
+}
