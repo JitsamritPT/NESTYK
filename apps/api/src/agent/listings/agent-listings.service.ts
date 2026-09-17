@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { RentRoomEntity } from '../../entities/rent-room.entity';
@@ -13,6 +13,11 @@ export type ListingsQuery = {
   roomStatus?: string;
   listingSource?: string;
   sort?: string;
+  propertyType?: string;
+  roomType?: string;
+  bedrooms?: string;
+  minPrice?: string;
+  maxPrice?: string;
 };
 
 const MIN_PRICE_SUBQUERY =
@@ -92,6 +97,37 @@ export class AgentListingsService {
     }
 
     const search = query.q?.trim();
+    if (query.propertyType) {
+      countQb.leftJoin('property.property_type', 'filterPropertyType')
+        .andWhere('filterPropertyType.code = :propertyType', { propertyType: query.propertyType });
+    }
+    if (query.roomType || query.bedrooms) {
+      countQb.leftJoin('room.room_type', 'filterRoomType');
+    }
+    if (query.roomType) {
+      countQb.andWhere('filterRoomType.code = :roomType', { roomType: query.roomType });
+    }
+    if (query.bedrooms) {
+      if (!/^[0-4]$/.test(query.bedrooms)) throw new BadRequestException('Invalid bedrooms');
+      const bedrooms = Number(query.bedrooms);
+      const bedroomValue = `COALESCE((SELECT CASE WHEN TRIM(lv.value) ~ '^[0-9]+$' THEN CAST(TRIM(lv.value) AS NUMERIC) END FROM room_layout_values lv JOIN master_layouts ml ON ml.id = lv.layout_id WHERE lv.rent_room_id = room.id AND ml.code = 'bedroom' LIMIT 1), filterRoomType.bedroom_count)`;
+      countQb.andWhere(`${bedroomValue} ${bedrooms === 4 ? '>=' : '='} :bedrooms`, { bedrooms });
+    }
+    const parsePrice = (value: string | undefined) => {
+      if (value == null || value === '') return undefined;
+      if (!/^\d+(\.\d{1,2})?$/.test(value) || !Number.isFinite(Number(value))) {
+        throw new BadRequestException('Invalid price');
+      }
+      return Number(value);
+    };
+    const minPrice = parsePrice(query.minPrice);
+    const maxPrice = parsePrice(query.maxPrice);
+    if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
+      throw new BadRequestException('Minimum price exceeds maximum price');
+    }
+    // Match the displayed starting monthly rent, before counting and pagination.
+    if (minPrice != null) countQb.andWhere(`${MIN_PRICE_SUBQUERY} >= :minPrice`, { minPrice });
+    if (maxPrice != null) countQb.andWhere(`${MIN_PRICE_SUBQUERY} <= :maxPrice`, { maxPrice });
     if (search) {
       countQb.andWhere(
         '(property.name ILIKE :q OR room.listing_title ILIKE :q OR contact.name ILIKE :q OR contact.phone ILIKE :q)',

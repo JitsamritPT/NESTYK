@@ -59,6 +59,11 @@ export async function fetchMyAgentListings(query: {
   roomStatus?: string;
   listingSource?: string;
   sort?: AgentListingsSort;
+  propertyType?: string;
+  roomType?: string;
+  bedrooms?: string;
+  minPrice?: string;
+  maxPrice?: string;
 } = {}): Promise<AgentListingsResponse> {
   await ensureAgentSession();
   const params = new URLSearchParams({ page: String(query.page ?? 1), limit: '20' });
@@ -67,6 +72,9 @@ export async function fetchMyAgentListings(query: {
   if (query.roomStatus) params.set('roomStatus', query.roomStatus);
   if (query.listingSource) params.set('listingSource', query.listingSource);
   if (query.sort) params.set('sort', query.sort);
+  for (const key of ['propertyType', 'roomType', 'bedrooms', 'minPrice', 'maxPrice'] as const) {
+    if (query[key]) params.set(key, query[key]);
+  }
   return apiGet<AgentListingsResponse>(`/agent/listings?${params}`);
 }
 
