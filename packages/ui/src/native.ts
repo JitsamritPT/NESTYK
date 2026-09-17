@@ -19,6 +19,8 @@ export * from './components/MobileWorkspaceHeader';
 export * from './components/MobileSectionHeader';
 export * from './components/MobileNotificationsBody';
 export * from './components/MobileBottomSheet';
+export * from './components/MobileActionSheetBody';
+export * from './components/MobilePhotoViewer';
 export * from './components/MobileProfileAvatar';
 export * from './components/MobileProfileEditBody';
 export * from './components/MobileLinkedAccountsBody';

@@ -1,5 +1,5 @@
 import { AgentRoomEditor } from './AgentRoomEditor';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import {
   MobileIcon,
   SelectionCheck,
   SelectionChip,
+  MobileSectionHeader,
   tokens,
   useMobileTheme,
 } from '@nestyk/ui/native';
@@ -138,6 +139,25 @@ export function AgentRoomsScreen({
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
   const searchRef = React.useRef<TextInput>(null);
+  const editRoomBackRef = useRef<(() => boolean) | null>(null);
+  const [editHeaderTitle, setEditHeaderTitle] = useState('');
+  const gateOpenRef = React.useRef(gateOpen);
+  gateOpenRef.current = gateOpen;
+
+  const handleEditRoomBack = useCallback(() => {
+    if (saving) return;
+    if (editing) {
+      if (editRoomBackRef.current?.()) return;
+      setEditing(false);
+      setEditHeaderTitle('');
+      return;
+    }
+    setSelected(null);
+  }, [saving, editing]);
+
+  useEffect(() => {
+    if (!editing) setEditHeaderTitle('');
+  }, [editing]);
 
   useEffect(() => {
     if (searchOpen) {
@@ -148,7 +168,8 @@ export function AgentRoomsScreen({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // Full-screen loader only on first open — search/filter keeps the list visible.
+    if (!gateOpenRef.current) setLoading(true);
     setError(null);
     const timer = setTimeout(() => {
       fetchMyAgentListings({
@@ -179,10 +200,6 @@ export function AgentRoomsScreen({
       clearTimeout(timer);
     };
   }, [query, filters, page, sort, refresh, reloadToken, onReloadSettled]);
-
-  useEffect(() => {
-    if (loading && items.length === 0) setGateOpen(false);
-  }, [loading, items.length]);
 
   useEffect(() => {
     if (selected === null) return;
@@ -575,10 +592,7 @@ export function AgentRoomsScreen({
         presentationStyle="fullScreen"
         animationType="slide"
         onRequestClose={() => {
-          if (!saving) {
-            if (editing) setEditing(false);
-            else setSelected(null);
-          }
+          if (!saving) handleEditRoomBack();
         }}
       >
         <SafeAreaProvider initialMetrics={initialWindowMetrics}>
@@ -586,10 +600,8 @@ export function AgentRoomsScreen({
             <View
               style={{
                 paddingHorizontal: 16,
-                paddingVertical: 12,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 12,
+                paddingTop: 4,
+                paddingBottom: 8,
                 flexShrink: 0,
                 zIndex: 1,
                 backgroundColor: theme.surface,
@@ -597,19 +609,16 @@ export function AgentRoomsScreen({
                 borderBottomColor: theme.border,
               }}
             >
-              <View style={{ flex: 1 }}>
-                <MobileButton
-                  variant="outline"
-                  disabled={saving}
-                  onPress={() => {
-                    if (editing) setEditing(false);
-                    else setSelected(null);
-                  }}
-                >{`‹ ${editing ? copy.cancelEdit : copy.backToRooms}`}</MobileButton>
-              </View>
-              {room && !editing ? (
-                <MobileButton onPress={() => setEditing(true)}>{copy.editRoom}</MobileButton>
-              ) : null}
+              <MobileSectionHeader
+                title={editing ? editHeaderTitle || copy.editRoom : copy.details}
+                leading="back"
+                backDisabled={saving}
+                onBackPress={handleEditRoomBack}
+                onActionPress={
+                  room && !editing ? () => setEditing(true) : undefined
+                }
+                actionLabel={room && !editing ? copy.edit : undefined}
+              />
             </View>
             {!modalReady ? (
               <ActivityIndicator />
@@ -625,9 +634,12 @@ export function AgentRoomsScreen({
                 <View style={{ flex: 1, padding: 16 }}>
                   <AgentRoomEditor
                     room={room}
+                    backHandlerRef={editRoomBackRef}
+                    onHeaderTitleChange={setEditHeaderTitle}
                     onBusy={setSaving}
                     onSaved={() => {
                       setEditing(false);
+                      setEditHeaderTitle('');
                       setDetailRefresh((n) => n + 1);
                       setRefresh((n) => n + 1);
                     }}

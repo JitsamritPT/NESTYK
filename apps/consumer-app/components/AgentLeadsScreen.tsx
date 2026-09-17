@@ -1,10 +1,10 @@
 import { LeadLocationPicker } from './LeadLocationPicker';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Modal, ActivityIndicator, Alert, StyleSheet, Platform } from 'react-native';
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
 import type { AgentLead } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
-import { MobileBrandLoader, MobileButton, MobileIcon, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
+import { MobileBrandLoader, MobileButton, MobileIcon, MobileInput, MobileSectionHeader, tokens, useMobileTheme } from '@nestyk/ui/native';
 import { getAgentLead, listAgentLeads } from '../lib/agent-leads-api';
 import { CreateLeadForm } from './CreateLeadForm';
 import { AgentLeadDetailBody, LeadStatusBadge } from './AgentLeadDetailBody';
@@ -69,10 +69,8 @@ export function AgentLeadsScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [gateOpen, setGateOpen] = useState(false);
-
-  useEffect(() => {
-    if (loading && !items.length) setGateOpen(false);
-  }, [loading, items.length]);
+  const gateOpenRef = useRef(gateOpen);
+  gateOpenRef.current = gateOpen;
 
   useEffect(() => {
     setActiveWorkFilter(workFilter);
@@ -95,7 +93,8 @@ export function AgentLeadsScreen({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // Full-screen loader only on first open — search/filter keeps the list visible.
+    if (!gateOpenRef.current) setLoading(true);
     setError(null);
     const timer = setTimeout(() => {
       listAgentLeads(query.trim(), page, { province, locations, includeUnspecified })
@@ -364,19 +363,29 @@ export function AgentLeadsScreen({
         <SafeAreaProvider initialMetrics={initialWindowMetrics}>
           <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
             <View style={[styles.modalHeader, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-              <View style={{ flex: 1 }}>
-                <MobileButton variant="outline" disabled={busy} onPress={closeModal}>
-                  {`‹ ${editing ? t.agent.listings.cancelEdit : creating ? c.cancel : c.back}`}
-                </MobileButton>
-              </View>
-              {selected && !editing && !creating && (
-                <MobileButton
-                  disabled={busy || detailLoading || !!detailError}
-                  onPress={() => setEditing(true)}
-                >
-                  แก้ไข Lead
-                </MobileButton>
-              )}
+              <MobileSectionHeader
+                title={
+                  editing
+                    ? c.editLead
+                    : creating
+                      ? c.create
+                      : selected?.name?.trim() || c.details
+                }
+                leading="back"
+                backDisabled={busy}
+                onBackPress={() => {
+                  if (!busy) closeModal();
+                }}
+                onActionPress={
+                  selected && !editing && !creating
+                    ? () => setEditing(true)
+                    : undefined
+                }
+                actionLabel={
+                  selected && !editing && !creating ? c.editLead : undefined
+                }
+                actionDisabled={busy || detailLoading || !!detailError}
+              />
             </View>
             {editing && selected ? (
               <CreateLeadForm
@@ -444,7 +453,7 @@ const styles = StyleSheet.create({
   factValue: { flex: 3, textAlign: 'right' },
   cardFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   detailLink: { fontFamily: tokens.typography.native.body, fontSize: 13, lineHeight: 20, fontWeight: '600' },
-  modalHeader: { paddingHorizontal: 16, paddingVertical: 12, gap: 12, borderBottomWidth: 1, flexShrink: 0, flexDirection: 'row', alignItems: 'center', zIndex: 1 },
+  modalHeader: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, borderBottomWidth: 1, flexShrink: 0, zIndex: 1 },
   detailBanner: { marginHorizontal: 16, marginTop: 12, borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
   filterChip: {
     flexDirection: 'row',

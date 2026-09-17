@@ -5,7 +5,19 @@ import { pickRoomPhotos, uploadRoomPhoto, enhanceRoomPhoto } from '../lib/room-p
 import { fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities, updateAgentRoom } from '../lib/agent-listings-api';
 import { searchPlaces, getPlaceDetails, searchNearbyPlaces } from '../lib/places-api';
 
-export function AgentRoomEditor({ room, onSaved, onBusy }: { room: AgentRoomDetail; onSaved: () => void; onBusy: (busy: boolean) => void }) {
+export function AgentRoomEditor({
+  room,
+  onSaved,
+  onBusy,
+  backHandlerRef,
+  onHeaderTitleChange,
+}: {
+  room: AgentRoomDetail;
+  onSaved: () => void;
+  onBusy: (busy: boolean) => void;
+  backHandlerRef?: React.MutableRefObject<(() => boolean) | null>;
+  onHeaderTitleChange?: (title: string) => void;
+}) {
   const { t, locale } = useLocale();
   const initialData = useMemo<CreateRoomWizardSubmitData>(() => ({
     visibility: room.visibility ?? 'private', isScoutRoom: true,
@@ -41,14 +53,31 @@ export function AgentRoomEditor({ room, onSaved, onBusy }: { room: AgentRoomDeta
     latitude: room.latitude == null ? undefined : Number(room.latitude),
     longitude: room.longitude == null ? undefined : Number(room.longitude),
   }), [room]);
-  return <MobileCreateListingWizardBody
-    config={defaultAgentListingConfig} initialData={initialData}
-    title={t.agent.listings.editRoom} submitLabel={t.agent.listings.saveChanges}
-    onSubmittingChange={onBusy} pickPhotos={pickRoomPhotos} uploadPhoto={uploadRoomPhoto} enhancePhoto={enhanceRoomPhoto}
-    listContacts={fetchAgentContacts} listPropertyTypes={fetchAgentPropertyTypes}
-    listContractTypes={fetchAgentContractTypes} listRoomTypes={fetchAgentRoomTypes} listFacilities={fetchAgentFacilities} mapsApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
-    searchNearby={(lat, lng) => searchNearbyPlaces(lat, lng, locale)}
-    searchPlaces={(q) => searchPlaces(q, locale)} getPlaceDetails={(id) => getPlaceDetails(id, locale)}
-    onSubmitListing={async (data) => { await updateAgentRoom(room.id, data); onSaved(); }}
-  />;
+  return (
+    <MobileCreateListingWizardBody
+      config={defaultAgentListingConfig}
+      initialData={initialData}
+      title={t.agent.listings.editRoom}
+      submitLabel={t.agent.listings.saveChanges}
+      backHandlerRef={backHandlerRef}
+      onHeaderTitleChange={onHeaderTitleChange}
+      onSubmittingChange={onBusy}
+      pickPhotos={pickRoomPhotos}
+      uploadPhoto={uploadRoomPhoto}
+      enhancePhoto={enhanceRoomPhoto}
+      listContacts={fetchAgentContacts}
+      listPropertyTypes={fetchAgentPropertyTypes}
+      listContractTypes={fetchAgentContractTypes}
+      listRoomTypes={fetchAgentRoomTypes}
+      listFacilities={fetchAgentFacilities}
+      mapsApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+      searchNearby={(lat, lng) => searchNearbyPlaces(lat, lng, locale)}
+      searchPlaces={(q) => searchPlaces(q, locale)}
+      getPlaceDetails={(id) => getPlaceDetails(id, locale)}
+      onSubmitListing={async (data) => {
+        await updateAgentRoom(room.id, data);
+        onSaved();
+      }}
+    />
+  );
 }

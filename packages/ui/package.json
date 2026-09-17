@@ -27,7 +27,8 @@
     "@nestyk/i18n": "*",
     "@nestyk/types": "*",
     "phosphor-react": "^1.4.1",
-    "phosphor-react-native": "^2.3.1"
+    "phosphor-react-native": "^2.3.1",
+    "react-native-zoom-toolkit": "^5.1.1"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",

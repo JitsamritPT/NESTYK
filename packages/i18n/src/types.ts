@@ -321,6 +321,7 @@ export interface TranslationSchema {
       profile: string;
       requirements: string;
       details: string;
+      editLead: string;
       back: string;
       newLead: string;
       statuses: {
@@ -452,12 +453,16 @@ export interface TranslationSchema {
       sourceNote: string;
       sourceCoAgent: string;
       sourceOwner: string;
+      sourceCoAgentShort: string;
+      sourceOwnerShort: string;
       sourceCoAgentHint: string;
       sourceOwnerHint: string;
       setupHubTitle: string;
       setupHubHint: string;
       setupProgress: string;
       setupMissingHint: string;
+      setupSaveMissingBanner: string;
+      setupSaveIncomplete: string;
       sectionDone: string;
       saveRoom: string;
       photosOptionalStatus: string;
@@ -551,6 +556,10 @@ export interface TranslationSchema {
       };
       quickCreateHint: string;
       optionalPhotosHint: string;
+      photosOptionalLead: string;
+      photosOfMax: string;
+      photosPublishMinHint: string;
+      coverBadge: string;
       detailsTitle: string;
       detailsHint: string;
       listingDescription: string;
@@ -627,8 +636,16 @@ export interface TranslationSchema {
       setCover: string;
       coverPhoto: string;
       enhancePhoto: string;
+      enhancePhotoLoading: string;
       enhancePhotoHint: string;
       enhancePhotoError: string;
+      enhanceQuotaShort: string;
+      enhanceQuotaExhausted: string;
+      enhanceQuotaUsedNote: string;
+      enhanceDiscardConfirmTitle: string;
+      enhanceDiscardConfirmBody: string;
+      enhanceDiscardConfirmStay: string;
+      enhanceDiscardConfirmDiscard: string;
       photoBefore: string;
       photoAfter: string;
       comparePhotoTitle: string;
@@ -636,6 +653,13 @@ export interface TranslationSchema {
       keepOriginalPhoto: string;
       viewPhoto: string;
       closePhotoPreview: string;
+      photoViewerTitle: string;
+      photoViewerCompareTitle: string;
+      photoViewerEnhancedBadge: string;
+      photoViewerEnhancedCaption: string;
+      photoViewerHintZoom: string;
+      photoViewerHintCompareSwitch: string;
+      photoViewerHintCompareClose: string;
       uploadProgress: string;
       photoUnavailable: string;
       photosMinError: string;
@@ -705,6 +729,8 @@ export interface TranslationSchema {
       addRoom: string;
       rentPerMonth: string;
       rentPerMonthShort: string;
+      rentAmount: string;
+      rentPeriod: string;
       specBed: string;
       specBeds: string;
       specSqm: string;
@@ -724,6 +750,16 @@ export interface TranslationSchema {
       filterReset: string;
       filterShowResults: string;
       filterClear: string;
+      rentAndTerms: string;
+      priceFrom: string;
+      roomInformation: string;
+      availabilityLabel: string;
+      specBath: string;
+      specBaths: string;
+      specFloor: string;
+      monthHint: string;
+      monthsHint: string;
+      edit: string;
     };
     dashboard: {
       workspaceLabel: string;

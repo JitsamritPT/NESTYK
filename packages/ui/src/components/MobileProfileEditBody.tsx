@@ -12,6 +12,7 @@ import { MobileInput } from './MobileInput';
 import { MobileButton } from './MobileButton';
 import { MobileProfileAvatar } from './MobileProfileAvatar';
 import { MobileBottomSheet } from './MobileBottomSheet';
+import { MobileActionSheetBody } from './MobileActionSheetBody';
 import { MobileIcon } from '../icons/MobileIcon';
 import { tokens } from '../theme/tokens';
 import { getCardElevation } from '../theme/elevation';
@@ -94,7 +95,7 @@ export const MobileProfileEditBody: React.FC<MobileProfileEditBodyProps> = ({
   avatarUri: initialAvatarUri,
 }) => {
   const { t } = useLocale();
-  const { theme, isDark } = useMobileTheme();
+  const { theme } = useMobileTheme();
   const split = useMemo(() => splitName(name), [name]);
   const [firstName, setFirstName] = useState(split.first);
   const [lastName, setLastName] = useState(split.last);
@@ -218,45 +219,37 @@ export const MobileProfileEditBody: React.FC<MobileProfileEditBodyProps> = ({
       </ScrollView>
 
       <MobileBottomSheet visible={photoSheetOpen} onClose={closeSheet}>
-        <Text style={[styles.sheetTitle, { color: theme.textHeading }]}>
-          {t.mobile.account.changePhoto}
-        </Text>
-        <TouchableOpacity
-          style={[styles.sheetRow, { borderBottomColor: theme.border }]}
-          onPress={onTakePhoto}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.sheetRowLabel, { color: theme.textHeading }]}>
-            {t.mobile.account.takePhoto}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sheetRow, { borderBottomColor: theme.border }]}
-          onPress={onChooseLibrary}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.sheetRowLabel, { color: theme.textHeading }]}>
-            {t.mobile.account.chooseFromLibrary}
-          </Text>
-        </TouchableOpacity>
-        {avatarUri ? (
-          <TouchableOpacity
-            style={[styles.sheetRow, { borderBottomColor: theme.border }]}
-            onPress={onRemovePhoto}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.sheetRowLabel, { color: tokens.colors.danger }]}>
-              {t.mobile.account.removePhoto}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-        <TouchableOpacity
-          style={[styles.sheetCancel, { backgroundColor: isDark ? theme.background : tokens.colors.background }]}
-          onPress={closeSheet}
-          activeOpacity={0.7}
-        >
-          <Text style={[styles.sheetRowLabel, { color: theme.textHeading }]}>{t.common.cancel}</Text>
-        </TouchableOpacity>
+        <MobileActionSheetBody
+          title={t.mobile.account.changePhoto}
+          cancelLabel={t.common.cancel}
+          onCancel={closeSheet}
+          actions={[
+            {
+              key: 'camera',
+              label: t.mobile.account.takePhoto,
+              onPress: () => {
+                void onTakePhoto();
+              },
+            },
+            {
+              key: 'library',
+              label: t.mobile.account.chooseFromLibrary,
+              onPress: () => {
+                void onChooseLibrary();
+              },
+            },
+            ...(avatarUri
+              ? [
+                  {
+                    key: 'remove',
+                    label: t.mobile.account.removePhoto,
+                    danger: true as const,
+                    onPress: onRemovePhoto,
+                  },
+                ]
+              : []),
+          ]}
+        />
       </MobileBottomSheet>
     </>
   );
@@ -341,32 +334,5 @@ const styles = StyleSheet.create({
   },
   saveBtnWrap: {
     marginTop: 16,
-  },
-  sheetTitle: {
-    fontFamily: tokens.typography.native.headingTh,
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: '600',
-    marginBottom: 8,
-    paddingHorizontal: 20,
-  },
-  sheetRow: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  sheetRowLabel: {
-    fontFamily: tokens.typography.native.body,
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  sheetCancel: {
-    marginTop: 12,
-    marginHorizontal: 20,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
   },
 });

@@ -13,13 +13,15 @@ export type RoomEditSection = {
   status: RoomEditSectionStatus;
   /** Short status line, e.g. "2 fields missing" or "Not added yet". */
   statusLabel: string;
+  /** After Save room — draw attention to required gaps on the hub. */
+  highlightError?: boolean;
 };
 
 export interface RoomEditSectionListProps {
   sections: RoomEditSection[];
   themeColor?: string;
   summaryLabel: string;
-  summaryTone: 'success' | 'warning';
+  summaryTone: 'success' | 'warning' | 'error';
   /** 0–1 progress for required sections. */
   progress?: number;
   disabled?: boolean;
@@ -65,15 +67,26 @@ export const RoomEditSectionList: React.FC<RoomEditSectionListProps> = ({
             android_ripple={{ color: `${BRAND}22` }}
             style={({ pressed }) => [
               styles.card,
+              section.highlightError ? styles.cardError : null,
               pressed && Platform.OS === 'ios' ? { opacity: 0.72 } : null,
             ]}
           >
-            <View style={styles.iconWrap}>
-              <MobileIcon name={section.icon} size={20} color={ICON_FG} />
+            <View style={[styles.iconWrap, section.highlightError ? styles.iconWrapError : null]}>
+              <MobileIcon
+                name={section.icon}
+                size={20}
+                color={section.highlightError ? tokens.colors.error : ICON_FG}
+              />
             </View>
             <View style={styles.rowBody}>
               <Text style={styles.rowTitle}>{section.label}</Text>
-              <Text style={styles.rowHint} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.rowHint,
+                  section.highlightError ? styles.rowHintError : null,
+                ]}
+                numberOfLines={2}
+              >
                 {section.status === 'complete' ? section.hint : section.statusLabel}
               </Text>
             </View>
@@ -82,7 +95,11 @@ export const RoomEditSectionList: React.FC<RoomEditSectionListProps> = ({
                 <MobileIcon name="check" size={12} color={tokens.colors.white} weight="bold" />
               </View>
             ) : (
-              <MobileIcon name="chevron-right" size={18} color={tokens.colors.divider} />
+              <MobileIcon
+                name="chevron-right"
+                size={18}
+                color={section.highlightError ? tokens.colors.error : tokens.colors.divider}
+              />
             )}
           </Pressable>
         ))}
@@ -130,6 +147,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: tokens.colors.border,
   },
+  cardError: {
+    borderColor: tokens.colors.error,
+    backgroundColor: '#FEF2F2',
+  },
   iconWrap: {
     width: 40,
     height: 40,
@@ -137,6 +158,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: ICON_BG,
+  },
+  iconWrapError: {
+    backgroundColor: '#FEE2E2',
   },
   rowBody: {
     flex: 1,
@@ -155,6 +179,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: tokens.colors.textSecondary,
+  },
+  rowHintError: {
+    color: tokens.colors.error,
+    fontWeight: '600',
   },
   completeBadge: {
     width: 22,

@@ -29,6 +29,7 @@ export type AgentListingCard = {
   coverMediaUrl: string | null;
   bedroomCount?: string | null;
   roomSizeSqm?: string | null;
+  floor?: string | null;
   updatedAt?: string | null;
 };
 
