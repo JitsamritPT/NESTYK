@@ -26,6 +26,11 @@ export class AgentListingsController {
     @Query('roomStatus') roomStatus?: string,
     @Query('listingSource') listingSource?: string,
     @Query('sort') sort?: string,
+    @Query('propertyType') propertyType?: string,
+    @Query('roomType') roomType?: string,
+    @Query('bedrooms') bedrooms?: string,
+    @Query('minPrice') minPrice?: string,
+    @Query('maxPrice') maxPrice?: string,
   ) {
     if (!user?.id) {
       throw new UnauthorizedException('Call POST /auth/sync first');
@@ -38,6 +43,7 @@ export class AgentListingsController {
       roomStatus,
       listingSource,
       sort,
+      propertyType, roomType, bedrooms, minPrice, maxPrice,
     });
   }
 }

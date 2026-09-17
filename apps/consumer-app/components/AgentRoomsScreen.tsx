@@ -1,4 +1,6 @@
 import { AgentRoomEditor } from './AgentRoomEditor';
+import { RoomPriceFilter } from './RoomPriceFilter';
+import { formatPriceSummary, validPriceRange } from './room-price-range';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -25,6 +27,7 @@ import {
   MobileBottomSheet,
   MobileBrandLoader,
   MobileIcon,
+  type AppIconName,
   SelectionCheck,
   SelectionChip,
   MobileSectionHeader,
@@ -42,13 +45,45 @@ type RoomFilters = {
   visibility: VisibilityFilter;
   roomStatus: StatusFilter;
   listingSource: SourceFilter;
+  propertyType: string;
+  roomType: string;
+  bedrooms: string;
+  minPrice: string;
+  maxPrice: string;
 };
 
 const EMPTY_FILTERS: RoomFilters = {
   visibility: '',
   roomStatus: '',
   listingSource: '',
+  propertyType: '', roomType: '', bedrooms: '', minPrice: '', maxPrice: '',
 };
+
+const PROPERTY_TYPE_ICONS: Record<string, AppIconName> = {
+  condo: 'buildings',
+  apartment: 'buildings',
+  house: 'home',
+};
+
+/** Matches master_room_types.bedroom_count — null = flexible (duplex/penthouse). */
+const ROOM_TYPE_BEDROOMS: Record<string, string | null> = {
+  studio: '0',
+  one_bedroom: '1',
+  one_bedroom_plus: '1',
+  two_bedroom: '2',
+  three_bedroom: '3',
+  four_bedroom: '4',
+  duplex: null,
+  penthouse: null,
+};
+
+const SOURCE_FILTER_OPTIONS: Array<{ value: SourceFilter; icon: AppIconName }> = [
+  { value: '', icon: 'globe' },
+  { value: 'owner', icon: 'user' },
+  { value: 'co_agent', icon: 'handshake' },
+];
+
+type FilterSectionKey = 'room' | 'price' | 'status' | 'extra';
 
 function Chip({
   label,
@@ -64,6 +99,7 @@ function Chip({
       label={label}
       selected={selected}
       onPress={onPress}
+      showCheck={false}
       style={styles.filterChip}
       labelStyle={styles.chipLabel}
     />
@@ -76,7 +112,7 @@ function FilterOptionRow({
   value,
   onChange,
 }: {
-  title: string;
+  title?: string;
   options: Array<{ value: string; label: string }>;
   value: string;
   onChange: (value: string) => void;
@@ -84,7 +120,9 @@ function FilterOptionRow({
   const { theme } = useMobileTheme();
   return (
     <View style={styles.filterSection}>
-      <Text style={[styles.filterSectionTitle, { color: theme.textHeading }]}>{title}</Text>
+      {title ? (
+        <Text style={[styles.filterSectionTitle, { color: theme.textHeading }]}>{title}</Text>
+      ) : null}
       <View style={styles.chipWrap}>
         {options.map((opt) => (
           <Chip
@@ -95,6 +133,105 @@ function FilterOptionRow({
           />
         ))}
       </View>
+    </View>
+  );
+}
+
+function FilterSubHeader({
+  title,
+  clearLabel,
+  showClear,
+  onClear,
+}: {
+  title: string;
+  clearLabel: string;
+  showClear: boolean;
+  onClear: () => void;
+}) {
+  const { theme } = useMobileTheme();
+  return (
+    <View style={styles.subHeader}>
+      <Text style={[styles.filterSectionTitle, { color: theme.textHeading, flex: 1 }]}>{title}</Text>
+      {showClear ? (
+        <Pressable onPress={onClear} hitSlop={8} accessibilityRole="button">
+          <Text style={styles.clearInline}>{clearLabel}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function FilterIconCard({
+  icon,
+  label,
+  selected,
+  onPress,
+}: {
+  icon: AppIconName;
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      android_ripple={{ color: '#00000014' }}
+      style={({ pressed }) => [
+        styles.iconCard,
+        selected ? styles.iconCardSelected : null,
+        pressed ? { opacity: 0.92 } : null,
+      ]}
+    >
+      <MobileIcon name={icon} size={22} color={tokens.colors.primary} />
+      <Text style={[styles.iconCardLabel, selected && styles.iconCardLabelSelected]} numberOfLines={2}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function FilterAccordion({
+  icon,
+  title,
+  summary,
+  expanded,
+  onToggle,
+  children,
+  isLast = false,
+}: {
+  icon: AppIconName;
+  title: string;
+  summary: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  isLast?: boolean;
+}) {
+  const { theme } = useMobileTheme();
+  return (
+    <View style={[styles.accordionBlock, !isLast && styles.accordionDivider]}>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        style={({ pressed }) => [styles.accordionHeader, pressed ? { opacity: 0.88 } : null]}
+      >
+        <View style={styles.accordionIconWell}>
+          <MobileIcon name={icon} size={18} color={tokens.colors.textSecondary} />
+        </View>
+        <View style={styles.accordionCopy}>
+          <Text style={[styles.accordionTitle, { color: theme.textHeading }]}>{title}</Text>
+          <Text style={styles.accordionSummary} numberOfLines={1}>
+            {summary}
+          </Text>
+        </View>
+        <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}>
+          <MobileIcon name="chevron-down" size={18} color={theme.textSecondary} />
+        </View>
+      </Pressable>
+      {expanded ? <View style={styles.accordionBody}>{children}</View> : null}
     </View>
   );
 }
@@ -112,7 +249,7 @@ export function AgentRoomsScreen({
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const { theme } = useMobileTheme();
   const copy = t.agent.listings;
   const cr = t.agent.createRoom;
@@ -121,6 +258,9 @@ export function AgentRoomsScreen({
   const [filters, setFilters] = useState<RoomFilters>(EMPTY_FILTERS);
   const [draft, setDraft] = useState<RoomFilters>(EMPTY_FILTERS);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [expandedFilter, setExpandedFilter] = useState<FilterSectionKey | null>(null);
+  const [roomTypePickerOpen, setRoomTypePickerOpen] = useState(false);
+  const [draggingPrice, setDraggingPrice] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [sort, setSort] = useState<AgentListingsSort>('updated_desc');
   const [viewMode, setViewMode] = useState<AgentListingsViewMode>('row');
@@ -178,6 +318,11 @@ export function AgentRoomsScreen({
         visibility: filters.visibility || undefined,
         roomStatus: filters.roomStatus || undefined,
         listingSource: filters.listingSource || undefined,
+        propertyType: filters.propertyType || undefined,
+        roomType: filters.roomType || undefined,
+        bedrooms: filters.bedrooms || undefined,
+        minPrice: filters.minPrice || undefined,
+        maxPrice: filters.maxPrice || undefined,
         sort,
       })
         .then((result) => {
@@ -223,11 +368,51 @@ export function AgentRoomsScreen({
     if (filters.visibility) n += 1;
     if (filters.roomStatus) n += 1;
     if (filters.listingSource) n += 1;
+    if (filters.propertyType) n += 1;
+    if (filters.roomType) n += 1;
+    if (filters.bedrooms) n += 1;
+    if (filters.minPrice || filters.maxPrice) n += 1;
     return n;
   }, [filters]);
 
   const activeChips = useMemo(() => {
     const chips: Array<{ key: string; label: string; clear: () => void }> = [];
+    for (const key of ['propertyType', 'roomType', 'bedrooms'] as const) {
+      if (!filters[key]) continue;
+      const label =
+        key === 'propertyType'
+          ? t.masters.propertyTypes[filters[key] as keyof typeof t.masters.propertyTypes]
+          : key === 'roomType'
+            ? t.masters.roomTypes[filters[key] as keyof typeof t.masters.roomTypes]
+            : filters[key] === '0'
+              ? t.masters.roomTypes.studio
+              : filters[key] === '4'
+                ? copy.specBeds.replace('{count}', '4+')
+                : filters[key] === '1'
+                  ? copy.specBed.replace('{count}', '1')
+                  : copy.specBeds.replace('{count}', filters[key]);
+      chips.push({
+        key,
+        label: label || filters[key],
+        clear: () => {
+          setFilters((f) => ({ ...f, [key]: '' }));
+          setPage(1);
+        },
+      });
+    }
+    if (filters.minPrice || filters.maxPrice) {
+      chips.push({
+        key: 'price',
+        label: formatPriceSummary(filters, locale, {
+          unlimited: copy.filterUnlimited,
+          perMonth: copy.filterPricePerMonth,
+        }),
+        clear: () => {
+          setFilters((f) => ({ ...f, minPrice: '', maxPrice: '' }));
+          setPage(1);
+        },
+      });
+    }
     if (filters.roomStatus) {
       chips.push({
         key: 'status',
@@ -252,14 +437,107 @@ export function AgentRoomsScreen({
       });
     }
     return chips;
-  }, [filters, copy, cr]);
+  }, [filters, copy, cr, t, locale]);
+
+  const invalidPrice = !validPriceRange(draft);
 
   const openFilter = () => {
     setDraft(filters);
+    setExpandedFilter(null);
+    setRoomTypePickerOpen(false);
+    setDraggingPrice(false);
     setFilterOpen(true);
   };
 
+  const toggleFilterSection = (key: FilterSectionKey) => {
+    setExpandedFilter((current) => {
+      const next = current === key ? null : key;
+      if (next !== 'room') setRoomTypePickerOpen(false);
+      return next;
+    });
+  };
+
+  const bedroomFilterLabel = (value: string) => {
+    if (value === '0') return t.masters.roomTypes.studio;
+    if (value === '4') return copy.specBeds.replace('{count}', '4+');
+    if (value === '1') return copy.specBed.replace('{count}', '1');
+    return copy.specBeds.replace('{count}', value);
+  };
+
+  const bedroomSegmentLabel = (value: string) => {
+    if (value === '0') return t.masters.roomTypes.studio;
+    if (value === '4') return '4+';
+    return value;
+  };
+
+  const applyRoomType = (roomType: string) => {
+    const syncedBeds = roomType ? ROOM_TYPE_BEDROOMS[roomType] : undefined;
+    setDraft((d) => ({
+      ...d,
+      roomType,
+      bedrooms: typeof syncedBeds === 'string' ? syncedBeds : d.bedrooms,
+    }));
+    setRoomTypePickerOpen(false);
+  };
+
+  const applyBedrooms = (bedrooms: string) => {
+    setRoomTypePickerOpen(false);
+    setDraft((d) => {
+      const locked = d.roomType ? ROOM_TYPE_BEDROOMS[d.roomType] : undefined;
+      const conflicts =
+        !!d.roomType &&
+        locked != null &&
+        bedrooms !== '' &&
+        bedrooms !== locked;
+      return {
+        ...d,
+        bedrooms,
+        roomType: conflicts ? '' : d.roomType,
+      };
+    });
+  };
+
+  const roomFilterSummary = [
+    draft.propertyType
+      ? t.masters.propertyTypes[draft.propertyType as keyof typeof t.masters.propertyTypes]
+      : null,
+    draft.roomType
+      ? t.masters.roomTypes[draft.roomType as keyof typeof t.masters.roomTypes]
+      : null,
+    draft.bedrooms ? bedroomFilterLabel(draft.bedrooms) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ') || copy.filterAny;
+
+  const priceFilterSummary =
+    draft.minPrice || draft.maxPrice
+      ? formatPriceSummary(draft, locale, {
+          unlimited: copy.filterUnlimited,
+          perMonth: copy.filterPricePerMonth,
+        })
+      : copy.filterAny;
+
+  const statusFilterSummary = [
+    draft.roomStatus
+      ? String(copy[draft.roomStatus as keyof typeof copy] || draft.roomStatus)
+      : null,
+    draft.listingSource
+      ? draft.listingSource === 'owner'
+        ? cr.sourceOwner
+        : cr.sourceCoAgent
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ') || copy.filterAny;
+
+  const extraFilterSummary = draft.visibility
+    ? draft.visibility === 'private'
+      ? cr.visibilityPrivate
+      : cr.visibilityPublished
+    : copy.filterVisibility;
+
   const applyFilter = () => {
+    if (invalidPrice) return;
     setFilters(draft);
     setPage(1);
     setFilterOpen(false);
@@ -295,14 +573,12 @@ export function AgentRoomsScreen({
     { value: 'private', label: cr.visibilityPrivate },
   ];
 
-  const sourceOptions = [
-    { value: '', label: copy.filterAny },
-    { value: 'owner', label: cr.sourceOwner },
-    { value: 'co_agent', label: cr.sourceCoAgent },
-  ];
+  const bedroomOptions = ['', '0', '1', '2', '3', '4'];
+
+  const propertyTypeEntries = Object.entries(t.masters.propertyTypes);
 
   const hasActiveQuery =
-    !!query.trim() || !!filters.visibility || !!filters.roomStatus || !!filters.listingSource;
+    !!query.trim() || filterBadge > 0;
 
   if (!gateOpen) {
     return (
@@ -380,7 +656,7 @@ export function AgentRoomsScreen({
           {activeChips.map((chip) => (
             <Pressable
               key={chip.key}
-              onPress={chip.clear}
+              onPress={() => { chip.clear(); setPage(1); }}
               style={styles.activeChip}
               accessibilityRole="button"
               accessibilityLabel={`${copy.filterClear} ${chip.label}`}
@@ -498,7 +774,7 @@ export function AgentRoomsScreen({
             onPress={() => setSortOpen(false)}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel={copy.filterClear}
+            accessibilityLabel={t.agent.createRoom.closePhotoPreview}
           >
             <MobileIcon name="close" size={22} color={theme.textHeading} />
           </Pressable>
@@ -537,37 +813,266 @@ export function AgentRoomsScreen({
         </View>
       </MobileBottomSheet>
 
-      <MobileBottomSheet visible={filterOpen} onClose={() => setFilterOpen(false)}>
+      <MobileBottomSheet
+        visible={filterOpen}
+        onClose={() => {
+          setFilterOpen(false);
+          setExpandedFilter(null);
+          setRoomTypePickerOpen(false);
+          setDraggingPrice(false);
+        }}
+        avoidKeyboard
+        maxHeight="92%"
+      >
         <View style={styles.sheetHeader}>
           <Text style={[styles.sheetTitle, { color: theme.textHeading }]}>{copy.filterRooms}</Text>
           <Pressable
-            onPress={() => setFilterOpen(false)}
+            onPress={() => {
+              setFilterOpen(false);
+              setExpandedFilter(null);
+              setRoomTypePickerOpen(false);
+            }}
             hitSlop={10}
             accessibilityRole="button"
-            accessibilityLabel={copy.filterClear}
+            accessibilityLabel={cr.closePhotoPreview}
           >
             <MobileIcon name="close" size={22} color={theme.textHeading} />
           </Pressable>
         </View>
-        <ScrollView style={styles.sheetBody} showsVerticalScrollIndicator={false}>
-          <FilterOptionRow
-            title={copy.filterAvailability}
-            options={statusOptions}
-            value={draft.roomStatus}
-            onChange={(v) => setDraft((d) => ({ ...d, roomStatus: v as StatusFilter }))}
-          />
-          <FilterOptionRow
-            title={copy.filterVisibility}
-            options={visibilityOptions}
-            value={draft.visibility}
-            onChange={(v) => setDraft((d) => ({ ...d, visibility: v as VisibilityFilter }))}
-          />
-          <FilterOptionRow
-            title={copy.filterSource}
-            options={sourceOptions}
-            value={draft.listingSource}
-            onChange={(v) => setDraft((d) => ({ ...d, listingSource: v as SourceFilter }))}
-          />
+        <ScrollView
+          style={[styles.sheetBody, { maxHeight: undefined }]}
+          scrollEnabled={!draggingPrice}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <FilterAccordion
+            icon="buildings"
+            title={copy.roomInformation}
+            summary={roomFilterSummary}
+            expanded={expandedFilter === 'room'}
+            onToggle={() => toggleFilterSection('room')}
+          >
+            <View style={styles.filterSection}>
+              <FilterSubHeader
+                title={cr.propertyType}
+                clearLabel={copy.filterAny}
+                showClear={!!draft.propertyType}
+                onClear={() => setDraft((d) => ({ ...d, propertyType: '' }))}
+              />
+              <View style={styles.iconCardRow}>
+                {propertyTypeEntries.map(([value, label]) => (
+                  <FilterIconCard
+                    key={value}
+                    icon={PROPERTY_TYPE_ICONS[value] ?? 'buildings'}
+                    label={label}
+                    selected={draft.propertyType === value}
+                    onPress={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        propertyType: d.propertyType === value ? '' : value,
+                      }))
+                    }
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterSectionTitle, { color: theme.textHeading }]}>
+                {cr.roomType}
+              </Text>
+              <Pressable
+                onPress={() => setRoomTypePickerOpen((v) => !v)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: roomTypePickerOpen }}
+                style={({ pressed }) => [
+                  styles.dropdownRow,
+                  roomTypePickerOpen ? styles.dropdownRowOpen : null,
+                  { borderColor: theme.border, backgroundColor: theme.surface },
+                  pressed ? { opacity: 0.9 } : null,
+                ]}
+              >
+                <Text style={[styles.dropdownValue, { color: theme.textHeading }]}>
+                  {draft.roomType
+                    ? t.masters.roomTypes[draft.roomType as keyof typeof t.masters.roomTypes]
+                    : copy.filterAny}
+                </Text>
+                <View
+                  style={{
+                    transform: [{ rotate: roomTypePickerOpen ? '180deg' : '0deg' }],
+                  }}
+                >
+                  <MobileIcon name="chevron-down" size={16} color={theme.textSecondary} />
+                </View>
+              </Pressable>
+              {roomTypePickerOpen ? (
+                <View
+                  style={[
+                    styles.dropdownMenu,
+                    { borderColor: theme.border, backgroundColor: theme.surface },
+                  ]}
+                >
+                  <Pressable
+                    onPress={() => applyRoomType('')}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: !draft.roomType }}
+                    style={({ pressed }) => [
+                      styles.dropdownOption,
+                      !draft.roomType ? styles.dropdownOptionSelected : null,
+                      pressed ? { opacity: 0.88 } : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownOptionLabel,
+                        {
+                          color: !draft.roomType
+                            ? tokens.colors.primary
+                            : theme.textHeading,
+                        },
+                      ]}
+                    >
+                      {copy.filterAny}
+                    </Text>
+                  </Pressable>
+                  {Object.entries(t.masters.roomTypes).map(([value, label]) => {
+                    const selected = draft.roomType === value;
+                    return (
+                      <Pressable
+                        key={value}
+                        onPress={() => applyRoomType(value)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        style={({ pressed }) => [
+                          styles.dropdownOption,
+                          selected ? styles.dropdownOptionSelected : null,
+                          pressed ? { opacity: 0.88 } : null,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownOptionLabel,
+                            {
+                              color: selected
+                                ? tokens.colors.primary
+                                : theme.textHeading,
+                            },
+                          ]}
+                        >
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterSectionTitle, { color: theme.textHeading }]}>
+                {cr.bedroom}
+              </Text>
+              <View style={styles.segmentRow}>
+                {bedroomOptions.map((value) => {
+                  const selected = draft.bedrooms === value;
+                  const label =
+                    value === '' ? copy.filterAny : bedroomSegmentLabel(value);
+                  return (
+                    <Pressable
+                      key={value || 'any'}
+                      onPress={() => applyBedrooms(value)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      style={({ pressed }) => [
+                        styles.segmentItem,
+                        selected ? styles.segmentItemSelected : null,
+                        pressed ? { opacity: 0.9 } : null,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.segmentLabel,
+                          selected ? styles.segmentLabelSelected : null,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </FilterAccordion>
+
+          <FilterAccordion
+            icon="coins"
+            title={copy.filterPriceRange}
+            summary={priceFilterSummary}
+            expanded={expandedFilter === 'price'}
+            onToggle={() => toggleFilterSection('price')}
+          >
+            <RoomPriceFilter
+              value={draft}
+              onChange={(range) => setDraft((d) => ({ ...d, ...range }))}
+              onDragging={setDraggingPrice}
+            />
+          </FilterAccordion>
+
+          <FilterAccordion
+            icon="calendar"
+            title={copy.filterManagement}
+            summary={statusFilterSummary}
+            expanded={expandedFilter === 'status'}
+            onToggle={() => toggleFilterSection('status')}
+          >
+            <FilterOptionRow
+              title={copy.filterAvailability}
+              options={statusOptions}
+              value={draft.roomStatus}
+              onChange={(v) => setDraft((d) => ({ ...d, roomStatus: v as StatusFilter }))}
+            />
+            <View style={styles.filterSection}>
+              <Text style={[styles.filterSectionTitle, { color: theme.textHeading }]}>
+                {copy.filterSource}
+              </Text>
+              <View style={styles.iconCardRow}>
+                {SOURCE_FILTER_OPTIONS.map((opt) => {
+                  const label =
+                    opt.value === ''
+                      ? copy.filterAny
+                      : opt.value === 'owner'
+                        ? cr.sourceOwner
+                        : cr.sourceCoAgent;
+                  return (
+                    <FilterIconCard
+                      key={opt.value || 'any'}
+                      icon={opt.icon}
+                      label={label}
+                      selected={draft.listingSource === opt.value}
+                      onPress={() => setDraft((d) => ({ ...d, listingSource: opt.value }))}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+          </FilterAccordion>
+
+          <FilterAccordion
+            icon="gear"
+            title={copy.filterMore}
+            summary={extraFilterSummary}
+            expanded={expandedFilter === 'extra'}
+            onToggle={() => toggleFilterSection('extra')}
+            isLast
+          >
+            <FilterOptionRow
+              title={copy.filterVisibility}
+              options={visibilityOptions}
+              value={draft.visibility}
+              onChange={(v) => setDraft((d) => ({ ...d, visibility: v as VisibilityFilter }))}
+            />
+          </FilterAccordion>
         </ScrollView>
         <View style={styles.sheetFooter}>
           <Pressable onPress={resetDraft} hitSlop={8}>
@@ -575,7 +1080,9 @@ export function AgentRoomsScreen({
           </Pressable>
           <Pressable
             onPress={applyFilter}
-            style={styles.showResultsBtn}
+            disabled={invalidPrice}
+            accessibilityState={{ disabled: invalidPrice }}
+            style={[styles.showResultsBtn, invalidPrice && { opacity: 0.45 }]}
             accessibilityRole="button"
             {...(Platform.OS === 'android'
               ? { android_ripple: { color: 'rgba(33,30,30,0.12)' } }
@@ -698,7 +1205,7 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 9,
     paddingHorizontal: 4,
-    backgroundColor: tokens.colors.danger,
+    backgroundColor: tokens.colors.brand[500],
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -707,7 +1214,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 14,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: tokens.colors.primary,
   },
   toolbar: {
     flexDirection: 'row',
@@ -836,25 +1343,194 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     maxHeight: 420,
   },
-  filterSection: { gap: 10, marginBottom: 20 },
+  filterSection: { gap: 10, marginBottom: 16 },
+  accordionBlock: {
+    paddingVertical: 4,
+  },
+  accordionDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.divider,
+    marginBottom: 4,
+    paddingBottom: 8,
+  },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    minHeight: 56,
+    paddingVertical: 8,
+  },
+  accordionIconWell: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: tokens.colors.slate[50],
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+  },
+  accordionCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  accordionTitle: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '500',
+  },
+  accordionSummary: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
+  },
+  accordionBody: {
+    paddingTop: 4,
+    paddingBottom: 12,
+  },
   filterSectionTitle: {
     fontFamily: tokens.typography.native.headingTh,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '500',
+  },
+  subHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
+  },
+  clearInline: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '600',
+    color: tokens.colors.accent,
+  },
+  iconCardRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  iconCard: {
+    flex: 1,
+    minHeight: 88,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: tokens.colors.border,
+    backgroundColor: tokens.colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    position: 'relative',
+  },
+  iconCardSelected: {
+    borderColor: tokens.colors.brand[500],
+    backgroundColor: tokens.colors.brand[50],
+  },
+  iconCardLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    color: tokens.colors.textHeading,
+    fontWeight: '600',
+  },
+  iconCardLabelSelected: {
+    color: tokens.colors.primary,
+  },
+  dropdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+  },
+  dropdownRowOpen: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
+  },
+  dropdownValue: {
+    fontFamily: tokens.typography.native.body,
     fontSize: 15,
     lineHeight: 22,
-    fontWeight: '500',
+    flex: 1,
+  },
+  dropdownMenu: {
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  dropdownOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 48,
+    paddingHorizontal: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: tokens.colors.border,
+  },
+  dropdownOptionSelected: {
+    backgroundColor: tokens.colors.brand[50],
+  },
+  dropdownOptionLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 22,
+    flex: 1,
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  segmentItem: {
+    minWidth: 48,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: tokens.colors.border,
+    backgroundColor: tokens.colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentItemSelected: {
+    borderColor: tokens.colors.brand[500],
+    backgroundColor: tokens.colors.brand[50],
+  },
+  segmentLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textHeading,
+    fontWeight: '600',
+  },
+  segmentLabelSelected: {
+    color: tokens.colors.primary,
   },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   filterChip: {
     flexGrow: 0,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minHeight: 36,
+    paddingVertical: 10,
+    borderRadius: 12,
+    minHeight: 44,
   },
   chipLabel: {
     fontFamily: tokens.typography.native.body,
     fontSize: 13,
     lineHeight: 19,
+    fontWeight: '600',
   },
   sheetFooter: {
     flexDirection: 'row',
