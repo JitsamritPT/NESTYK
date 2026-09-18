@@ -39,24 +39,16 @@ const subjects: Record<AgreementDocumentSubject, string> = {
 
 const EXTRA_SLOTS = [
   {
-    code: "power_of_attorney",
-    label: "มอบอำนาจ / แต่งตั้งนายหน้า",
-    hint: "หนังสือมอบอำนาจหรือเอกสารแต่งตั้งนายหน้า",
-    defaultSubject: "representative" as AgreementDocumentSubject,
-  },
-  {
-    code: "payment_proof",
-    label: "หลักฐานการจ่ายเงิน",
-    hint: "สลิปโอนหรือหลักฐานการชำระเงินจอง",
-    defaultSubject: "tenant" as AgreementDocumentSubject,
-  },
-  {
     code: "other",
     label: "อื่นๆ",
     hint: "เอกสารประกอบเพิ่มเติมตามดีล",
     defaultSubject: "tenant" as AgreementDocumentSubject,
   },
 ] as const;
+
+const NAMED_EXTRA_CODES = new Set(
+  EXTRA_SLOTS.filter((slot) => slot.code !== "other").map((slot) => slot.code),
+);
 
 type ExtraSlotCode = (typeof EXTRA_SLOTS)[number]["code"];
 type Requirement = AgreementAttachmentChecklist["requirements"][number];
@@ -182,9 +174,7 @@ export function AgreementAttachments({
   function docsForExtraSlot(code: ExtraSlotCode) {
     if (code === "other") {
       return extraDocs.filter(
-        (d) =>
-          d.documentTypeCode !== "power_of_attorney" &&
-          d.documentTypeCode !== "payment_proof",
+        (d) => !NAMED_EXTRA_CODES.has(d.documentTypeCode as ExtraSlotCode),
       );
     }
     return extraDocs.filter((d) => d.documentTypeCode === code);
@@ -679,8 +669,7 @@ export function AgreementAttachments({
                   .filter(
                     (t) =>
                       t.code === "other" ||
-                      (t.code !== "power_of_attorney" &&
-                        t.code !== "payment_proof" &&
+                      (!NAMED_EXTRA_CODES.has(t.code as ExtraSlotCode) &&
                         t.code !== "ownership_proof"),
                   )
                   .map((t) => (

@@ -42,6 +42,18 @@ export class AgentContractsController {
   @Get("candidates") candidates(@CurrentUser() user: AuthRequestUser) {
     return this.contracts.candidates(user.id);
   }
+  @Get("reservation-defaults/:leadId") reservationDefaults(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("leadId", ParseIntPipe) leadId: number,
+  ) {
+    return this.contracts.reservationDefaults(user.id, leadId);
+  }
+  @Get("broker-appointment-defaults/:leadId") brokerAppointmentDefaults(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("leadId", ParseIntPipe) leadId: number,
+  ) {
+    return this.contracts.brokerAppointmentDefaults(user.id, leadId);
+  }
   @Get() list(@CurrentUser() user: AuthRequestUser) {
     return this.contracts.list(user.id);
   }
@@ -69,6 +81,22 @@ export class AgentContractsController {
     @Param("id", ParseIntPipe) id: number,
   ) {
     return this.contracts.reservationPdf(user.id, id, true);
+  }
+  @Post(":id/broker-appointment-preview")
+  @HttpCode(HttpStatus.OK)
+  brokerAppointmentPreview(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.contracts.brokerAppointmentPdf(user.id, id, false);
+  }
+  @Post(":id/generate-broker-appointment")
+  @HttpCode(HttpStatus.OK)
+  generateBrokerAppointment(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.contracts.brokerAppointmentPdf(user.id, id, true);
   }
   @Post(":id/sign")
   @HttpCode(HttpStatus.OK)

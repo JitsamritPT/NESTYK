@@ -11,7 +11,7 @@ export function validateAgreementData(
   schema: Record<string, unknown>,
   input: unknown,
   contract: CreateAgentContract,
-  formKind: "reservation" | "lease",
+  formKind: "reservation" | "lease" | "broker_appointment",
 ): Record<string, unknown> {
   if (input != null && (typeof input !== "object" || Array.isArray(input)))
     throw new BadRequestException("ข้อมูลเฉพาะสัญญาต้องเป็น object");
@@ -23,11 +23,13 @@ export function validateAgreementData(
           moveInDate: contract.moveInDate,
           reservationFee: contract.reservationFee,
         }
-      : {
-          endDate: contract.endDate,
-          monthlyRent: contract.monthlyRent,
-          deposit: contract.deposit,
-        }),
+      : formKind === "lease"
+        ? {
+            endDate: contract.endDate,
+            monthlyRent: contract.monthlyRent,
+            deposit: contract.deposit,
+          }
+        : {}),
   };
   if (JSON.stringify(data).length > 64000)
     throw new BadRequestException("ข้อมูลเฉพาะสัญญามีขนาดใหญ่เกินไป");

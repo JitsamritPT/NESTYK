@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -44,5 +45,12 @@ export class AgentTenantsController {
   }
   @Post() create(@CurrentUser() u: AuthRequestUser, @Body() body: unknown) {
     return this.tenants.create(u.id, body);
+  }
+  @Patch(":id") update(
+    @CurrentUser() u: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: unknown,
+  ) {
+    return this.tenants.update(u.id, id, body);
   }
 }

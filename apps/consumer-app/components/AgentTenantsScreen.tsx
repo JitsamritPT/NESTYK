@@ -1,4 +1,3 @@
-import { getAgentContract } from "../lib/agent-contracts-api";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -10,13 +9,9 @@ import {
   View,
 } from "react-native";
 import { MobileBrandLoader, MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
-import type {
-  AgentContract,
-  AgentContractStatus,
-  AgentTenant,
-} from "@nestyk/types";
+import type { AgentContract, AgentTenant } from "@nestyk/types";
 import { useLocale } from "@nestyk/i18n";
-import { getAgentTenant, listAgentTenants } from "../lib/agent-tenants-api";
+import { getAgentTenant, listAgentTenants, updateAgentTenant } from "../lib/agent-tenants-api";
 import { TenantForm } from "./TenantForm";
 import { ContractsScreen } from "./ContractsScreen";
 
@@ -69,27 +64,6 @@ const renewal = (t: AgentTenant) =>
     const days = daysLeft(c);
     return days != null && days >= 0 && days <= 30;
   });
-const contractLabels: Record<AgentContractStatus, string> = {
-  draft: "ฉบับร่าง",
-  awaiting_signatures: "รอลงนาม",
-  awaiting_agent_review: "รอตรวจสัญญา",
-  awaiting_payment: "รอชำระเงิน",
-  awaiting_payment_verification: "รอตรวจชำระเงิน",
-  active: "มีผลแล้ว",
-  cancelled: "ยกเลิก",
-  expired: "หมดอายุ",
-  terminated: "สิ้นสุดสัญญา",
-};
-const contractStatusColor = (status: AgentContractStatus) =>
-  status === "active"
-    ? "#278268"
-    : status.startsWith("awaiting")
-      ? "#BB7914"
-      : "#788193";
-const money = (value: number | null, suffix = "") =>
-  value == null
-    ? "ยังไม่ระบุ"
-    : `฿${value.toLocaleString("th-TH", { maximumFractionDigits: 2 })}${suffix}`;
 
 export function AgentTenantsScreen({
   searchOpen = false,
@@ -110,9 +84,6 @@ export function AgentTenantsScreen({
   const headerSearch = onSearchOpenChange != null;
   const [items, setItems] = useState<AgentTenant[]>([]);
   const [selected, setSelected] = useState<AgentTenant | null>(null);
-  const [initialContract, setInitialContract] = useState<AgentContract | null>(
-    null,
-  );
   const [creating, setCreating] = useState(false);
   const [tab, setTab] = useState<"overview" | "contracts">("overview");
   const [tabsWidth, setTabsWidth] = useState(0);
@@ -134,6 +105,16 @@ export function AgentTenantsScreen({
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    phone: "",
+    email: "",
+    identityNumber: "",
+    nationality: "",
+    note: "",
+  });
   useEffect(() => {
     if (workFilter === "awaiting_signature") setFilter("signing");
     else if (workFilter === "renewal" || workFilter === "overdue_payment")
@@ -222,6 +203,7 @@ export function AgentTenantsScreen({
     setOpening(true);
     setError("");
     setNotice("");
+    setEditing(false);
     try {
       setSelected(await getAgentTenant(t.id));
       setTab("overview");
@@ -242,19 +224,48 @@ export function AgentTenantsScreen({
       );
     }
   }
-  async function openContract(contract: AgentContract) {
-    if (opening) return;
-    setOpening(true);
+  function beginEdit(tenant: AgentTenant) {
+    setEditForm({
+      name: tenant.name,
+      phone: tenant.phone,
+      email: tenant.email || "",
+      identityNumber: tenant.identityNumber || "",
+      nationality: tenant.nationality || "",
+      note: tenant.note || "",
+    });
+    setEditing(true);
+    setError("");
+    setNotice("");
+  }
+  async function saveEdit() {
+    if (!selected || savingEdit) return;
+    if (!editForm.name.trim() || !editForm.phone.trim()) {
+      setError("กรุณากรอกชื่อและเบอร์โทร");
+      return;
+    }
+    setSavingEdit(true);
     setError("");
     try {
-      setInitialContract(await getAgentContract(contract.id));
-      setTab("contracts");
+      const latest = await updateAgentTenant(selected.id, {
+        name: editForm.name.trim(),
+        phone: editForm.phone.trim(),
+        email: editForm.email.trim(),
+        identityNumber: editForm.identityNumber.trim(),
+        nationality: editForm.nationality.trim(),
+        note: editForm.note.trim(),
+      });
+      setSelected(latest);
+      setItems((current) =>
+        current.map((t) => (t.id === latest.id ? latest : t)),
+      );
+      setEditing(false);
+      setNotice("บันทึกข้อมูลผู้เช่าแล้ว");
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : "โหลดสัญญาไม่สำเร็จ กรุณาลองอีกครั้ง",
+        e instanceof Error ? e.message : "บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง",
       );
     } finally {
-      setOpening(false);
+      setSavingEdit(false);
     }
   }
   if (!gateOpen && !creating && !selected) {
@@ -285,114 +296,11 @@ export function AgentTenantsScreen({
       />
     );
   if (selected) {
-    const reservationContracts = [...selected.contracts]
-      .filter((c) => c.formKind === "reservation")
-      .sort((a, b) => b.id - a.id);
-    const leaseContracts = [...selected.contracts]
-      .filter((c) => c.formKind === "lease")
-      .sort((a, b) => b.id - a.id);
-    const renderDocumentCard = (
-      cardTitle: string,
-      items: AgentContract[],
-      emptyText: string,
-      createLabel: string,
-    ) => (
-      <View style={[s.card, panel]}>
-        <View style={s.row}>
-          <Text style={[s.subtitle, title]}>{cardTitle}</Text>
-          {items.length > 0 && (
-            <Text style={[s.small, muted]}>{items.length} ฉบับ</Text>
-          )}
-        </View>
-        {items.length === 0 ? (
-          <>
-            <Text style={[s.body, muted]}>{emptyText}</Text>
-            {button(
-              createLabel,
-              () => {
-                setInitialContract(null);
-                setTab("contracts");
-              },
-              true,
-              opening,
-            )}
-          </>
-        ) : (
-          items.map((contract, index) => {
-            const remaining = daysLeft(contract);
-            return (
-              <View
-                key={contract.id}
-                style={[
-                  s.contractItem,
-                  index > 0 && {
-                    borderTopWidth: 1,
-                    borderColor: theme.border,
-                  },
-                ]}
-              >
-                <View style={s.row}>
-                  <Text style={[s.body, title]}>
-                    {contract.agreementTypeName}
-                  </Text>
-                  <Text
-                    style={[
-                      s.badge,
-                      {
-                        color: contractStatusColor(contract.status),
-                        backgroundColor: `${contractStatusColor(contract.status)}15`,
-                      },
-                    ]}
-                  >
-                    {contractLabels[contract.status]}
-                  </Text>
-                </View>
-                <Text style={[s.small, muted]}>
-                  เลขที่สัญญา {contract.contractNo}
-                </Text>
-                <Text style={[s.body, title]}>
-                  {contract.property}
-                  {contract.room ? ` · ห้อง ${contract.room}` : ""}
-                </Text>
-                <Text style={[s.body, muted]}>
-                  {contract.formKind === "reservation"
-                    ? `วันที่จอง ${date(contract.bookingDate ?? contract.startDate)} · วันที่เข้าอยู่ ${contract.moveInDate ? date(contract.moveInDate) : "ยังไม่ระบุ"}`
-                    : `${date(contract.startDate)} – ${contract.endDate ? date(contract.endDate) : "ไม่ระบุวันสิ้นสุด"}`}
-                </Text>
-                <Text style={[s.body, title]}>
-                  {contract.formKind === "reservation" ? "เงินจอง" : "ค่าเช่า"}{" "}
-                  {money(
-                    contract.formKind === "reservation"
-                      ? contract.reservationFee
-                      : contract.monthlyRent,
-                    contract.formKind === "reservation" ? "" : " / เดือน",
-                  )}
-                </Text>
-                {remaining != null && remaining <= 30 && (
-                  <Text style={[s.small, { color: "#B57506" }]}>
-                    {remaining < 0
-                      ? "เลยวันสิ้นสุดตามสัญญา กรุณาตรวจสอบสถานะ"
-                      : `ครบกำหนดใน ${remaining} วัน`}
-                  </Text>
-                )}
-                {button(
-                  "ดูสัญญา",
-                  () => {
-                    void openContract(contract);
-                  },
-                  true,
-                  opening,
-                )}
-              </View>
-            );
-          })
-        )}
-      </View>
-    );
     return (
       <View style={s.root}>
         {button("← ผู้เช่าทั้งหมด", () => {
           setSelected(null);
+          setEditing(false);
           setNotice("");
           setError("");
         })}
@@ -423,10 +331,6 @@ export function AgentTenantsScreen({
               </Text>
             </View>
           </View>
-          <Text style={[s.body, muted]}>
-            {selected.property}
-            {selected.room ? ` · ห้อง ${selected.room}` : ""}
-          </Text>
         </View>
         <View
           onLayout={(event) => setTabsWidth(event.nativeEvent.layout.width)}
@@ -438,14 +342,14 @@ export function AgentTenantsScreen({
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === key }}
               onPress={() => {
-                setInitialContract(null);
+                setEditing(false);
                 setTab(key);
               }}
               style={s.tab}
             >
               <Text style={[s.body, tab === key ? title : muted]}>
                 {key === "overview"
-                  ? "ภาพรวม"
+                  ? "ข้อมูลผู้เช่า"
                   : `สัญญา (${selected.contracts.length})`}
               </Text>
             </Pressable>
@@ -472,47 +376,113 @@ export function AgentTenantsScreen({
           <ContractsScreen
             key={selected.id}
             tenant={selected}
-            initialContract={initialContract}
             onChanged={() => {
               void refreshTenant(selected.id);
             }}
           />
-        ) : (
-          <>
-            <View style={[s.card, panel]}>
-              <Text style={[s.subtitle, title]}>ข้อมูลผู้เช่า</Text>
-              {(
+        ) : editing ? (
+          <View style={[s.card, panel]}>
+            {(
+              [
+                ["name", "ชื่อ–นามสกุล *", "ชื่อที่ใช้ในสัญญา"],
+                ["phone", "เบอร์โทร *", "เบอร์โทรที่ติดต่อได้"],
+                ["email", "อีเมล", "name@example.com"],
                 [
-                  ["เบอร์โทร", selected.phone],
-                  ["อีเมล", selected.email || "ไม่ระบุ"],
-                  ["Lead ต้นทาง", `#${selected.leadId}`],
-                  ["หมายเหตุ", selected.note || "ไม่ระบุ"],
-                ] as const
-              ).map(([label, value]) => (
-                <View key={label} style={{ gap: 3 }}>
-                  <Text style={[s.small, muted]}>{label}</Text>
-                  <Text selectable style={[s.body, title]}>
-                    {value}
-                  </Text>
-                </View>
-              ))}
-            </View>
-            {renderDocumentCard(
-              "หนังสือจองห้อง",
-              reservationContracts,
-              "ยังไม่มีหนังสือจองห้อง เริ่มจองห้องให้ลูกค้าได้เลย",
-              "สร้างหนังสือจอง",
-            )}
-            {renderDocumentCard(
-              "สัญญาเช่า",
-              leaseContracts,
-              "ยังไม่มีสัญญาเช่า กำหนดระยะเวลาเช่าและค่าเช่าได้เลย",
-              "สร้างสัญญาเช่า",
-            )}
-            <Text style={[s.small, muted, { textAlign: "center" }]}>
-              จัดการเอกสารเพิ่มเติมได้ในแท็บสัญญา
+                  "identityNumber",
+                  "เลขบัตรประชาชน / พาสปอร์ต",
+                  "เช่น 1-2345-67890-12-3 หรือ A1234567",
+                ],
+                ["nationality", "สัญชาติ", "เช่น ไทย"],
+                ["note", "หมายเหตุ", "ข้อมูลเพิ่มเติมเกี่ยวกับผู้เช่า"],
+              ] as const
+            ).map(([key, label, placeholder]) => (
+              <View key={key} style={{ gap: 6 }}>
+                <Text style={[s.body, title]}>{label}</Text>
+                <MobileInput
+                  accessibilityLabel={label}
+                  value={editForm[key]}
+                  onChangeText={(value) =>
+                    setEditForm((current) => ({ ...current, [key]: value }))
+                  }
+                  placeholder={placeholder}
+                  maxLength={
+                    key === "note"
+                      ? 500
+                      : key === "phone"
+                        ? 50
+                        : key === "identityNumber"
+                          ? 100
+                          : key === "nationality"
+                            ? 120
+                            : 255
+                  }
+                  keyboardType={
+                    key === "phone"
+                      ? "phone-pad"
+                      : key === "email"
+                        ? "email-address"
+                        : "default"
+                  }
+                  autoCapitalize={
+                    key === "email" || key === "identityNumber"
+                      ? "none"
+                      : "sentences"
+                  }
+                  editable={!savingEdit}
+                />
+              </View>
+            ))}
+            <Text style={[s.small, muted]}>
+              โครงการและห้องไม่สามารถแก้จากหน้านี้
+              {selected.property
+                ? ` · ${selected.property}${selected.room ? ` · ห้อง ${selected.room}` : ""}`
+                : ""}
             </Text>
-          </>
+            {button(
+              savingEdit ? "กำลังบันทึก…" : "บันทึก",
+              () => {
+                void saveEdit();
+              },
+              true,
+              savingEdit,
+            )}
+            {button(
+              "ยกเลิก",
+              () => {
+                if (savingEdit) return;
+                setEditing(false);
+                setError("");
+              },
+              false,
+              savingEdit,
+            )}
+          </View>
+        ) : (
+          <View style={[s.card, panel]}>
+            {(
+              [
+                ["เบอร์โทร", selected.phone],
+                ["อีเมล", selected.email || "ไม่ระบุ"],
+                [
+                  "เลขบัตรประชาชน / พาสปอร์ต",
+                  selected.identityNumber || "ไม่ระบุ",
+                ],
+                ["สัญชาติ", selected.nationality || "ไม่ระบุ"],
+                ["โครงการ", selected.property],
+                ["ห้อง", selected.room || "ไม่ระบุ"],
+                ["ที่อยู่", selected.fullAddress || "ไม่ระบุ"],
+                ["หมายเหตุ", selected.note || "ไม่ระบุ"],
+              ] as const
+            ).map(([label, value]) => (
+              <View key={label} style={{ gap: 3 }}>
+                <Text style={[s.small, muted]}>{label}</Text>
+                <Text selectable style={[s.body, title]}>
+                  {value}
+                </Text>
+              </View>
+            ))}
+            {button("แก้ไขข้อมูลผู้เช่า", () => beginEdit(selected), true)}
+          </View>
         )}
       </View>
     );
@@ -699,7 +669,6 @@ const s = StyleSheet.create({
     lineHeight: 20,
   },
   card: { borderWidth: 1, borderRadius: 17, padding: 16, gap: 15 },
-  contractItem: { gap: 8, paddingTop: 12 },
   person: { flexDirection: "row", alignItems: "center", gap: 12 },
   grow: { flex: 1, gap: 4, minWidth: 0 },
   row: {

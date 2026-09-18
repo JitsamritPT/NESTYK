@@ -3,7 +3,7 @@ export interface AgreementTemplate {
   agreementTypeCode: string;
   version: number;
   name: string;
-  formKind: "reservation" | "lease";
+  formKind: "reservation" | "lease" | "broker_appointment";
   dataSchema: Record<string, unknown>;
 }
 export interface AgreementType {
@@ -11,7 +11,7 @@ export interface AgreementType {
   nameTh: string;
   nameEn: string;
   icon: string;
-  formKind: "reservation" | "lease";
+  formKind: "reservation" | "lease" | "broker_appointment";
 }
 export type AgentContractStatus =
   | "draft"
@@ -39,7 +39,7 @@ export interface AgentContract {
   tenant: string;
   agreementTypeCode: string;
   agreementTypeName: string;
-  formKind: "reservation" | "lease";
+  formKind: "reservation" | "lease" | "broker_appointment";
   reservationFee: number | null;
   status: AgentContractStatus;
   startDate: string;
@@ -58,6 +58,9 @@ export interface AgentContract {
   reservationLetterUrl: string | null;
   reservationLetterStatus:
     "awaiting_signatures" | "ready_to_generate" | "ready" | null;
+  brokerAppointmentUrl: string | null;
+  brokerAppointmentStatus:
+    "awaiting_signatures" | "ready_to_generate" | "ready" | null;
   leaseDocumentUrl: string | null;
   invoiceUrl: string | null;
   receiptUrl: string | null;
@@ -66,7 +69,8 @@ export type AgentContractDocumentKind =
   | "reservation_letter"
   | "lease_agreement"
   | "invoice"
-  | "receipt";
+  | "receipt"
+  | "broker_appointment";
 export type AgentContractSignParty = "owner" | "tenant" | "agent";
 export interface SignAgentContract {
   parties: AgentContractSignParty[];
@@ -154,4 +158,78 @@ export interface FinancialDocumentInput {
   paymentDetails: string;
   receiverName: string;
   notes: string;
+}
+
+/** Fillable fields for residential rental reservation PDF (หนังสือจอง). */
+export interface ReservationLetterInput {
+  documentNo: string;
+  issueDate: string;
+  tenantName: string;
+  tenantPhone: string;
+  tenantId: string;
+  tenantNationality: string;
+  landlordName: string;
+  landlordPhone: string;
+  landlordId: string;
+  landlordNationality: string;
+  agentName: string;
+  companyName: string;
+  agentPhone: string;
+  project: string;
+  address: string;
+  unitNo: string;
+  floor: string;
+  area: string;
+  beds: string;
+  baths: string;
+  termMonths: string;
+  termFrom: string;
+  termTo: string;
+  monthlyRent: string;
+  advanceMonths: string;
+  advanceAmount: string;
+  depositMonths: string;
+  depositAmount: string;
+  reservationPayment: string;
+  reservationWords: string;
+  /** Apply reservation to advance rent. */
+  applyToAdvance: boolean;
+  /** Apply reservation to security deposit. */
+  applyToDeposit: boolean;
+  balanceDue: string;
+  payee: string;
+  /** transfer | cash | credit | "" */
+  paymentMethod: string;
+  bankAccount: string;
+  tenantSignName: string;
+  landlordSignName: string;
+  agentSignName: string;
+}
+
+/** Fields for generated rental broker appointment PDF (แต่งตั้งนายหน้า). */
+export interface BrokerAppointmentInput {
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  landlordNationality: string;
+  landlordId: string;
+  landlordAddress: string;
+  landlordPhone: string;
+  brokerCompany: string;
+  brokerContact: string;
+  brokerNationality: string;
+  brokerId: string;
+  brokerPhone: string;
+  brokerAddress: string;
+  propertyLine: string;
+  monthlyRent: string;
+  leaseMonths: string;
+  commissionFee: string;
+  commissionMonths: string;
+  landlordSignName: string;
+  brokerSignName: string;
+  /** Optional PNG data URL for landlord signature image on the PDF. */
+  landlordSignaturePng: string;
+  /** Optional PNG data URL for broker signature image on the PDF. */
+  brokerSignaturePng: string;
 }

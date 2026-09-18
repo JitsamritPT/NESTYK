@@ -25,11 +25,43 @@ test('validates actual calendar dates, financial precision and required fields',
 test('formats standard contract numbers for reservation and lease', () => {
   assert.equal(contractNoPrefix('reservation'), 'RS');
   assert.equal(contractNoPrefix('lease'), 'LS');
+  assert.equal(contractNoPrefix('broker_appointment'), 'BA');
   assert.equal(formatContractNo('LS', 2026, 1), 'LS202600001');
   assert.equal(formatContractNo('RS', 2026, 42), 'RS202600042');
   assert.equal(parseContractSeq('LS202600007'), 7);
   assert.equal(parseContractSeq('EC-11'), null);
   assert.equal(typeof contractYear(), 'number');
+});
+test('broker appointment defaults pick rent matching lead lease duration', () => {
+  const { pickBrokerRentFromRoom } = require('../src/agent/contracts/broker-appointment.ts');
+  assert.deepEqual(
+    pickBrokerRentFromRoom(
+      {
+        price_rows: [
+          { price: '18000', contract_type: { term_months: 12 } },
+          { price: '16000', contract_type: { term_months: 6 } },
+        ],
+      },
+      12,
+    ),
+    { monthlyRent: '18000', leaseMonths: '12' },
+  );
+  assert.deepEqual(
+    pickBrokerRentFromRoom(
+      {
+        price_rows: [
+          { price: '18000', contract_type: { term_months: 12 } },
+          { price: '16000', contract_type: { term_months: 6 } },
+        ],
+      },
+      null,
+    ),
+    { monthlyRent: '16000', leaseMonths: '6' },
+  );
+  assert.deepEqual(pickBrokerRentFromRoom(null, 12), {
+    monthlyRent: '',
+    leaseMonths: '12',
+  });
 });
 function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0 } = {}) {
   const saved = []; const calls = []; let rolledBack = false;
@@ -115,12 +147,13 @@ test('reservation drafts persist their master code and booking fee without month
   assert.match(c.contract_no, /^RS\d{4}\d{5}$/);
   assert.ok(f.calls.some(call => call[2]?.start === '2026-10-15' && call[2]?.end === null));
   assert.equal(c.agreement_type_code, 'reservation'); assert.equal(c.reservation_fee, '5000.00'); assert.equal(c.monthly_rent, null); assert.equal(c.deposit, null);
-  assert.ok(f.calls.some(call => call[2]?.isLease === false));
+  assert.ok(f.calls.some(call => call[2]?.formKind === 'reservation'));
 });
-test('lease creation excludes only the same tenant reservation from overlap checks', async () => {
+test('overlap checks only the same form kind so reservation does not block lease or broker', async () => {
   const f = fixture(); await f.service.create(7, valid);
-  const clause = f.calls.find(call => call[1]?.includes?.('agreementType.form_kind'));
-  assert.ok(clause[1].includes('c.tenant_id = :tenantId')); assert.equal(clause[2].isLease, true); assert.equal(clause[2].tenantId, 2);
+  const clause = f.calls.find(call => call[1]?.includes?.('= :formKind'));
+  assert.ok(clause); assert.equal(clause[2].formKind, 'lease');
+  assert.equal(f.calls.some(call => call[2]?.isLease != null), false);
 });
 test('inactive or unknown master type is rejected before transaction', async () => {
   const service = new AgentContractsService({ getRepository: () => ({findOneBy: async () => null}), transaction: () => assert.fail('Must not write') });

@@ -20,6 +20,12 @@ export class TenantEntity extends SerialTimestampEntity {
   @Column({ type: 'varchar', length: 500, nullable: true })
   note: string | null;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  identity_number: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  nationality: string | null;
+
   @Column({ type: 'int', nullable: true })
   user_id: number | null;
 

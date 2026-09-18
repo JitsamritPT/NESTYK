@@ -3,18 +3,22 @@ const assert = require('node:assert/strict');
 const ts = require('typescript');
 require('reflect-metadata');
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(require('node:fs').readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true, emitDecoratorMetadata: true, esModuleInterop: true }, fileName: filename }).outputText, filename);
-const { AgentTenantsService, validateTenant } = require('../src/agent/tenants/agent-tenants.service.ts');
+const { AgentTenantsService, validateTenant, validateTenantProfile } = require('../src/agent/tenants/agent-tenants.service.ts');
 const { AgentTenantsController } = require('../src/agent/tenants/agent-tenants.controller.ts');
 const { LeadEntity } = require('../src/entities/lead.entity.ts');
 const { TenantEntity } = require('../src/entities/tenant.entity.ts');
 const { AuthService } = require('../src/auth/auth.service.ts');
 const { Module } = require('@nestjs/common'); const { NestFactory } = require('@nestjs/core');
-const valid = { leadId: 1, rentRoomId: 2, name: 'ผู้เช่าทดสอบ', phone: '0812345678', email: 'tenant@example.invalid', note: 'Test' };
+const valid = { leadId: 1, rentRoomId: 2, name: 'ผู้เช่าทดสอบ', phone: '0812345678', email: 'tenant@example.invalid', note: 'Test', identityNumber: '', nationality: '' };
+const profile = { name: 'ผู้เช่าทดสอบ', phone: '0812345678', email: 'tenant@example.invalid', note: 'Test', identityNumber: '', nationality: '' };
 
 test('validates required identity/contact fields and optional email without accepting spoofed ownership', () => {
   assert.deepEqual(validateTenant({ ...valid, name: ' ผู้เช่าทดสอบ ', created_by_user_id: 99 }), valid);
-  for (const patch of [{ leadId: 0 }, { rentRoomId: '2' }, { name: '' }, { phone: '' }, { phone: 'hello' }, { phone: '123' }, { email: 'bad@' }, { note: 'a'.repeat(501) }]) assert.throws(() => validateTenant({ ...valid, ...patch }));
+  assert.deepEqual(validateTenantProfile({ ...profile, name: ' ผู้เช่าทดสอบ ' }), profile);
+  for (const patch of [{ leadId: 0 }, { rentRoomId: '2' }, { name: '' }, { phone: '' }, { phone: 'hello' }, { phone: '123' }, { email: 'bad@' }, { note: 'a'.repeat(501) }, { identityNumber: 'ab' }, { identityNumber: 'a'.repeat(101) }, { nationality: 'a'.repeat(121) }]) assert.throws(() => validateTenant({ ...valid, ...patch }));
   assert.equal(validateTenant({ ...valid, email: '', note: undefined }).email, '');
+  assert.equal(validateTenant({ ...valid, identityNumber: '1-2345-67890-12-3', nationality: ' ไทย ' }).identityNumber, '1-2345-67890-12-3');
+  assert.equal(validateTenant({ ...valid, identityNumber: '1-2345-67890-12-3', nationality: ' ไทย ' }).nationality, 'ไทย');
 });
 function fixture(options = {}) {
   const saved = []; const lead = { id: 1, name: 'Original lead', phone: '0899999999', status: 'viewed', tenant_id: null, ...options.lead };
@@ -55,11 +59,65 @@ test('candidate searches are scoped, bounded, and parameterized', async () => {
   assert.equal(calls.filter(c => c[0] === 'where' && c[2].agentId === 7).length, 2); assert.equal(calls.filter(c => c[0] === 'take' && c[1] === 30).length, 2);
   assert.ok(calls.some(c => c[0] === 'andWhere' && c[1] === 'lead.tenant_id IS NULL')); assert.ok(calls.some(c => c[2]?.q === "%O'Reilly%"));
 });
+test('updates tenant profile fields without requiring lead or room ids', async () => {
+  const tenant = {
+    id: 8, lead_id: 1, name: 'Old', phone: '0811111111', email: null, note: null,
+    identity_number: null, nationality: null, created_at: new Date('2026-09-11'), lead: null,
+  };
+  const qb = {};
+  for (const k of ['leftJoinAndSelect', 'where', 'andWhere', 'orderBy']) qb[k] = () => qb;
+  qb.getOne = async () => tenant;
+  const service = new AgentTenantsService({
+    getRepository: () => ({
+      createQueryBuilder: () => qb,
+      save: async (row) => row,
+    }),
+  }, { list: async () => [] });
+  service.view = async (agent, id) => {
+    assert.equal(agent, 7);
+    assert.equal(id, 8);
+    return {
+      id: tenant.id,
+      name: tenant.name,
+      phone: tenant.phone,
+      email: tenant.email,
+      note: tenant.note,
+      identityNumber: tenant.identity_number,
+      nationality: tenant.nationality,
+    };
+  };
+  const result = await service.update(7, 8, {
+    name: ' New Name ',
+    phone: '0899999999',
+    email: 'new@example.invalid',
+    note: 'updated',
+    identityNumber: 'A1234567',
+    nationality: 'ไทย',
+  });
+  assert.equal(tenant.name, 'New Name');
+  assert.equal(tenant.phone, '0899999999');
+  assert.equal(tenant.identity_number, 'A1234567');
+  assert.equal(tenant.nationality, 'ไทย');
+  assert.equal(result.name, 'New Name');
+});
+test('rejects update for missing tenant after scoped lookup', async () => {
+  const qb = {};
+  for (const k of ['leftJoinAndSelect', 'where', 'andWhere', 'orderBy']) qb[k] = () => qb;
+  qb.getOne = async () => null;
+  const service = new AgentTenantsService({ getRepository: () => ({ createQueryBuilder: () => qb }) }, {});
+  await assert.rejects(() => service.update(7, 99, profile), (e) => e.getStatus() === 404);
+});
 test('tenant HTTP routes require agent role and pass current identity to services', async t => {
   const previous = process.env.ALLOW_DEV_AUTH; process.env.ALLOW_DEV_AUTH = 'true'; t.after(() => { if (previous === undefined) delete process.env.ALLOW_DEV_AUTH; else process.env.ALLOW_DEV_AUTH = previous; });
   class TestModule {}
   Module({ controllers: [AgentTenantsController], providers: [
-    { provide: AgentTenantsService, useValue: { list: async id => [{ agentId: id }], leadOptions: async () => [], roomOptions: async () => [], create: async (id, input) => ({ ...validateTenant(input), agentId: id }) } },
+    { provide: AgentTenantsService, useValue: {
+      list: async id => [{ agentId: id }],
+      leadOptions: async () => [],
+      roomOptions: async () => [],
+      create: async (id, input) => ({ ...validateTenant(input), agentId: id }),
+      update: async (id, tenantId, input) => ({ ...validateTenantProfile(input), agentId: id, id: tenantId }),
+    } },
     { provide: AuthService, useValue: { findBySupabaseUserId: async id => ({ id: Number(id) }), loadUserWithRoles: async id => ({ id, roleNames: id === 7 ? ['agent'] : ['tenant'] }) } },
   ] })(TestModule);
   const app = await NestFactory.create(TestModule, { logger: false }); await app.listen(0, '127.0.0.1'); t.after(() => app.close()); const path = `${await app.getUrl()}/agent/tenants`;
@@ -69,4 +127,8 @@ test('tenant HTTP routes require agent role and pass current identity to service
   for (const suffix of ['/leads', '/rooms']) assert.equal((await fetch(path + suffix, { headers: headers(7) })).status, 200);
   assert.equal((await fetch(path, { method: 'POST', headers: headers(7), body: '{}' })).status, 400);
   const created = await fetch(path, { method: 'POST', headers: headers(7), body: JSON.stringify(valid) }); assert.equal(created.status, 201); assert.equal((await created.json()).agentId, 7);
+  const patched = await fetch(`${path}/8`, { method: 'PATCH', headers: headers(7), body: JSON.stringify(profile) });
+  assert.equal(patched.status, 200);
+  assert.deepEqual(await patched.json(), { ...profile, agentId: 7, id: 8 });
+  assert.equal((await fetch(`${path}/8`, { method: 'PATCH', headers: headers(8), body: JSON.stringify(profile) })).status, 403);
 });

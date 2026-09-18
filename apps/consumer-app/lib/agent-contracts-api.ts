@@ -21,6 +21,30 @@ export async function listContractCandidates(): Promise<ContractCandidate[]> {
   await ensureAgentSession();
   return apiGet("/agent/contracts/candidates");
 }
+export async function getReservationDefaults(
+  leadId: number,
+): Promise<import("@nestyk/types").ReservationLetterInput> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/reservation-defaults/${leadId}`);
+}
+export async function getBrokerAppointmentLeadDefaults(
+  leadId: number,
+): Promise<import("@nestyk/types").BrokerAppointmentInput> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/broker-appointment-defaults/${leadId}`);
+}
+export async function previewAgentBrokerAppointment(
+  id: number,
+): Promise<AgentContract> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/broker-appointment-preview`, {});
+}
+export async function generateAgentBrokerAppointment(
+  id: number,
+): Promise<AgentContract> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/generate-broker-appointment`, {});
+}
 export async function createAgentContract(
   input: CreateAgentContract,
 ): Promise<AgentContract> {
@@ -114,6 +138,20 @@ export async function listAgreementAttachments(
   await ensureAgentSession();
   return apiGet(`/agent/contracts/${id}/attachments`);
 }
+export async function getBrokerAppointmentDefaults(
+  id: number,
+): Promise<import("@nestyk/types").BrokerAppointmentInput> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/${id}/attachments/broker-appointment/defaults`);
+}
+export async function generateBrokerAppointment(
+  id: number,
+  body: import("@nestyk/types").BrokerAppointmentInput,
+): Promise<import("@nestyk/types").AgreementAttachmentChecklist> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/attachments/broker-appointment`, body);
+}
+
 export async function openAgreementAttachment(
   id: number,
   documentId: number,

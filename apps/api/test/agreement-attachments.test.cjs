@@ -37,7 +37,7 @@ test('attachments stay editable until contract is active or reservation letter i
   assert.equal(documentsEditable({status}),false);
  assert.equal(documentsEditable({
   status:'awaiting_agent_review',
-  document_url:'7/11/generated/reservation_letter/mock-v2/letter.pdf',
+  document_url:'7/11/generated/reservation_letter/letter-v1/letter.pdf',
  }),false);
 });
 test('multipart document metadata rejects invalid subjects, type codes and replacement IDs',()=>{

@@ -31,6 +31,19 @@ export class AgreementAttachmentsController {
   ) {
     return this.attachments.list(user.id, id);
   }
+  @Get("broker-appointment/defaults") brokerAppointmentDefaults(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.attachments.brokerAppointmentDefaults(user.id, id);
+  }
+  @Post("broker-appointment") generateBrokerAppointment(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: unknown,
+  ) {
+    return this.attachments.generateBrokerAppointment(user.id, id, body);
+  }
   @Get(":documentId/url") url(
     @CurrentUser() user: AuthRequestUser,
     @Param("id", ParseIntPipe) id: number,

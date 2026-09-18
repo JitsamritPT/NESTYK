@@ -1,8 +1,5 @@
-import React, { useEffect, useState } from "react";
-import type { AgreementType } from "@nestyk/types";
-import { listAgreementTypes } from "../lib/agent-contracts-api";
+import React from "react";
 import {
-  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -13,38 +10,43 @@ import {
   MobileIcon,
   tokens,
   useMobileTheme,
+  type AppIconName,
 } from "@nestyk/ui/native";
+
+/** Create-menu options shown under 「เลือกประเภทสัญญา」. */
+export type CreateDocumentKind =
+  | "reservation"
+  | "lease"
+  | "invoice"
+  | "receipt"
+  | "broker_appointment"
+  | "agent_commission";
+
+const CREATE_OPTIONS: Array<{
+  kind: CreateDocumentKind;
+  label: string;
+  icon: AppIconName;
+}> = [
+  { kind: "reservation", label: "หนังสือจองห้อง", icon: "calendar" },
+  { kind: "lease", label: "สัญญาเช่า", icon: "key" },
+  { kind: "invoice", label: "ใบแจ้งหนี้", icon: "note" },
+  { kind: "receipt", label: "ใบเสร็จ", icon: "note" },
+  { kind: "broker_appointment", label: "แต่งตั้งนายหน้า", icon: "handshake" },
+  {
+    kind: "agent_commission",
+    label: "ข้อตกลงแบ่งค่าคอมมิชชั่นระหว่างเอเจนต์",
+    icon: "users",
+  },
+];
 
 export function ContractTypePicker({
   onSelect,
   onBack,
 }: {
-  onSelect: (type: AgreementType) => void;
+  onSelect: (kind: CreateDocumentKind) => void;
   onBack: () => void;
 }) {
   const { theme } = useMobileTheme();
-  const [contractTypes, setTypes] = useState<AgreementType[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    listAgreementTypes()
-      .then((rows) => {
-        if (!cancelled) setTypes(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setError("โหลดประเภทสัญญาไม่สำเร็จ");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [retry]);
   return (
     <View style={styles.root}>
       <MobileButton variant="outline" onPress={onBack}>
@@ -55,59 +57,35 @@ export function ContractTypePicker({
           เลือกประเภทสัญญา
         </Text>
         <Text style={[styles.description, { color: theme.textSecondary }]}>
-          ต้องการสร้างสัญญาอะไร?
+          ต้องการสร้างเอกสารอะไร?
         </Text>
       </View>
-      {loading && <ActivityIndicator />}
-      {!!error && (
-        <View>
-          <Text accessibilityRole="alert" style={{ color: theme.textHeading }}>
-            {error}
-          </Text>
-          <MobileButton
-            variant="outline"
-            onPress={() => setRetry((n) => n + 1)}
-          >
-            ลองอีกครั้ง
-          </MobileButton>
-        </View>
-      )}
-      {!loading && !error && !contractTypes.length && (
-        <Text style={{ color: theme.textSecondary }}>
-          ยังไม่มีประเภทสัญญาที่เปิดใช้งาน
-        </Text>
-      )}
       <View style={styles.grid}>
-        {(!loading && !error ? contractTypes : []).map((type) => (
+        {CREATE_OPTIONS.map((option) => (
           <Pressable
-            key={type.code}
+            key={option.kind}
             accessibilityRole="button"
-            accessibilityLabel={`สร้าง${type.nameTh}`}
-            onPress={() => onSelect(type)}
+            accessibilityLabel={`สร้าง${option.label}`}
+            onPress={() => onSelect(option.kind)}
             style={({ pressed }) => [
               styles.tile,
               { opacity: pressed ? 0.75 : 1 },
             ]}
           >
             <MobileIcon
-              name={
-                type.icon === "calendar"
-                  ? "calendar"
-                  : type.icon === "key"
-                    ? "key"
-                    : "note"
-              }
+              name={option.icon}
               size={30}
               color="#FFFFFF"
               weight="regular"
             />
-            <Text style={styles.label}>{type.nameTh}</Text>
+            <Text style={styles.label}>{option.label}</Text>
           </Pressable>
         ))}
       </View>
     </View>
   );
 }
+
 const styles = StyleSheet.create({
   root: { gap: 22, paddingBottom: 24 },
   heading: { gap: 6 },
@@ -131,12 +109,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 10,
-    gap: 12,
+    gap: 10,
   },
   label: {
     fontFamily: tokens.typography.native.headingTh,
-    fontSize: 13,
-    lineHeight: 21,
+    fontSize: 12,
+    lineHeight: 18,
     textAlign: "center",
     color: "#FFFFFF",
   },

@@ -233,7 +233,7 @@ test("inaccessible contract uploads nothing and failed persistence cleans upload
 test("finalized reservation letter rejects financial create/edit", async () => {
   const { service, row, counts } = serviceFixture();
   row.document_url =
-    "7/11/generated/reservation_letter/mock-v2/reservation.pdf";
+    "7/11/generated/reservation_letter/letter-v1/reservation.pdf";
   row.owner_signed_at = new Date();
   row.tenant_signed_at = new Date();
   row.agent_signed_at = new Date();

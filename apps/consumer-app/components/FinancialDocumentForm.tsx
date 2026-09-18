@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, BackHandler, Text, View } from "react-native";
+import { ActivityIndicator, BackHandler, Pressable, Text, View } from "react-native";
 import { MobileButton, MobileInput, useMobileTheme } from "@nestyk/ui/native";
 import { useLocale } from "@nestyk/i18n";
 import type {
@@ -26,12 +26,14 @@ const RECEIPT_FIELDS: TextField[] = [
 ];
 
 export function FinancialDocumentForm({
-  contractId,
+  contractId: fixedContractId,
+  hosts,
   kind,
   onBack,
   onCreated,
 }: {
-  contractId: number;
+  contractId?: number;
+  hosts?: AgentContract[];
   kind: FinancialDocumentKind;
   onBack: () => void;
   onCreated: (value: AgentContract) => void;
@@ -39,17 +41,22 @@ export function FinancialDocumentForm({
   const { t } = useLocale();
   const labels = t.agent.contracts.financial;
   const { theme } = useMobileTheme();
+  const needsHostPick = fixedContractId == null;
+  const [hostId, setHostId] = useState<number | null>(fixedContractId ?? null);
+  const contractId = fixedContractId ?? hostId;
   const [form, setForm] = useState<FinancialDocumentInput | null>(null);
   const [items, setItems] = useState<
     { description: string; quantity: string; unitPrice: string }[]
   >([]);
   const [discount, setDiscount] = useState("0");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
   const saving = useRef(false);
   const isReceipt = kind === "receipt";
+  const title = { color: theme.textHeading };
+  const muted = { color: theme.textSecondary };
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (!saving.current) onBack();
@@ -58,6 +65,12 @@ export function FinancialDocumentForm({
     return () => sub.remove();
   }, [onBack]);
   useEffect(() => {
+    if (contractId == null) {
+      setForm(null);
+      setLoading(false);
+      setError("");
+      return;
+    }
     let active = true;
     setLoading(true);
     setError("");
@@ -83,7 +96,7 @@ export function FinancialDocumentForm({
     return () => {
       active = false;
     };
-  }, [contractId, kind, retry]);
+  }, [contractId, kind, retry, labels.invalid]);
   const required: TextField[] = isReceipt
     ? [
         "documentNo",
@@ -126,7 +139,7 @@ export function FinancialDocumentForm({
   const total =
     (taxable + Math.round((taxable * vatRate) / 100)) / 100;
   async function submit() {
-    if (!form || saving.current) return;
+    if (!form || contractId == null || saving.current) return;
     if (isReceipt) {
       if (
         required.some((key) => !form[key].trim()) ||
@@ -244,6 +257,48 @@ export function FinancialDocumentForm({
       >
         {isReceipt ? labels.receiptHint : labels.hint}
       </Text>
+      {needsHostPick && (
+        <View style={{ gap: 8 }}>
+          <Text style={[{ fontSize: 14, lineHeight: 22, fontWeight: "600" }, title]}>
+            ผูกกับหนังสือจอง *
+          </Text>
+          {!(hosts ?? []).length ? (
+            <Text style={[{ fontSize: 13, lineHeight: 20 }, muted]}>
+              ยังไม่มีหนังสือจองที่ใช้ได้ — สร้างหนังสือจองก่อน
+            </Text>
+          ) : (
+            (hosts ?? []).map((host) => {
+              const selected = hostId === host.id;
+              return (
+                <Pressable
+                  key={host.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  disabled={busy}
+                  onPress={() => setHostId(host.id)}
+                  style={({ pressed }) => ({
+                    borderWidth: 1,
+                    borderColor: selected ? "#F8B615" : theme.border,
+                    backgroundColor: selected ? "#FFF8E7" : theme.surface,
+                    borderRadius: 12,
+                    padding: 12,
+                    gap: 4,
+                    opacity: pressed || busy ? 0.7 : 1,
+                  })}
+                >
+                  <Text style={[{ fontSize: 15, lineHeight: 24 }, title]}>
+                    {host.contractNo}
+                  </Text>
+                  <Text style={[{ fontSize: 13, lineHeight: 20 }, muted]}>
+                    {host.property}
+                    {host.room ? ` · ห้อง ${host.room}` : ""}
+                  </Text>
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+      )}
       {!!error && (
         <Text
           accessibilityRole="alert"
@@ -252,7 +307,7 @@ export function FinancialDocumentForm({
           {error}
         </Text>
       )}
-      {loading ? (
+      {contractId == null ? null : loading ? (
         <ActivityIndicator />
       ) : !form ? (
         <MobileButton onPress={() => setRetry((n) => n + 1)}>
