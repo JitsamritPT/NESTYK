@@ -178,11 +178,13 @@ export function AgreementAttachments({
   const running = useRef(false);
   const picking = useRef(false);
   const request = useRef(0);
+  const contractIdRef = useRef(contractId);
   const extraSlots = useMemo(() => extraSlotsFor(formKind), [formKind]);
   const namedExtras = useMemo(() => namedExtraCodes(extraSlots), [extraSlots]);
   useEffect(() => {
-    onReadinessChange?.({ contractId, ready: !busy && !!state?.readyToSign });
-  }, [contractId, busy, state?.readyToSign, onReadinessChange]);
+    // Keep last known readiness while reloading — do not treat busy/null as "not ready".
+    onReadinessChange?.({ contractId, ready: !!state?.readyToSign });
+  }, [contractId, state?.readyToSign, onReadinessChange]);
   const ink = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
 
@@ -232,7 +234,10 @@ export function AgreementAttachments({
   }
 
   useEffect(() => {
-    setState(null);
+    const switched = contractIdRef.current !== contractId;
+    contractIdRef.current = contractId;
+    // Only clear checklist when switching contracts; keep prior state across refreshKey reloads.
+    if (switched) setState(null);
     void load();
     return () => {
       request.current++;
