@@ -101,6 +101,7 @@ test('createSignInvite returns public url and publicSign records party', async (
         }),
         getRepository: (entity) => db.getRepository(entity),
         findOne: async (entity, opts) => {
+          if (entity === LeaseContractEntity) return current;
           if (entity === AgreementSignInviteEntity) {
             return invites.find((row) => row.id === opts.where.id) || null;
           }

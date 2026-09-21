@@ -43,6 +43,34 @@ const TEXT = [
 
 const PAYMENT_METHODS = new Set(["", "transfer", "cash", "credit"]);
 
+/** Calendar date in Asia/Bangkok (YYYY-MM-DD). */
+export function bangkokDate(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/** Number and booking date are system-owned: keep a saved draft, otherwise assign today. */
+export function stampReservationDocumentHeader(
+  input: unknown,
+  saved?: Partial<ReservationLetterInput> | null,
+): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
+  const savedDate = saved?.issueDate;
+  const savedNo = saved?.documentNo;
+  return {
+    ...(input as Record<string, unknown>),
+    documentNo: typeof savedNo === "string" ? savedNo : "",
+    issueDate:
+      typeof savedDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(savedDate)
+        ? savedDate
+        : bangkokDate(),
+  };
+}
+
 export function emptyReservationLetter(): ReservationLetterInput {
   return {
     documentNo: "",

@@ -4,6 +4,7 @@ import {
   ReservationLetterFields,
   emptyReservationLetterForm,
   reservationLetterFieldErrors,
+  reservationIssueDate,
 } from "./ReservationLetterFields";
 import {
   BrokerAppointmentFields,
@@ -72,6 +73,9 @@ import {
   getBrokerAppointmentLeadDefaults,
   getLeaseDefaults,
   createAgentContract,
+  updateAgentContractDraft,
+  cancelAgentContractDraft,
+  getAgentContractDraftTemplate,
   uploadAgentContractDocument,
   signAgentContract,
   createContractSignInvite,
@@ -189,6 +193,9 @@ export function ContractsScreen({
   const [choosingType, setChoosingType] = useState(false);
   const [menuCreate, setMenuCreate] = useState<CreateDocumentKind | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editingDraft, setEditingDraft] = useState<AgentContract | null>(null);
+  const [cancellingDraft, setCancellingDraft] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [financialKind, setFinancialKind] = useState<"invoice" | "receipt" | null>(null);
   const [attachmentsNonce, setAttachmentsNonce] = useState(0);
@@ -520,7 +527,8 @@ export function ContractsScreen({
     !!selected &&
     selected.formKind === "lease" &&
     selected.leaseAgreementStatus === "ready";
-  const documentLocked = reservationLocked || brokerLocked || leaseLocked;
+  const draftCancelled = selected?.status === "cancelled";
+  const documentLocked = reservationLocked || brokerLocked || leaseLocked || draftCancelled;
   const attachmentsRequired =
     !!selected &&
     (selected.formKind === "reservation" || selected.formKind === "lease");
@@ -731,6 +739,8 @@ export function ContractsScreen({
     type: AgreementType,
     source: AgentContract | null = null,
   ) {
+    setEditingDraft(null);
+    setCancellingDraft(false);
     setRenewing(source);
     setAgreementType(type);
     setChoosingType(false);
@@ -861,18 +871,71 @@ export function ContractsScreen({
       setBusy(false);
     }
   }
+  async function editDraft(contract: AgentContract) {
+    setBusy(true);
+    setError("");
+    try {
+      const draftTemplate = await getAgentContractDraftTemplate(contract.id);
+      const latest = await getAgentContract(contract.id);
+      setEditingDraft(latest);
+      setRenewing(null);
+      setAgreementType({ code: latest.agreementTypeCode, nameTh: latest.agreementTypeName,
+        nameEn: latest.agreementTypeName, icon: "key", formKind: latest.formKind });
+      setTemplate(draftTemplate);
+      setLeadId(latest.leadId);
+      setCandidates([{ leadId: latest.leadId, tenant: latest.tenant, property: latest.property, room: latest.room }]);
+      setForm({ startDate: latest.startDate, endDate: latest.endDate ?? "", moveInDate: latest.moveInDate ?? "",
+        monthlyRent: String(latest.monthlyRent ?? ""), deposit: String(latest.deposit ?? ""),
+        reservationFee: String(latest.reservationFee ?? ""), notes: latest.notes ?? "" });
+      setLetter({ ...emptyReservationLetterForm(), ...(latest.data.reservationLetter as Partial<ReservationLetterInput> ?? {}) });
+      setBrokerForm({ ...emptyBrokerAppointmentForm(), ...(latest.data.brokerAppointment as Partial<BrokerAppointmentInput> ?? {}) });
+      setLeaseForm({ ...emptyLeaseAgreementForm(), ...(latest.data.leaseAgreement as Partial<LeaseAgreementInput> ?? {}) });
+      setLetterErrors({}); setBrokerErrors({}); setLeaseErrors({});
+      setExtraFields(Object.fromEntries(Object.keys((draftTemplate.dataSchema.properties ?? {}) as object)
+        .filter(key => !standardFields.has(key) && latest.data[key] != null)
+        .map(key => [key, String(latest.data[key])])));
+      setCancellingDraft(false);
+      setCreating(true);
+      setChoosingType(false);
+    } catch (e) { setError(message(e)); }
+    finally { setBusy(false); }
+  }
+  async function cancelDraft() {
+    if (!selected || busy || saving.current || !cancelReason.trim()) return;
+    saving.current = true;
+    setBusy(true); setError("");
+    try {
+      const latest = await cancelAgentContractDraft(selected.id, cancelReason);
+      setSelected(latest);
+      setContracts(rows => rows.map(row => row.id === latest.id ? latest : row));
+      setCancellingDraft(false); setCancelReason("");
+      setNotice("ยกเลิกฉบับร่างแล้ว สามารถสร้างสัญญาใหม่ได้");
+      onChanged?.();
+    } catch (e) { setError(message(e)); }
+    finally { saving.current = false; setBusy(false); }
+  }
   async function save() {
     if (saving.current || busy) return;
     if (!template) {
       setError("กรุณาโหลดแม่แบบสัญญาให้สำเร็จก่อนบันทึก");
       return;
     }
+    const savedReservation = editingDraft?.data?.reservationLetter as
+      | ReservationLetterInput
+      | undefined;
+    const reservationLetter = reservation
+      ? {
+          ...letter,
+          documentNo: savedReservation?.documentNo ?? "",
+          issueDate: reservationIssueDate(savedReservation?.issueDate),
+        }
+      : letter;
     if (reservation) {
       if (!leadId) {
         setError("กรุณาเลือกผู้เช่า");
         return;
       }
-      const fieldErrors = reservationLetterFieldErrors(letter);
+      const fieldErrors = reservationLetterFieldErrors(reservationLetter);
       if (Object.keys(fieldErrors).length) {
         setLetterErrors(fieldErrors);
         setError("กรุณากรอกข้อมูลหนังสือจองที่จำเป็นให้ครบ");
@@ -951,14 +1014,14 @@ export function ContractsScreen({
           ]),
       );
       const startDate = reservation
-        ? letter.issueDate.trim()
+        ? reservationLetter.issueDate.trim()
         : broker
           ? brokerForm.issueDate.trim()
           : lease
             ? leaseForm.termFrom.trim()
             : form.startDate.trim();
       const moveInDate = reservation
-        ? (letter.termFrom || letter.issueDate).trim()
+        ? (reservationLetter.termFrom || reservationLetter.issueDate).trim()
         : undefined;
       const reservationFee = reservation
         ? Number(String(letter.reservationPayment).replace(/,/g, ""))
@@ -969,7 +1032,8 @@ export function ContractsScreen({
       const leaseDeposit = lease
         ? Number(String(leaseForm.depositAmount).replace(/,/g, ""))
         : Number(form.deposit);
-      const contract = await createAgentContract({
+      const persist = editingDraft ? (input: Parameters<typeof createAgentContract>[0]) => updateAgentContractDraft(editingDraft.id, input, editingDraft.data.draftRevision ?? null) : createAgentContract;
+      const contract = await persist({
         leadId,
         startDate,
         ...(reservation
@@ -988,7 +1052,7 @@ export function ContractsScreen({
         ...(renewing ? { previousAgreementId: renewing.id } : {}),
         data: {
           ...extra,
-          ...(reservation ? { reservationLetter: letter } : {}),
+          ...(reservation ? { reservationLetter } : {}),
           ...(broker ? { brokerAppointment: brokerForm } : {}),
           ...(lease ? { leaseAgreement: leaseForm } : {}),
         },
@@ -1004,7 +1068,8 @@ export function ContractsScreen({
       setCreating(false);
       setSelected(contract);
       setRenewing(null);
-      setNotice("บันทึกฉบับร่างแล้ว");
+      setNotice(editingDraft ? "บันทึกการแก้ไขแล้ว กรุณาสร้างลิงก์ลงนามใหม่หากเคยแชร์ไว้" : "บันทึกฉบับร่างแล้ว");
+      setEditingDraft(null);
       onChanged?.();
       setLeadId(null);
       setLetter(emptyReservationLetterForm());
@@ -1031,6 +1096,9 @@ export function ContractsScreen({
   }
   const back = () => {
     setSelected(null);
+    setEditingDraft(null);
+    setCancellingDraft(false);
+    setCancelReason("");
     setRenewing(null);
     setCreating(false);
     setFinancialKind(null);
@@ -1121,19 +1189,20 @@ export function ContractsScreen({
   if (creating)
     return (
       <View style={s.root}>
-        {button(renewing ? "← กลับไปสัญญาเดิม" : "← เลือกประเภทสัญญา", () => {
+        {button(renewing || editingDraft ? "← กลับไปสัญญาเดิม" : "← เลือกประเภทสัญญา", () => {
           if (busy) return;
           setCreating(false);
-          if (!renewing) setChoosingType(true);
+          if (!renewing && !editingDraft) setChoosingType(true);
+          setEditingDraft(null);
           setRenewing(null);
           setError("");
         })}
         <Text style={[s.heading, title]}>
-          {renewing ? "ต่ออายุ" : "สร้าง"}
+          {editingDraft ? "แก้ไขฉบับร่าง · " : renewing ? "ต่ออายุ" : "สร้าง"}
           {agreementType?.nameTh || "สัญญาเช่า"}
         </Text>
         <Text style={[s.body, muted]}>
-          เลือกผู้เช่าและห้องเพื่อเตรียมฉบับร่างสัญญา
+          {editingDraft ? "แก้ไขเงื่อนไขได้โดยคงผู้เช่า ห้อง และเลขสัญญาเดิม เมื่อบันทึกจะล้าง PDF และเอกสารการเงินเดิมเพื่อให้สร้างจากข้อมูลล่าสุด" : "เลือกผู้เช่าและห้องเพื่อเตรียมฉบับร่างสัญญา"}
         </Text>
         {errorView}
         {busy && <ActivityIndicator color={accent} />}
@@ -1153,7 +1222,7 @@ export function ContractsScreen({
           {candidates.map((c) => (
             <Pressable
               key={c.leadId}
-              disabled={busy}
+              disabled={busy || !!editingDraft}
               accessibilityRole="radio"
               accessibilityState={{ checked: leadId === c.leadId }}
               onPress={() => {
@@ -1223,7 +1292,7 @@ export function ContractsScreen({
                 : "ยังไม่มีผู้เช่าที่พร้อมทำสัญญา ต้องมี Lead สถานะจองแล้ว พร้อมข้อมูลผู้เช่าและห้องที่คุณจัดการ"}
             </Text>
           )}
-          {!renewing &&
+          {!renewing && !editingDraft &&
             button("โหลดรายชื่ออีกครั้ง", () => {
               void loadCandidates();
             })}
@@ -1393,7 +1462,7 @@ export function ContractsScreen({
         </View>
       </View>
     );
-  if (selected && financialKind && !reservationLocked)
+  if (selected && financialKind && !reservationLocked && !draftCancelled)
     return <FinancialDocumentForm key={`${selected.id}:${financialKind}`} contractId={selected.id} kind={financialKind}
       onBack={() => setFinancialKind(null)}
       onCreated={row => {
@@ -1461,6 +1530,23 @@ export function ContractsScreen({
             <Text style={[s.body, muted]}>{selected.notes}</Text>
           )}
         </View>
+        {selected.status === "draft" && !selected.ownerSignedAt && !selected.tenantSignedAt && !selected.agentSignedAt && !documentLocked && (
+          <View style={[s.card, card]}>
+            {button("แก้ไขฉบับร่าง", () => { void editDraft(selected); })}
+            {button("ยกเลิกฉบับร่าง", () => { setCancellingDraft(true); setCancelReason(""); setError(""); })}
+            {cancellingDraft && <>
+              <Text style={[s.body, title]}>ยืนยันยกเลิก {selected.contractNo}</Text>
+              <Text style={[s.small, muted]}>รายการจะยังอยู่ในประวัติ ลิงก์ลงนามเดิมจะใช้ไม่ได้ และสามารถสร้างสัญญาใหม่ได้</Text>
+              <MobileInput label="เหตุผลที่ยกเลิก" value={cancelReason} onChangeText={setCancelReason} editable={!busy} maxLength={1000}
+                placeholder="เหตุผลที่ยกเลิก" accessibilityLabel="เหตุผลที่ยกเลิกฉบับร่าง" multiline />
+              <MobileButton disabled={busy || !cancelReason.trim()} onPress={() => { void cancelDraft(); }}>ยืนยันยกเลิกฉบับร่าง</MobileButton>
+              {button("เก็บฉบับร่างไว้", () => { setCancellingDraft(false); setCancelReason(""); })}
+            </>}
+          </View>
+        )}
+        {selected.status === "cancelled" && !!selected.data.draftCancellation && (
+          <Text style={[s.body, muted]}>เหตุผลที่ยกเลิก: {String((selected.data.draftCancellation as { reason?: string }).reason ?? "")}</Text>
+        )}
         {(!!selected.previousAgreementId ||
           (selected.formKind === "lease" &&
             ["active", "expired"].includes(selected.status))) && (
@@ -1695,6 +1781,7 @@ export function ContractsScreen({
           <AgreementAttachments
             key={selected.id}
             contractId={selected.id}
+            formKind={selected.formKind}
             onReadinessChange={setAttachmentReadiness}
             refreshKey={`${selected.status}:${selected.ownerSignedAt}:${selected.tenantSignedAt}:${selected.agentSignedAt}:${selected.reservationLetterStatus}:${selected.leaseAgreementStatus}:${attachmentsNonce}`}
           />
@@ -1910,7 +1997,7 @@ export function ContractsScreen({
                 <View style={[s.previewActions, { padding: 12 }]}>
                   {(previewDoc.kind === "invoice" ||
                     previewDoc.kind === "receipt") &&
-                    !reservationLocked && (
+                    !reservationLocked && !draftCancelled && (
                       <MobileButton
                         disabled={busy}
                         onPress={() => {

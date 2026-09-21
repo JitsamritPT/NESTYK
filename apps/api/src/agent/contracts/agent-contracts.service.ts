@@ -20,7 +20,7 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { createHash, randomBytes } from "crypto";
-import { DataSource, EntityManager, IsNull } from "typeorm";
+import { DataSource, EntityManager, IsNull, Raw } from "typeorm";
 import {
   MOCK_RESERVATION_VERSION,
   createReservationMock,
@@ -47,7 +47,7 @@ import {
   emptyLeaseAgreement,
   pickLeaseRentFromRoom,
 } from "./lease-agreement";
-import { validateReservationLetter, emptyReservationLetter } from "./reservation-letter";
+import { validateReservationLetter, emptyReservationLetter, stampReservationDocumentHeader, bangkokDate } from "./reservation-letter";
 import type {
   AgentContract,
   AgentContractDocumentKind,
@@ -372,6 +372,8 @@ export class AgentContractsService {
   }
   /** After a stamped letter exists, the agreement is view-only. */
   private assertDocumentMutable(c: LeaseContractEntity) {
+    if (c.status === "cancelled")
+      throw new BadRequestException("ยกเลิกสัญญาแล้ว ไม่สามารถแก้ไขเอกสารได้");
     if (
       this.reservationDocument(c)?.status === "ready" ||
       reservationLetterFinalized(c)
@@ -621,6 +623,8 @@ export class AgentContractsService {
           id,
           created_by_user_id: agentId,
           document_url: c.document_url ?? IsNull(),
+          status: c.status,
+          data: Raw(alias => `${alias} = :expectedData`, { expectedData: JSON.stringify(c.data ?? {}) }),
         },
         {
           document_url: stored.path,
@@ -713,6 +717,8 @@ export class AgentContractsService {
           id,
           created_by_user_id: agentId,
           document_url: c.document_url ?? IsNull(),
+          status: c.status,
+          data: Raw(alias => `${alias} = :expectedData`, { expectedData: JSON.stringify(c.data ?? {}) }),
         },
         {
           document_url: stored.path,
@@ -797,6 +803,8 @@ export class AgentContractsService {
           id,
           created_by_user_id: agentId,
           document_url: c.document_url ?? IsNull(),
+          status: c.status,
+          data: Raw(alias => `${alias} = :expectedData`, { expectedData: JSON.stringify(c.data ?? {}) }),
         },
         {
           document_url: stored.path,
@@ -1030,9 +1038,12 @@ export class AgentContractsService {
       patch.status = complete ? "awaiting_agent_review" : "awaiting_signatures";
     }
     try {
-      await this.db
+      const result = await this.db
         .getRepository(LeaseContractEntity)
-        .update({ id: c.id, created_by_user_id: agentId }, patch);
+        .update({ id: c.id, created_by_user_id: agentId, status: c.status,
+          data: Raw(alias => `${alias} = :expectedData`, { expectedData: JSON.stringify(c.data ?? {}) }),
+        }, patch);
+      if (result.affected !== 1) throw new ConflictException("สัญญาถูกเปลี่ยนแล้ว กรุณาเปิดใหม่ก่อนลงนาม");
     } catch (error) {
       await this.documents.remove(stored.path).catch(() => undefined);
       if ((error as { code?: string }).code === "23514")
@@ -1107,6 +1118,12 @@ export class AgentContractsService {
     const token = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + SIGN_INVITE_TTL_MS);
     await this.db.transaction(async (manager) => {
+      const current = await manager.findOne(LeaseContractEntity, {
+        where: { id: c.id }, lock: { mode: "pessimistic_write" },
+      });
+      if (!current || CLOSED_STATUSES.includes(current.status as (typeof CLOSED_STATUSES)[number]) ||
+          current[SIGN_COLUMNS[shareParty].at] || JSON.stringify(current.data) !== JSON.stringify(c.data))
+        throw new ConflictException("สัญญาถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
       await manager
         .createQueryBuilder()
         .update(AgreementSignInviteEntity)
@@ -1208,6 +1225,12 @@ export class AgentContractsService {
     }
     try {
       await this.db.transaction(async (manager) => {
+        const current = await manager.findOne(LeaseContractEntity, {
+          where: { id: c.id }, lock: { mode: "pessimistic_write" },
+        });
+        if (!current || CLOSED_STATUSES.includes(current.status as (typeof CLOSED_STATUSES)[number]) ||
+            JSON.stringify(current.data) !== JSON.stringify(c.data))
+          throw new ConflictException("สัญญาถูกเปลี่ยนแล้ว กรุณาขอลิงก์ลงนามใหม่");
         const locked = await manager.findOne(AgreementSignInviteEntity, {
           where: { id: invite.id },
           lock: { mode: "pessimistic_write" },
@@ -1216,10 +1239,6 @@ export class AgentContractsService {
           throw new ConflictException("ลิงก์นี้ใช้ไม่ได้แล้ว");
         if (locked.expires_at.getTime() < Date.now())
           throw new BadRequestException("ลิงก์ลงนามหมดอายุแล้ว");
-        const current = await manager.findOneBy(LeaseContractEntity, {
-          id: c.id,
-        });
-        if (!current) throw new NotFoundException("ไม่พบสัญญา");
         if (current[SIGN_COLUMNS[invite.party].at])
           throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
         await manager.update(LeaseContractEntity, { id: c.id }, patch);
@@ -1312,10 +1331,9 @@ export class AgentContractsService {
     const agentName = agent
       ? `${agent.first_name ?? ""} ${agent.last_name ?? ""}`.trim()
       : "";
-    const today = new Date().toISOString().slice(0, 10);
     return {
       ...emptyReservationLetter(),
-      issueDate: today,
+      issueDate: bangkokDate(),
       tenantName: tenant.name ?? "",
       tenantPhone: tenant.phone ?? "",
       tenantId: tenant.identity_number ?? "",
@@ -1478,9 +1496,73 @@ export class AgentContractsService {
     };
   }
 
+  private assertDraft(c: LeaseContractEntity) {
+    if (c.status !== "draft" || c.owner_signed_at || c.tenant_signed_at || c.agent_signed_at ||
+        c.owner_signature_url || c.tenant_signature_url || c.agent_signature_url)
+      throw new BadRequestException("แก้ไขหรือยกเลิกได้เฉพาะฉบับร่างที่ยังไม่มีผู้ลงนาม");
+    this.assertDocumentMutable(c);
+  }
+
+  async draftTemplate(agentId: number, id: number) {
+    const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    this.assertDraft(c);
+    const t = c.template;
+    if (!t) throw new BadRequestException("ไม่พบแม่แบบสัญญา");
+    return { id: t.id, agreementTypeCode: t.agreement_type_code, version: t.version,
+      name: t.name, formKind: t.form_kind, dataSchema: t.data_schema };
+  }
+
+  private async revokeDraftInvites(manager: EntityManager, id: number) {
+    await manager.update(AgreementSignInviteEntity,
+      { agreement_id: id, used_at: IsNull(), revoked_at: IsNull() },
+      { revoked_at: new Date() });
+  }
+
+  async cancelDraft(agentId: number, id: number, input: unknown) {
+    const reason = input && typeof input === "object" ? (input as { reason?: unknown }).reason : null;
+    if (typeof reason !== "string" || !reason.trim() || reason.trim().length > 1000)
+      throw new BadRequestException("กรุณาระบุเหตุผลยกเลิกไม่เกิน 1,000 ตัวอักษร");
+    await this.db.transaction(async manager => {
+      const c = await manager.findOne(LeaseContractEntity, {
+        where: { id, created_by_user_id: agentId }, lock: { mode: "pessimistic_write" },
+      });
+      if (!c) throw new NotFoundException("ไม่พบสัญญา");
+      this.assertDraft(c);
+      await manager.update(LeaseContractEntity, { id }, {
+        status: "cancelled",
+        data: { ...c.data, draftCancellation: { reason: reason.trim(), at: new Date().toISOString(), by: agentId } },
+      });
+      await this.revokeDraftInvites(manager, id);
+    });
+    return this.view(agentId, id);
+  }
+
+  async updateDraft(agentId: number, id: number, input: unknown) {
+    return this.saveDraft(agentId, input, id);
+  }
+
   async create(agentId: number, input: unknown) {
+    return this.saveDraft(agentId, input);
+  }
+
+  private async saveDraft(agentId: number, input: unknown, editingId?: number) {
     if (!input || typeof input !== "object" || Array.isArray(input))
       throw new BadRequestException("กรุณาระบุข้อมูลสัญญา");
+    const existing = editingId == null ? null : await this.db.getRepository(LeaseContractEntity)
+      .findOneBy({ id: editingId, created_by_user_id: agentId });
+    if (editingId != null && !existing) throw new NotFoundException("ไม่พบสัญญา");
+    if (existing) {
+      this.assertDraft(existing);
+      const body = input as Record<string, unknown>;
+      if ((body.expectedDraftRevision ?? null) !== (existing.data?.draftRevision ?? null))
+        throw new ConflictException("ฉบับร่างถูกแก้ไขแล้ว กรุณาเปิดใหม่ก่อนบันทึก");
+      if (body.leadId !== existing.lead_id || body.agreementTypeCode !== existing.agreement_type_code ||
+          (body.templateId != null && body.templateId !== existing.template_id) ||
+          (body.previousAgreementId != null && body.previousAgreementId !== existing.previous_agreement_id))
+        throw new BadRequestException("ไม่สามารถเปลี่ยนผู้เช่า ห้อง ประเภท หรือแม่แบบของฉบับร่างเดิม");
+      input = { ...body, templateId: existing.template_id, previousAgreementId: existing.previous_agreement_id };
+    }
     const code =
       input && typeof input === "object"
         ? ((input as Record<string, unknown>).agreementTypeCode ?? "lease")
@@ -1489,7 +1571,7 @@ export class AgentContractsService {
       throw new BadRequestException("กรุณาเลือกประเภทสัญญา");
     const type = await this.db
       .getRepository(MasterAgreementTypeEntity)
-      .findOneBy({ code, is_active: true });
+      .findOneBy({ code, ...(!existing ? { is_active: true } : {}) });
     if (!type || !["lease", "reservation", "broker_appointment"].includes(type.form_kind))
       throw new BadRequestException("ประเภทสัญญานี้ยังไม่เปิดใช้งาน");
     const raw = input as Record<string, unknown>;
@@ -1507,7 +1589,7 @@ export class AgentContractsService {
       .findOne({
         where: {
           agreement_type_code: code,
-          is_active: true,
+          ...(!existing ? { is_active: true } : {}),
           ...(raw.templateId != null ? { id: Number(raw.templateId) } : {}),
         },
         order: { version: "DESC" },
@@ -1523,7 +1605,12 @@ export class AgentContractsService {
     let brokerAppointment: BrokerAppointmentInput | undefined;
     let leaseAgreement: LeaseAgreementInput | undefined;
     if (type.form_kind === "reservation" && rawData.reservationLetter != null) {
-      reservationLetter = validateReservationLetter(rawData.reservationLetter);
+      const savedLetter = existing?.data?.reservationLetter as
+        | ReservationLetterInput
+        | undefined;
+      reservationLetter = validateReservationLetter(
+        stampReservationDocumentHeader(rawData.reservationLetter, savedLetter),
+      );
       delete rawData.reservationLetter;
     }
     if (type.form_kind === "broker_appointment" && rawData.brokerAppointment != null) {
@@ -1536,6 +1623,18 @@ export class AgentContractsService {
     }
     // Prefer lease form dates/money when the overlay payload is present.
     let contractInput = b;
+    if (reservationLetter) {
+      const moveIn =
+        contractInput.moveInDate &&
+        contractInput.moveInDate >= reservationLetter.issueDate
+          ? contractInput.moveInDate
+          : reservationLetter.issueDate;
+      contractInput = {
+        ...contractInput,
+        startDate: reservationLetter.issueDate,
+        moveInDate: moveIn,
+      };
+    }
     if (leaseAgreement) {
       const rent = Number(String(leaseAgreement.monthlyRent).replace(/,/g, ""));
       const deposit = Number(
@@ -1555,6 +1654,7 @@ export class AgentContractsService {
       contractInput,
       template.form_kind,
     );
+    if (existing) data.draftRevision = randomBytes(16).toString("hex");
     if (reservationLetter) data.reservationLetter = reservationLetter;
     if (brokerAppointment)
       data.brokerAppointment = brokerAppointmentSnapshot(brokerAppointment);
@@ -1581,6 +1681,17 @@ export class AgentContractsService {
       });
       if (!tenant || !room)
         throw new NotFoundException("ไม่พบผู้เช่าหรือห้องที่คุณมีสิทธิ์จัดการ");
+      if (existing) {
+        const current = await manager.findOne(LeaseContractEntity, {
+          where: { id: existing.id, created_by_user_id: agentId }, lock: { mode: "pessimistic_write" },
+        });
+        if (!current) throw new NotFoundException("ไม่พบสัญญา");
+        this.assertDraft(current);
+        if (current.updated_at.getTime() !== existing.updated_at.getTime())
+          throw new ConflictException("ฉบับร่างถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
+        if (current.tenant_id !== tenant.id || current.rent_room_id !== room.id)
+          throw new ConflictException("ข้อมูลผู้เช่าหรือห้องเปลี่ยนไป กรุณาสร้างฉบับร่างใหม่");
+      }
       let previous: LeaseContractEntity | null = null;
       if (raw.previousAgreementId != null) {
         previous = await manager.findOne(LeaseContractEntity, {
@@ -1616,6 +1727,7 @@ export class AgentContractsService {
             previousId: previous.id,
           })
           .andWhere("c.status <> 'cancelled'")
+          .andWhere("c.id <> :editingId", { editingId: editingId ?? 0 })
           .getCount();
         if (successor) throw new ConflictException("สัญญานี้มีฉบับต่ออายุแล้ว");
       }
@@ -1625,6 +1737,7 @@ export class AgentContractsService {
         .leftJoin("c.agreement_type", "agreementType")
         .leftJoin("c.template", "contractTemplate")
         .where("c.rent_room_id = :roomId", { roomId: room.id })
+        .andWhere("c.id <> :editingId", { editingId: editingId ?? 0 })
         // Different form kinds may coexist on the same room/date
         // (e.g. reservation + broker appointment + lease the same day).
         .andWhere(
@@ -1653,7 +1766,7 @@ export class AgentContractsService {
         throw new ConflictException(
           "ห้องนี้มีสัญญาประเภทเดียวกันในช่วงวันที่เลือกแล้ว กรุณาตรวจสอบรายการสัญญา",
         );
-      const tenancy = await manager.save(
+      const tenancy = existing ? { id: existing.room_tenancy_id } : await manager.save(
         RoomTenancyEntity,
         manager.create(RoomTenancyEntity, {
           rent_room_id: room.id,
@@ -1675,7 +1788,7 @@ export class AgentContractsService {
         id: room.properties_id,
       });
       const agent = await manager.findOneBy(UserEntity, { id: agentId });
-      const contractNo = await nextContractNo(manager, type.form_kind);
+      const contractNo = existing?.contract_no ?? await nextContractNo(manager, type.form_kind);
       if (reservationLetter && !reservationLetter.documentNo)
         reservationLetter = { ...reservationLetter, documentNo: contractNo };
       if (reservationLetter) data.reservationLetter = reservationLetter;
@@ -1696,6 +1809,7 @@ export class AgentContractsService {
       const contract = await manager.save(
         LeaseContractEntity,
         manager.create(LeaseContractEntity, {
+          ...(existing ? { id: existing.id, document_url: null, invoice_url: null, receipt_url: null } : {}),
           contract_no: contractNo,
           template_id: template.id,
           data,
@@ -1775,6 +1889,7 @@ export class AgentContractsService {
           status: "draft",
         }),
       );
+      if (existing) await this.revokeDraftInvites(manager, existing.id);
       if (!previous)
         await manager.update(
           LeaseContractEntity,

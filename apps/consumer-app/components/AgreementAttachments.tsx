@@ -46,11 +46,36 @@ const EXTRA_SLOTS = [
   },
 ] as const;
 
-const NAMED_EXTRA_CODES = new Set(
-  EXTRA_SLOTS.filter((slot) => slot.code !== "other").map((slot) => slot.code),
-);
+const LEASE_EXTRA_SLOTS = [
+  {
+    code: "lease_annex_1",
+    label: "เอกสารแนบท้าย 1",
+    hint: "ไม่บังคับ — แนบเอกสารแนบท้ายสัญญาเช่าฉบับที่ 1",
+    defaultSubject: "property" as AgreementDocumentSubject,
+  },
+  {
+    code: "lease_annex_2",
+    label: "เอกสารแนบท้าย 2",
+    hint: "ไม่บังคับ — แนบเอกสารแนบท้ายสัญญาเช่าฉบับที่ 2",
+    defaultSubject: "property" as AgreementDocumentSubject,
+  },
+] as const;
 
-type ExtraSlotCode = (typeof EXTRA_SLOTS)[number]["code"];
+type ExtraSlot = (typeof EXTRA_SLOTS)[number] | (typeof LEASE_EXTRA_SLOTS)[number];
+type ExtraSlotCode = ExtraSlot["code"];
+
+function extraSlotsFor(formKind?: string | null): ExtraSlot[] {
+  return formKind === "lease"
+    ? [...LEASE_EXTRA_SLOTS, ...EXTRA_SLOTS]
+    : [...EXTRA_SLOTS];
+}
+
+function namedExtraCodes(slots: ExtraSlot[]) {
+  return new Set(
+    slots.filter((slot) => slot.code !== "other").map((slot) => slot.code),
+  );
+}
+
 type Requirement = AgreementAttachmentChecklist["requirements"][number];
 type Sheet =
   | { kind: "pickType"; requirement: Requirement }
@@ -131,10 +156,12 @@ function Chip({
 export function AgreementAttachments({
   contractId,
   refreshKey,
+  formKind,
   onReadinessChange,
 }: {
   contractId: number;
   refreshKey?: string;
+  formKind?: string | null;
   onReadinessChange?: (value: { contractId: number; ready: boolean }) => void;
 }) {
   const { theme } = useMobileTheme();
@@ -151,6 +178,8 @@ export function AgreementAttachments({
   const running = useRef(false);
   const picking = useRef(false);
   const request = useRef(0);
+  const extraSlots = useMemo(() => extraSlotsFor(formKind), [formKind]);
+  const namedExtras = useMemo(() => namedExtraCodes(extraSlots), [extraSlots]);
   useEffect(() => {
     onReadinessChange?.({ contractId, ready: !busy && !!state?.readyToSign });
   }, [contractId, busy, state?.readyToSign, onReadinessChange]);
@@ -174,14 +203,14 @@ export function AgreementAttachments({
   function docsForExtraSlot(code: ExtraSlotCode) {
     if (code === "other") {
       return extraDocs.filter(
-        (d) => !NAMED_EXTRA_CODES.has(d.documentTypeCode as ExtraSlotCode),
+        (d) => !namedExtras.has(d.documentTypeCode as ExtraSlotCode),
       );
     }
     return extraDocs.filter((d) => d.documentTypeCode === code);
   }
 
   function openExtraUpload(slot: ExtraSlotCode) {
-    const meta = EXTRA_SLOTS.find((row) => row.code === slot)!;
+    const meta = extraSlots.find((row) => row.code === slot)!;
     setExtraSubject(meta.defaultSubject);
     setExtraType(slot);
     setSheet({ kind: "extraUpload", slot });
@@ -493,7 +522,7 @@ export function AgreementAttachments({
               ? "สร้างเอกสารแล้ว จึงแนบหรือแก้ไขไม่ได้ สามารถเปิดดูไฟล์ที่แนบไว้ได้"
               : "ไม่บังคับ — แนบได้จนกว่าจะกดสร้างเอกสาร"}
           </Text>
-          {EXTRA_SLOTS.map((slot) => {
+          {extraSlots.map((slot) => {
             const files = docsForExtraSlot(slot.code);
             const hasFile = files.length > 0;
             const statusColor = hasFile ? "#198460" : theme.textSecondary;
@@ -644,7 +673,7 @@ export function AgreementAttachments({
         <ScrollView style={s.sheet} contentContainerStyle={{ gap: 12 }}>
           <Text style={[s.sheetTitle, ink]}>
             {sheet?.kind === "extraUpload"
-              ? EXTRA_SLOTS.find((row) => row.code === sheet.slot)?.label ??
+              ? extraSlots.find((row) => row.code === sheet.slot)?.label ??
                 "แนบเอกสารเพิ่ม"
               : "แนบเอกสารเพิ่ม"}
           </Text>
@@ -669,7 +698,7 @@ export function AgreementAttachments({
                   .filter(
                     (t) =>
                       t.code === "other" ||
-                      (!NAMED_EXTRA_CODES.has(t.code as ExtraSlotCode) &&
+                      (!namedExtras.has(t.code as ExtraSlotCode) &&
                         t.code !== "ownership_proof"),
                   )
                   .map((t) => (

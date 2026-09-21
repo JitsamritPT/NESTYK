@@ -72,6 +72,20 @@ export class AgentContractsController {
   @Post() create(@CurrentUser() user: AuthRequestUser, @Body() body: unknown) {
     return this.contracts.create(user.id, body);
   }
+  @Get(":id/draft-template")
+  draftTemplate(@CurrentUser() user: AuthRequestUser, @Param("id", ParseIntPipe) id: number) {
+    return this.contracts.draftTemplate(user.id, id);
+  }
+  @Post(":id/draft")
+  @HttpCode(HttpStatus.OK)
+  updateDraft(@CurrentUser() user: AuthRequestUser, @Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    return this.contracts.updateDraft(user.id, id, body);
+  }
+  @Post(":id/cancel-draft")
+  @HttpCode(HttpStatus.OK)
+  cancelDraft(@CurrentUser() user: AuthRequestUser, @Param("id", ParseIntPipe) id: number, @Body() body: unknown) {
+    return this.contracts.cancelDraft(user.id, id, body);
+  }
   @Post(":id/reservation-preview")
   @HttpCode(HttpStatus.OK)
   reservationPreview(

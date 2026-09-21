@@ -258,3 +258,16 @@ export async function generateFinancialDocument(
   await ensureAgentSession();
   return apiPost(`/agent/contracts/${id}/financial-documents/${kind}`, input);
 }
+
+export async function updateAgentContractDraft(id: number, input: CreateAgentContract, expectedDraftRevision: unknown = null): Promise<AgentContract> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/draft`, { ...input, expectedDraftRevision });
+}
+export async function cancelAgentContractDraft(id: number, reason: string): Promise<AgentContract> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/cancel-draft`, { reason });
+}
+export async function getAgentContractDraftTemplate(id: number): Promise<import("@nestyk/types").AgreementTemplate> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/${id}/draft-template`);
+}

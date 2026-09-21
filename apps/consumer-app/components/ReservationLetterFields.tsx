@@ -53,12 +53,22 @@ type TextKey = Exclude<
 >;
 
 export const RESERVATION_LETTER_REQUIRED: TextKey[] = [
-  "issueDate",
   "tenantName",
   "landlordName",
   "project",
   "reservationPayment",
 ];
+
+/** Booking date is the document date; keep a saved draft date, otherwise today in Bangkok. */
+export function reservationIssueDate(saved?: string | null) {
+  if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) return saved;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
 
 const REQUIRED_MESSAGE = "กรุณากรอกข้อมูลนี้";
 
@@ -91,18 +101,6 @@ const SECTIONS: Array<{
     required?: boolean;
   }>;
 }> = [
-  {
-    title: "หัวเอกสาร",
-    fields: [
-      { key: "documentNo", label: "เลขที่ (เว้นว่างให้ระบบใส่)" },
-      {
-        key: "issueDate",
-        label: "วันที่จอง (YYYY-MM-DD)",
-        required: true,
-        placeholder: "2026-10-01",
-      },
-    ],
-  },
   {
     title: "01 คู่สัญญาและผู้ประสานงาน",
     fields: [
