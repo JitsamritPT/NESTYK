@@ -723,6 +723,12 @@ export interface TranslationSchema {
       generatePromo: string;
       generatingPromo: string;
       generatePromoError: string;
+      promoDraftBusyTitle: string;
+      promoDraftBusyHint: string;
+      promoDraftFailedTitle: string;
+      promoDraftFailedHint: string;
+      promoDraftRetry: string;
+      promoDraftWriteYourself: string;
       promoStaleBadge: string;
       promoStaleAlertTitle: string;
       promoStaleAlertBody: string;

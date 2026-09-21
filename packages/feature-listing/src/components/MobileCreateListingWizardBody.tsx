@@ -285,6 +285,16 @@ function isFilledCount(value: string) {
 const MOCK_AI_ENHANCE_LIMIT = 10;
 const MOCK_AI_PROMO_LIMIT = 10;
 
+type PromoAiPhase = 'closed' | 'generating' | 'ready' | 'failed';
+type PromoFailKind = 'overload' | 'generic';
+
+function isPromoOverloadError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /AI_OVERLOAD|high demand|resource.?exhausted|\b503\b|\b429\b|busy|unavailable|timed out/i.test(
+    message,
+  );
+}
+
 export const MobileCreateListingWizardBody: React.FC<
   MobileCreateListingWizardBodyProps
 > = ({
@@ -330,7 +340,8 @@ export const MobileCreateListingWizardBody: React.FC<
   const [promoFingerprint, setPromoFingerprint] = useState<string | null>(null);
   const [generatingPromo, setGeneratingPromo] = useState(false);
   const [promoPreviewOpen, setPromoPreviewOpen] = useState(false);
-  const [promoAiPhase, setPromoAiPhase] = useState<'closed' | 'generating' | 'ready'>('closed');
+  const [promoAiPhase, setPromoAiPhase] = useState<PromoAiPhase>('closed');
+  const [promoFailKind, setPromoFailKind] = useState<PromoFailKind>('generic');
   const [promoDraft, setPromoDraft] = useState<{
     listingTitle: string;
     listingDescription: string;
@@ -1431,6 +1442,113 @@ export const MobileCreateListingWizardBody: React.FC<
       })),
       availableFrom,
     });
+
+  const closePromoAiSheet = useCallback(() => {
+    promoAbortRef.current?.abort();
+    promoAbortRef.current = null;
+    setGeneratingPromo(false);
+    setPromoAiPhase('closed');
+    setPromoDraft(null);
+    setPromoFailKind('generic');
+  }, []);
+
+  const runPromoGenerate = useCallback(async () => {
+    if (!generateListingPromo || generatingPromo) return;
+    const abort = new AbortController();
+    promoAbortRef.current = abort;
+    setPromoDraft(null);
+    setPromoFailKind('generic');
+    setPromoAiPhase('generating');
+    setGeneratingPromo(true);
+    try {
+      const facilityLabels = facilities.map((f) => t.masters.facilities[f.code] ?? f.code);
+      const result = await generateListingPromo({
+        locale,
+        signal: abort.signal,
+        listing: {
+          propertyName: propertyName.trim(),
+          address: address.trim(),
+          district: district.trim(),
+          province: province.trim(),
+          subdistrict: subdistrict.trim(),
+          roomId: roomId.trim() || undefined,
+          floor: floor.trim() || undefined,
+          building: building.trim() || undefined,
+          bedroom: bedroom.trim() || undefined,
+          bathroom: bathroom.trim() || undefined,
+          sizeSqm: sizeSqm.trim() || undefined,
+          roomTypeCode: selectedRoomType?.code,
+          facilityLabels,
+          customFacilities: customFacilities
+            .split('\n')
+            .map((v) => v.trim())
+            .filter(Boolean),
+          nearbyPlaces: nearbyPlaces.map((p) => ({
+            name: p.name,
+            distanceMeters: p.distanceMeters,
+            type: p.type,
+          })),
+          prices: selectedContractTypeIds.map((id) => {
+            const opt = contractTypes.find((c) => c.id === id);
+            return {
+              contractTypeCode: opt?.code,
+              termMonths: opt?.termMonths,
+              price: Number(rentsByTypeId[String(id)]) || undefined,
+              advanceRentMonths: leaseTerms(id).advanceRentMonths,
+              depositMonths: leaseTerms(id).depositMonths,
+            };
+          }),
+          availableFromDate: availableFrom || undefined,
+        },
+      });
+      if (abort.signal.aborted || promoAbortRef.current !== abort) return;
+      setPromoDraft({
+        listingTitle: result.listingTitle.trim(),
+        listingDescription: result.listingDescription.trim(),
+      });
+      setPromoAiPhase('ready');
+      // Demo quota only — never decrement on failure/overload.
+      setPromoRemaining((n) => Math.max(0, n - 1));
+    } catch (err) {
+      if (abort.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        return;
+      }
+      if (promoAbortRef.current !== abort) return;
+      setPromoFailKind(isPromoOverloadError(err) ? 'overload' : 'generic');
+      setPromoAiPhase('failed');
+      setPromoDraft(null);
+    } finally {
+      if (promoAbortRef.current === abort) {
+        promoAbortRef.current = null;
+        setGeneratingPromo(false);
+      }
+    }
+  }, [
+    address,
+    availableFrom,
+    bathroom,
+    bedroom,
+    building,
+    contractTypes,
+    customFacilities,
+    district,
+    facilities,
+    floor,
+    generateListingPromo,
+    generatingPromo,
+    leaseTerms,
+    locale,
+    nearbyPlaces,
+    propertyName,
+    province,
+    rentsByTypeId,
+    roomId,
+    selectedContractTypeIds,
+    selectedRoomType?.code,
+    sizeSqm,
+    subdistrict,
+    t.masters.facilities,
+  ]);
 
   const finishSection = () => {
     const invalid = validateStep(step);
@@ -2945,77 +3063,13 @@ export const MobileCreateListingWizardBody: React.FC<
                   loading={generatingPromo}
                   disabled={generatingPromo || promoAiPhase !== 'closed'}
                   style={styles.promoAssistBtn}
-                  onPress={async () => {
+                  onPress={() => {
                     if (generatingPromo || promoAiPhase !== 'closed' || !generateListingPromo) return;
                     if (promoRemaining <= 0) {
                       Alert.alert(cr.promoQuotaExhausted);
                       return;
                     }
-                    const abort = new AbortController();
-                    promoAbortRef.current = abort;
-                    setPromoDraft(null);
-                    setPromoAiPhase('generating');
-                    setGeneratingPromo(true);
-                    try {
-                      const facilityLabels = facilities.map((f) => t.masters.facilities[f.code] ?? f.code);
-                      const result = await generateListingPromo({
-                        locale,
-                        signal: abort.signal,
-                        listing: {
-                          propertyName: propertyName.trim(),
-                          address: address.trim(),
-                          district: district.trim(),
-                          province: province.trim(),
-                          subdistrict: subdistrict.trim(),
-                          roomId: roomId.trim() || undefined,
-                          floor: floor.trim() || undefined,
-                          building: building.trim() || undefined,
-                          bedroom: bedroom.trim() || undefined,
-                          bathroom: bathroom.trim() || undefined,
-                          sizeSqm: sizeSqm.trim() || undefined,
-                          roomTypeCode: selectedRoomType?.code,
-                          facilityLabels,
-                          customFacilities: customFacilities.split('\n').map((v) => v.trim()).filter(Boolean),
-                          nearbyPlaces: nearbyPlaces.map((p) => ({
-                            name: p.name,
-                            distanceMeters: p.distanceMeters,
-                            type: p.type,
-                          })),
-                          prices: selectedContractTypeIds.map((id) => {
-                            const opt = contractTypes.find((c) => c.id === id);
-                            return {
-                              contractTypeCode: opt?.code,
-                              termMonths: opt?.termMonths,
-                              price: Number(rentsByTypeId[String(id)]) || undefined,
-                              advanceRentMonths: leaseTerms(id).advanceRentMonths,
-                              depositMonths: leaseTerms(id).depositMonths,
-                            };
-                          }),
-                          availableFromDate: availableFrom || undefined,
-                        },
-                      });
-                      if (abort.signal.aborted || promoAbortRef.current !== abort) return;
-                      setPromoDraft({
-                        listingTitle: result.listingTitle.trim(),
-                        listingDescription: result.listingDescription.trim(),
-                      });
-                      setPromoAiPhase('ready');
-                      setPromoRemaining((n) => Math.max(0, n - 1));
-                    } catch (err) {
-                      if (abort.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
-                        return;
-                      }
-                      if (promoAbortRef.current !== abort) return;
-                      setPromoAiPhase('closed');
-                      setPromoDraft(null);
-                      const message = err instanceof Error ? err.message : String(err);
-                      Alert.alert(cr.generatePromoError, message);
-                    } finally {
-                      if (promoAbortRef.current === abort) {
-                        promoAbortRef.current = null;
-                        setGeneratingPromo(false);
-                      }
-                    }
+                    void runPromoGenerate();
                   }}
                 />
               </View>
@@ -3066,7 +3120,8 @@ export const MobileCreateListingWizardBody: React.FC<
                   editable={!generatingPromo}
                   onChangeText={setDescription}
                   multiline
-                  style={{ minHeight: 140, textAlignVertical: 'top' }}
+                  scrollEnabled
+                  style={{ minHeight: 140, maxHeight: 280, textAlignVertical: 'top' }}
                 />
               </View>
 
@@ -3585,8 +3640,14 @@ export const MobileCreateListingWizardBody: React.FC<
         transparent
         onRequestClose={() => setPromoPreviewOpen(false)}
       >
-        <Pressable style={styles.promoModalBackdrop} onPress={() => setPromoPreviewOpen(false)}>
-          <Pressable style={styles.promoModalCard} onPress={() => {}}>
+        <View style={styles.promoModalBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setPromoPreviewOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel={cr.promoPreviewBack}
+          />
+          <View style={styles.promoModalCard}>
             <View style={styles.promoModalHeader}>
               <Text style={styles.promoModalTitle}>{cr.promoListingPreview}</Text>
               <Pressable onPress={() => setPromoPreviewOpen(false)} hitSlop={10}>
@@ -3597,6 +3658,8 @@ export const MobileCreateListingWizardBody: React.FC<
               style={styles.promoModalScroll}
               contentContainerStyle={styles.promoModalScrollContent}
               showsVerticalScrollIndicator
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
             >
               {photos[0]?.uri ? (
                 <Image
@@ -3604,49 +3667,60 @@ export const MobileCreateListingWizardBody: React.FC<
                   style={styles.promoModalCover}
                 />
               ) : null}
-              <Text style={styles.promoModalListingTitle}>
+              <Text selectable style={styles.promoModalListingTitle}>
                 {promoTitle.trim() || cr.promoPreviewEmpty}
               </Text>
-              <Text style={styles.promoModalListingDesc}>
+              <Text selectable style={styles.promoModalListingDesc}>
                 {description.trim() || cr.promoPreviewEmptyDesc}
               </Text>
             </ScrollView>
             <MobileButton onPress={() => setPromoPreviewOpen(false)}>
               {cr.promoPreviewBack}
             </MobileButton>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       <MobileBottomSheet
         visible={promoAiPhase !== 'closed'}
-        onClose={() => {
-          if (promoAiPhase === 'generating') {
-            promoAbortRef.current?.abort();
-            promoAbortRef.current = null;
-            setGeneratingPromo(false);
-          }
-          setPromoAiPhase('closed');
-          setPromoDraft(null);
-        }}
+        onClose={closePromoAiSheet}
         closeOnBackdropPress={promoAiPhase !== 'generating'}
+        sheetStyle={styles.promoDraftSheetPanel}
       >
         <View style={styles.promoDraftSheet}>
           <Text style={styles.promoDraftSheetChrome}>{cr.promoDraftReviewTitle}</Text>
           <View style={styles.promoHatchWrap}>
             <MobileNestykHatchLoader
               mode={promoAiPhase === 'ready' ? 'success' : 'idle'}
-              size={96}
+              size={88}
               accessibilityLabel={
-                promoAiPhase === 'ready' ? cr.promoDraftReadyTitle : cr.promoDraftHatchingTitle
+                promoAiPhase === 'ready'
+                  ? cr.promoDraftReadyTitle
+                  : promoAiPhase === 'failed'
+                    ? promoFailKind === 'overload'
+                      ? cr.promoDraftBusyTitle
+                      : cr.promoDraftFailedTitle
+                    : cr.promoDraftHatchingTitle
               }
             />
           </View>
           <Text style={styles.promoDraftSheetTitle}>
-            {promoAiPhase === 'ready' ? cr.promoDraftReadyTitle : cr.promoDraftHatchingTitle}
+            {promoAiPhase === 'ready'
+              ? cr.promoDraftReadyTitle
+              : promoAiPhase === 'failed'
+                ? promoFailKind === 'overload'
+                  ? cr.promoDraftBusyTitle
+                  : cr.promoDraftFailedTitle
+                : cr.promoDraftHatchingTitle}
           </Text>
           <Text style={styles.promoDraftSheetHint}>
-            {promoAiPhase === 'ready' ? cr.promoDraftReadyHint : cr.promoDraftHatchingHint}
+            {promoAiPhase === 'ready'
+              ? cr.promoDraftReadyHint
+              : promoAiPhase === 'failed'
+                ? promoFailKind === 'overload'
+                  ? cr.promoDraftBusyHint
+                  : cr.promoDraftFailedHint
+                : cr.promoDraftHatchingHint}
           </Text>
 
           {promoAiPhase === 'generating' ? (
@@ -3661,17 +3735,15 @@ export const MobileCreateListingWizardBody: React.FC<
                 <View style={[styles.promoSkeletonLine, { width: '94%' }]} />
                 <View style={[styles.promoSkeletonLine, { width: '72%' }]} />
               </View>
-              <MobileButton
-                variant="outline"
-                onPress={() => {
-                  promoAbortRef.current?.abort();
-                  promoAbortRef.current = null;
-                  setGeneratingPromo(false);
-                  setPromoAiPhase('closed');
-                  setPromoDraft(null);
-                }}
-              >
+              <MobileButton variant="outline" onPress={closePromoAiSheet}>
                 {cr.promoDraftCancel}
+              </MobileButton>
+            </>
+          ) : promoAiPhase === 'failed' ? (
+            <>
+              <MobileButton onPress={() => void runPromoGenerate()}>{cr.promoDraftRetry}</MobileButton>
+              <MobileButton variant="outline" onPress={closePromoAiSheet}>
+                {cr.promoDraftWriteYourself}
               </MobileButton>
             </>
           ) : (
@@ -3683,15 +3755,17 @@ export const MobileCreateListingWizardBody: React.FC<
               ) : null}
               <ScrollView
                 style={styles.promoDraftScroll}
-                contentContainerStyle={{ gap: 12, paddingBottom: 8 }}
+                contentContainerStyle={styles.promoDraftScrollContent}
                 showsVerticalScrollIndicator
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
               >
                 <Text style={styles.promoDraftLabel}>{cr.promoListingTitle}</Text>
-                <Text style={styles.promoDraftBody}>
+                <Text selectable style={styles.promoDraftBody}>
                   {promoDraft?.listingTitle || '—'}
                 </Text>
                 <Text style={styles.promoDraftLabel}>{cr.listingDescription}</Text>
-                <Text style={styles.promoDraftBody}>
+                <Text selectable style={styles.promoDraftBody}>
                   {promoDraft?.listingDescription || '—'}
                 </Text>
               </ScrollView>
@@ -3711,13 +3785,7 @@ export const MobileCreateListingWizardBody: React.FC<
               >
                 {cr.promoDraftUse}
               </MobileButton>
-              <MobileButton
-                variant="outline"
-                onPress={() => {
-                  setPromoAiPhase('closed');
-                  setPromoDraft(null);
-                }}
-              >
+              <MobileButton variant="outline" onPress={closePromoAiSheet}>
                 {cr.promoDraftKeep}
               </MobileButton>
             </>
@@ -4484,6 +4552,7 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
     maxHeight: '85%',
+    zIndex: 1,
   },
   promoModalHeader: {
     flexDirection: 'row',
@@ -4499,6 +4568,7 @@ const styles = StyleSheet.create({
   },
   promoModalScroll: {
     flexGrow: 0,
+    flexShrink: 1,
     maxHeight: 420,
   },
   promoModalScrollContent: {
@@ -4516,13 +4586,16 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 26,
     fontWeight: '700',
-    color: tokens.colors.textHeading,
+    color: tokens.colors.primary,
   },
   promoModalListingDesc: {
     fontFamily: tokens.typography.native.body,
     fontSize: 14,
     lineHeight: 22,
-    color: tokens.colors.textSecondary,
+    color: tokens.colors.primary,
+  },
+  promoDraftSheetPanel: {
+    backgroundColor: '#FFFFFF',
   },
   promoDraftSheet: {
     paddingHorizontal: 20,
@@ -4534,7 +4607,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     fontWeight: '700',
-    color: tokens.colors.textHeading,
+    color: tokens.colors.primary,
     textAlign: 'center',
   },
   promoHatchWrap: {
@@ -4542,13 +4615,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingTop: 4,
     paddingBottom: 4,
+    overflow: 'hidden',
   },
   promoDraftSheetTitle: {
     fontFamily: tokens.typography.native.body,
     fontSize: 17,
     lineHeight: 26,
     fontWeight: '700',
-    color: tokens.colors.textHeading,
+    color: tokens.colors.primary,
     textAlign: 'center',
   },
   promoDraftSheetHint: {
@@ -4581,7 +4655,20 @@ const styles = StyleSheet.create({
     color: tokens.colors.warning,
   },
   promoDraftScroll: {
+    minHeight: 120,
     maxHeight: 280,
+    flexGrow: 0,
+    flexShrink: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  promoDraftScrollContent: {
+    gap: 12,
+    paddingBottom: 8,
   },
   promoDraftLabel: {
     fontFamily: tokens.typography.native.body,
@@ -4594,7 +4681,7 @@ const styles = StyleSheet.create({
     fontFamily: tokens.typography.native.body,
     fontSize: 15,
     lineHeight: 23,
-    color: tokens.colors.textHeading,
+    color: tokens.colors.primary,
   },
   promoStaleBanner: {
     flexDirection: 'row',

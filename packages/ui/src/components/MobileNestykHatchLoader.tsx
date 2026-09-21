@@ -1,19 +1,20 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   AppState,
+  Image,
+  type ImageSourcePropType,
   StyleSheet,
   View,
   type AppStateStatus,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import Svg, { Circle, ClipPath, Defs, Ellipse, G, Path, Rect } from 'react-native-svg';
+import Svg, { Defs, Ellipse, LinearGradient, Path, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
   Easing,
   type SharedValue,
   cancelAnimation,
-  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -21,86 +22,133 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { tokens } from '../theme/tokens';
+import { hatchHead, hatchSuccess } from '../assets/hatchAssets';
 
-const AnimatedG = Animated.createAnimatedComponent(G);
-
-const INK = tokens.colors.primary;
-const BRAND = tokens.colors.brand[500];
-const SHELL = '#FFF5DA';
-const SHADOW = '#EAD9B0';
-const STROKE = 5;
-
-/** Idle narrative loop — matches nestyk-egg-idle-v2.svg (5.6s). */
-export const NESTYK_IDLE_LOOP_MS = 5600;
-/** Success hatch settle time before sparks loop — matches hatch-v2. */
+/** Idle narrative loop (~6.2s) — rock → crack → small peek → close. */
+export const NESTYK_IDLE_LOOP_MS = 6200;
+/** Success hatch settle before spark loop. */
 export const NESTYK_HATCH_DURATION_MS = 2000;
 
 export type NestykHatchMode = 'idle' | 'success';
 
 export type MobileNestykHatchLoaderProps = {
-  /** idle = waiting loop. success = hatch once then hold + spark loop. */
   mode?: NestykHatchMode;
-  /** Display size in px (spec 80–100). */
   size?: number;
-  /** Fires once when success hatch settles (not on cancel/idle). */
   onSuccessComplete?: () => void;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
 };
 
-const BIRD_BODY =
-  'M126 220V131L108 123 127 114C128 82 172 82 179 113L185 159Q214 154 225 170Q237 187 222 211Q210 232 179 234L150 234Q134 234 126 220Z';
-const WING = 'M175 181Q191 164 210 176Q212 195 188 205';
-/** Split into two absolute paths — avoid relative `m` mid-path (can crash RN SVG). */
-const FOOT_L = 'M149 235v16h-12';
-const FOOT_R = 'M187 235v16h12';
-const SHELL_FULL =
-  'M160 60C119 60 83 126 83 185C83 232 112 256 160 256S237 232 237 185C237 126 201 60 160 60Z';
-const SHELL_CAP =
-  'M83 185C83 126 119 60 160 60S237 126 237 185L213 199 187 180 160 199 134 180 109 199Z';
-const SHELL_BASE =
-  'M83 185L109 199 134 180 160 199 187 180 213 199 237 185C237 232 208 256 160 256S83 232 83 185Z';
-const CRACK = 'M84 185L109 199 134 180 160 199 187 180 213 199 236 185';
-const HIGHLIGHT = 'M118 118Q128 95 143 88';
-/** Idle peek mask — matches nestyk-egg-idle-v2.svg clipPath (fixed to egg, bird moves inside). */
-const PEEK_CLIP =
-  'M70 0H250V197L213 199 187 180 160 199 134 180 109 199 70 180Z';
-const SPARK_A = 'M239 75Q242 88 254 91Q242 94 239 107Q236 94 224 91Q236 88 239 75';
-const SPARK_B = 'M80 119Q82 129 92 131Q82 133 80 143Q78 133 68 131Q78 129 80 119';
-const SPARK_C = 'M244 192Q246 201 254 203Q246 205 244 214Q242 205 234 203Q242 201 244 192';
-
-function BirdMark() {
-  return (
-    <G>
-      <Path
-        d={BIRD_BODY}
-        fill={BRAND}
-        stroke={INK}
-        strokeWidth={STROKE}
-        strokeLinejoin="round"
-      />
-      <Circle cx={149} cy={113} r={5} fill={INK} />
-      <Path
-        d={WING}
-        fill="none"
-        stroke={INK}
-        strokeWidth={STROKE}
-        strokeLinecap="round"
-      />
-      <Path d={FOOT_L} fill="none" stroke={INK} strokeWidth={STROKE} strokeLinecap="round" />
-      <Path d={FOOT_R} fill="none" stroke={INK} strokeWidth={STROKE} strokeLinecap="round" />
-    </G>
-  );
-}
-
 function stopAll(vals: SharedValue<number>[]) {
   vals.forEach((v) => cancelAnimation(v));
 }
 
+function SoftEgg({ size }: { size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 320 320">
+      <Defs>
+        <LinearGradient id="nestykEggFill" x1="0.2" y1="0" x2="0.78" y2="1">
+          <Stop offset="0" stopColor="#FFFDF7" />
+          <Stop offset="0.48" stopColor="#FFF8E8" />
+          <Stop offset="1" stopColor="#DDC9A3" />
+        </LinearGradient>
+        <RadialGradient id="nestykEggLight" cx="31%" cy="22%" r="70%">
+          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.9} />
+          <Stop offset="0.58" stopColor="#FFFFFF" stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Path
+        d="M160 49C119 49 83 121 83 187 83 235 112 259 160 259S237 235 237 187C237 121 201 49 160 49Z"
+        fill="url(#nestykEggFill)"
+      />
+      <Path
+        d="M160 49C119 49 83 121 83 187 83 235 112 259 160 259S237 235 237 187C237 121 201 49 160 49Z"
+        fill="url(#nestykEggLight)"
+      />
+      <Path
+        d="M105 120Q121 79 151 67"
+        fill="none"
+        stroke="#FFFFFF"
+        strokeWidth={10}
+        strokeLinecap="round"
+        opacity={0.55}
+      />
+    </Svg>
+  );
+}
+
+function EggBase({ size }: { size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 320 320">
+      <Defs>
+        <LinearGradient id="nestykBaseFill" x1="0.2" y1="0" x2="0.78" y2="1">
+          <Stop offset="0" stopColor="#FFFDF7" />
+          <Stop offset="0.48" stopColor="#FFF8E8" />
+          <Stop offset="1" stopColor="#DDC9A3" />
+        </LinearGradient>
+        <RadialGradient id="nestykBaseLight" cx="31%" cy="22%" r="70%">
+          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.9} />
+          <Stop offset="0.58" stopColor="#FFFFFF" stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Path
+        d="M82 185 107 200 133 180 160 200 187 180 214 200 238 185C238 233 209 259 160 259S82 233 82 185Z"
+        fill="url(#nestykBaseFill)"
+      />
+      <Path
+        d="M82 185 107 200 133 180 160 200 187 180 214 200 238 185C238 233 209 259 160 259S82 233 82 185Z"
+        fill="url(#nestykBaseLight)"
+        opacity={0.62}
+      />
+      <Path
+        d="M103 221Q130 247 175 245"
+        fill="none"
+        stroke="#FFFFFF"
+        strokeWidth={7}
+        strokeLinecap="round"
+        opacity={0.3}
+      />
+    </Svg>
+  );
+}
+
+function EggCap({ size }: { size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 320 320">
+      <Defs>
+        <LinearGradient id="nestykCapFill" x1="0.2" y1="0" x2="0.78" y2="1">
+          <Stop offset="0" stopColor="#FFFDF7" />
+          <Stop offset="0.48" stopColor="#FFF8E8" />
+          <Stop offset="1" stopColor="#DDC9A3" />
+        </LinearGradient>
+        <RadialGradient id="nestykCapLight" cx="31%" cy="22%" r="70%">
+          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.9} />
+          <Stop offset="0.58" stopColor="#FFFFFF" stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Path
+        d="M82 185C82 120 118 49 160 49S238 120 238 185L214 200 187 180 160 200 133 180 107 200Z"
+        fill="url(#nestykCapFill)"
+      />
+      <Path
+        d="M82 185C82 120 118 49 160 49S238 120 238 185L214 200 187 180 160 200 133 180 107 200Z"
+        fill="url(#nestykCapLight)"
+      />
+      <Path
+        d="M105 120Q121 79 151 67"
+        fill="none"
+        stroke="#FFFFFF"
+        strokeWidth={10}
+        strokeLinecap="round"
+        opacity={0.52}
+      />
+    </Svg>
+  );
+}
+
 /**
- * NESTYK hatch loader v2 — Idle peek loop (5.6s) / Success full hatch + spark twinkle.
- * Never call plain JS helpers from useAnimatedStyle (UI worklet) — Hermes SIGABRT.
+ * Honey & Cream 2.5D hatch loader — PNG mascot + soft egg (no flat black-stroke bird).
+ * Idle loops 6.2s with a small peek; Success plays once then holds with spark twinkle.
  */
 export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = ({
   mode = 'idle',
@@ -113,39 +161,39 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const onSuccessRef = useRef(onSuccessComplete);
   onSuccessRef.current = onSuccessComplete;
-  /** Primitive captured into worklets — no JS helper calls on UI thread. */
-  const unit = size / 320;
-  const clipId = `nestykPeek${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  const stageClipId = `nestykStage${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
 
-  const rock = useSharedValue(0);
-  const wholeOpacity = useSharedValue(1);
+  const eggOpacity = useSharedValue(1);
+  const eggRotate = useSharedValue(0);
   const crackOpacity = useSharedValue(0);
   const capY = useSharedValue(0);
-  const birdY = useSharedValue(140);
-  const birdX = useSharedValue(0);
-  const birdOpacity = useSharedValue(1);
-  const baseOpacity = useSharedValue(1);
-  const baseY = useSharedValue(0);
-  const baseScale = useSharedValue(1);
-  const capOpen = useSharedValue(0);
+  const capRotate = useSharedValue(0);
+  const peekOpacity = useSharedValue(0);
+  const peekY = useSharedValue(12);
+  const peekScale = useSharedValue(0.96);
+  const peekRotate = useSharedValue(0);
+  const successOpacity = useSharedValue(0);
+  const successY = useSharedValue(24);
+  const successScale = useSharedValue(0.9);
+  const shadowScale = useSharedValue(1);
   const sparkA = useSharedValue(0);
   const sparkB = useSharedValue(0);
   const sparkC = useSharedValue(0);
 
   const allValsRef = useRef<SharedValue<number>[]>([]);
   allValsRef.current = [
-    rock,
-    wholeOpacity,
+    eggOpacity,
+    eggRotate,
     crackOpacity,
     capY,
-    birdY,
-    birdX,
-    birdOpacity,
-    baseOpacity,
-    baseY,
-    baseScale,
-    capOpen,
+    capRotate,
+    peekOpacity,
+    peekY,
+    peekScale,
+    peekRotate,
+    successOpacity,
+    successY,
+    successScale,
+    shadowScale,
     sparkA,
     sparkB,
     sparkC,
@@ -177,93 +225,87 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
   }, []);
 
   useEffect(() => {
-    const allVals = allValsRef.current;
-    stopAll(allVals);
+    const vals = allValsRef.current;
+    stopAll(vals);
     let successTimer: ReturnType<typeof setTimeout> | undefined;
+    const ease = Easing.inOut(Easing.sin);
+    const soft = Easing.bezier(0.28, 0.72, 0.28, 1);
 
     if (!appActive) {
-      return () => stopAll(allVals);
+      return () => stopAll(vals);
     }
 
     if (reduceMotion) {
-      rock.value = 0;
-      birdX.value = 0;
+      eggRotate.value = 0;
       capY.value = 0;
-      capOpen.value = 0;
-      baseY.value = 0;
-      baseScale.value = 1;
+      capRotate.value = 0;
+      peekY.value = 0;
+      peekScale.value = 1;
+      peekRotate.value = 0;
+      successY.value = 0;
+      successScale.value = 1;
+      shadowScale.value = 1;
+      sparkA.value = 0;
+      sparkB.value = 0;
+      sparkC.value = 0;
       if (mode === 'success') {
-        wholeOpacity.value = 0;
+        eggOpacity.value = 0;
         crackOpacity.value = 0;
-        baseOpacity.value = 0;
-        birdY.value = 0;
-        birdOpacity.value = 1;
-        sparkA.value = 0.8;
-        sparkB.value = 0.8;
-        sparkC.value = 0.8;
+        peekOpacity.value = 0;
+        successOpacity.value = 1;
+        sparkA.value = 0.75;
         onSuccessRef.current?.();
       } else {
-        wholeOpacity.value = 1;
+        eggOpacity.value = 1;
         crackOpacity.value = 0;
-        baseOpacity.value = 1;
-        birdY.value = 140;
-        birdOpacity.value = 0;
-        sparkA.value = 0;
-        sparkB.value = 0;
-        sparkC.value = 0;
+        peekOpacity.value = 0;
+        successOpacity.value = 0;
       }
-      return () => stopAll(allVals);
+      return () => stopAll(vals);
     }
 
     if (mode === 'idle') {
-      rock.value = 0;
-      wholeOpacity.value = 1;
-      crackOpacity.value = 0;
-      capY.value = 0;
-      capOpen.value = 0;
-      birdY.value = 140;
-      birdX.value = 0;
-      birdOpacity.value = 1;
-      baseOpacity.value = 1;
-      baseY.value = 0;
-      baseScale.value = 1;
+      successOpacity.value = 0;
+      successY.value = 24;
+      successScale.value = 0.9;
       sparkA.value = 0;
       sparkB.value = 0;
       sparkC.value = 0;
 
-      const ease = Easing.inOut(Easing.sin);
+      eggOpacity.value = 1;
+      eggRotate.value = 0;
+      crackOpacity.value = 0;
+      capY.value = 0;
+      capRotate.value = 0;
+      peekOpacity.value = 0;
+      peekY.value = 18;
+      peekScale.value = 0.98;
+      peekRotate.value = 0;
+      shadowScale.value = 1;
 
-      rock.value = withRepeat(
+      // One continuous 6.2s story: rock → crack → cap lifts → tiny peek → close.
+      eggRotate.value = withRepeat(
         withSequence(
-          withTiming(0, { duration: 840 }),
-          withTiming(-3, { duration: 280, easing: ease }),
-          withTiming(3, { duration: 280, easing: ease }),
-          withTiming(0, { duration: 392, easing: ease }),
-          withTiming(0, { duration: 5600 - 1792 }),
+          withTiming(0, { duration: 868 }),
+          withTiming(-1.8, { duration: 248, easing: ease }),
+          withTiming(1.8, { duration: 248, easing: ease }),
+          withTiming(-0.7, { duration: 248, easing: ease }),
+          withTiming(0, { duration: 248, easing: ease }),
+          withTiming(0, { duration: 4340 }),
         ),
         -1,
         false,
       );
 
-      wholeOpacity.value = withRepeat(
-        withSequence(
-          withTiming(1, { duration: 1568 }),
-          withTiming(0, { duration: 56 }),
-          withTiming(0, { duration: 3248 }),
-          withTiming(1, { duration: 280 }),
-          withTiming(1, { duration: 448 }),
-        ),
-        -1,
-        false,
-      );
+      eggOpacity.value = 1;
 
       crackOpacity.value = withRepeat(
         withSequence(
-          withTiming(0, { duration: 952 }),
-          withTiming(1, { duration: 56 }),
-          withTiming(1, { duration: 3472 }),
-          withTiming(0, { duration: 448 }),
-          withTiming(0, { duration: 672 }),
+          withTiming(0, { duration: 1302 }),
+          withTiming(0.58, { duration: 186, easing: ease }),
+          withTiming(0.58, { duration: 2790 }),
+          withTiming(0, { duration: 372, easing: ease }),
+          withTiming(0, { duration: 1550 }),
         ),
         -1,
         false,
@@ -271,292 +313,336 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
 
       capY.value = withRepeat(
         withSequence(
-          withTiming(0, { duration: 1792 }),
-          withTiming(0, { duration: 784 }),
-          withTiming(-66, { duration: 784, easing: ease }),
-          withTiming(-66, { duration: 1064 }),
-          withTiming(0, { duration: 1008, easing: ease }),
-          withTiming(0, { duration: 168 }),
+          withTiming(0, { duration: 1922 }),
+          withTiming(-22, { duration: 620, easing: soft }),
+          withTiming(-29, { duration: 434, easing: soft }),
+          withTiming(-29, { duration: 930 }),
+          withTiming(-20, { duration: 434, easing: soft }),
+          withTiming(0, { duration: 558, easing: soft }),
+          withTiming(0, { duration: 1302 }),
         ),
         -1,
         false,
       );
 
-      birdY.value = withRepeat(
+      capRotate.value = withRepeat(
         withSequence(
-          withTiming(140, { duration: 1792 }),
-          withTiming(140, { duration: 784 }),
-          withTiming(40, { duration: 784, easing: ease }),
-          withTiming(40, { duration: 1064 }),
-          withTiming(140, { duration: 1008, easing: ease }),
-          withTiming(140, { duration: 168 }),
+          withTiming(0, { duration: 1922 }),
+          withTiming(-1, { duration: 620, easing: soft }),
+          withTiming(-2, { duration: 434, easing: soft }),
+          withTiming(-2, { duration: 930 }),
+          withTiming(-0.7, { duration: 434, easing: soft }),
+          withTiming(0, { duration: 558, easing: soft }),
+          withTiming(0, { duration: 1302 }),
         ),
         -1,
         false,
       );
 
-      birdX.value = withRepeat(
+      peekOpacity.value = withRepeat(
         withSequence(
-          withTiming(0, { duration: 2912 }),
-          withTiming(3, { duration: 168, easing: ease }),
-          withTiming(0, { duration: 280, easing: ease }),
-          withTiming(-3, { duration: 168, easing: ease }),
-          withTiming(0, { duration: 280, easing: ease }),
-          withTiming(0, { duration: 1792 }),
+          withTiming(0, { duration: 2108 }),
+          withTiming(0.35, { duration: 434, easing: soft }),
+          withTiming(1, { duration: 434, easing: soft }),
+          withTiming(1, { duration: 930 }),
+          withTiming(0.7, { duration: 434, easing: soft }),
+          withTiming(0, { duration: 310, easing: soft }),
+          withTiming(0, { duration: 1550 }),
         ),
         -1,
         false,
       );
 
-      return () => stopAll(allVals);
+      peekY.value = withRepeat(
+        withSequence(
+          withTiming(18, { duration: 2108 }),
+          withTiming(10, { duration: 434, easing: soft }),
+          withTiming(0, { duration: 434, easing: soft }),
+          withTiming(-1, { duration: 310, easing: ease }),
+          withTiming(0, { duration: 310, easing: ease }),
+          withTiming(0, { duration: 310 }),
+          withTiming(9, { duration: 434, easing: soft }),
+          withTiming(18, { duration: 310, easing: soft }),
+          withTiming(18, { duration: 1550 }),
+        ),
+        -1,
+        false,
+      );
+
+      peekScale.value = withRepeat(
+        withSequence(
+          withTiming(0.98, { duration: 2108 }),
+          withTiming(1, { duration: 868, easing: soft }),
+          withTiming(1, { duration: 930 }),
+          withTiming(0.99, { duration: 744, easing: soft }),
+          withTiming(0.98, { duration: 1550 }),
+        ),
+        -1,
+        false,
+      );
+
+      // Gentle head tilt (life) — no separate blink layers in PNG
+      peekRotate.value = withRepeat(
+        withSequence(
+          withTiming(0, { duration: 2976 }),
+          withTiming(0.7, { duration: 310, easing: ease }),
+          withTiming(-0.7, { duration: 310, easing: ease }),
+          withTiming(0, { duration: 310, easing: ease }),
+          withTiming(0, { duration: 2294 }),
+        ),
+        -1,
+        false,
+      );
+
+      shadowScale.value = withRepeat(
+        withSequence(
+          withTiming(1, { duration: 1922 }),
+          withTiming(0.9, { duration: 1054, easing: ease }),
+          withTiming(0.9, { duration: 930 }),
+          withTiming(1, { duration: 744, easing: ease }),
+          withTiming(1, { duration: 1550 }),
+        ),
+        -1,
+        false,
+      );
+
+      return () => stopAll(vals);
     }
 
-    rock.value = withTiming(0, { duration: 120 });
-    birdX.value = withTiming(0, { duration: 120 });
-    capY.value = withTiming(0, { duration: 120 });
-    wholeOpacity.value = 1;
-    crackOpacity.value = 0;
-    baseOpacity.value = 1;
-    baseY.value = 0;
-    baseScale.value = 1;
-    capOpen.value = 0;
-    birdY.value = 130;
-    birdOpacity.value = 0;
+    // Success — cancel idle, hatch once, hold + sparks
+    peekOpacity.value = withTiming(0, { duration: 160 });
+    crackOpacity.value = withTiming(0.65, { duration: 400 });
+    eggOpacity.value = withSequence(
+      withTiming(1, { duration: 400 }),
+      withTiming(0, { duration: 500, easing: ease }),
+    );
+    eggRotate.value = withTiming(0, { duration: 200 });
+
+    successOpacity.value = 0;
+    successY.value = 28;
+    successScale.value = 0.88;
     sparkA.value = 0;
     sparkB.value = 0;
     sparkC.value = 0;
 
-    const hatchEase = Easing.bezier(0.2, 0.7, 0.3, 1);
+    const hatchEase = Easing.bezier(0.18, 0.8, 0.28, 1);
 
-    wholeOpacity.value = withTiming(0, { duration: 800 });
-    crackOpacity.value = withTiming(1, { duration: 800 });
-    capOpen.value = withDelay(
-      700,
-      withTiming(1, { duration: 1200, easing: hatchEase }),
-    );
-    baseOpacity.value = withDelay(1300, withTiming(0, { duration: 800 }));
-    baseY.value = withDelay(1300, withTiming(20, { duration: 800 }));
-    baseScale.value = withDelay(1300, withTiming(0.9, { duration: 800 }));
-    birdOpacity.value = withDelay(850, withTiming(1, { duration: 200 }));
-    birdY.value = withDelay(
-      850,
+    successOpacity.value = withDelay(520, withTiming(1, { duration: 280 }));
+    successY.value = withDelay(
+      520,
       withSequence(
-        withTiming(-8, { duration: 800, easing: hatchEase }),
-        withTiming(0, { duration: 200, easing: hatchEase }),
+        withTiming(-4, { duration: 620, easing: hatchEase }),
+        withTiming(0, { duration: 280, easing: ease }),
+      ),
+    );
+    successScale.value = withDelay(
+      520,
+      withSequence(
+        withTiming(1.03, { duration: 620, easing: hatchEase }),
+        withTiming(1, { duration: 280, easing: ease }),
+      ),
+    );
+    shadowScale.value = withDelay(
+      520,
+      withSequence(
+        withTiming(0.85, { duration: 400, easing: ease }),
+        withTiming(1.08, { duration: 280, easing: ease }),
+        withTiming(1, { duration: 220, easing: ease }),
       ),
     );
 
-    const twinkleEase = Easing.inOut(Easing.sin);
-    const startTwinkle = (sv: SharedValue<number>, delayMs: number) => {
+    const twinkle = (sv: SharedValue<number>, delayMs: number) => {
       sv.value = withDelay(
         delayMs,
         withRepeat(
           withSequence(
-            withTiming(1, { duration: 1000, easing: twinkleEase }),
-            withTiming(0.2, { duration: 1000, easing: twinkleEase }),
+            withTiming(1, { duration: 900, easing: ease }),
+            withTiming(0.18, { duration: 900, easing: ease }),
           ),
           -1,
           false,
         ),
       );
     };
-    startTwinkle(sparkA, 2000);
-    startTwinkle(sparkB, 2600);
-    startTwinkle(sparkC, 3200);
+    twinkle(sparkA, 1800);
+    twinkle(sparkB, 2300);
+    twinkle(sparkC, 2800);
 
     successTimer = setTimeout(() => onSuccessRef.current?.(), NESTYK_HATCH_DURATION_MS);
 
     return () => {
       if (successTimer) clearTimeout(successTimer);
-      stopAll(allVals);
+      stopAll(vals);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- shared values stable; avoid callback identity
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, reduceMotion, appActive]);
 
-  const rockStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rock.value}deg` }],
+  const eggStyle = useAnimatedStyle(() => ({
+    opacity: eggOpacity.value,
+    transform: [{ rotate: `${eggRotate.value}deg` }],
   }));
 
-  const wholeStyle = useAnimatedStyle(() => ({
-    opacity: wholeOpacity.value,
+  const capStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: capY.value * (size / 320) },
+      { rotate: `${capRotate.value}deg` },
+    ],
   }));
 
   const crackStyle = useAnimatedStyle(() => ({
     opacity: crackOpacity.value,
   }));
 
-  const capIdleStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: capY.value * unit }],
-  }));
-
-  /** Bird moves in viewBox units inside a fixed ClipPath (egg opening) — not as a View. */
-  const birdAnimatedProps = useAnimatedProps(() => ({
-    opacity: birdOpacity.value,
+  const peekStyle = useAnimatedStyle(() => ({
+    opacity: peekOpacity.value,
     transform: [
-      { translateX: birdX.value },
-      { translateY: birdY.value },
+      { translateY: peekY.value * (size / 320) },
+      { scale: peekScale.value },
+      { rotate: `${peekRotate.value}deg` },
     ],
   }));
 
-  const capSuccessStyle = useAnimatedStyle(() => {
-    const p = capOpen.value;
-    return {
-      opacity: p > 0.6 ? Math.max(0, 1 - (p - 0.6) / 0.4) : 1,
-      transform: [
-        { translateX: p * 42 * unit },
-        { translateY: p * -78 * unit },
-        { rotate: `${p * 30}deg` },
-      ],
-    };
-  });
-
-  const baseStyle = useAnimatedStyle(() => ({
-    opacity: baseOpacity.value,
+  const successStyle = useAnimatedStyle(() => ({
+    opacity: successOpacity.value,
     transform: [
-      { translateY: baseY.value * unit },
-      { scale: baseScale.value },
+      { translateY: successY.value },
+      { scale: successScale.value },
     ],
+  }));
+
+  const shadowStyle = useAnimatedStyle(() => ({
+    opacity: 0.14,
+    transform: [{ scaleX: shadowScale.value }],
   }));
 
   const sparkAStyle = useAnimatedStyle(() => ({
     opacity: sparkA.value,
-    transform: [{ scale: 0.65 + sparkA.value * 0.35 }],
+    transform: [{ scale: 0.65 + sparkA.value * 0.4 }],
   }));
   const sparkBStyle = useAnimatedStyle(() => ({
     opacity: sparkB.value,
-    transform: [{ scale: 0.65 + sparkB.value * 0.35 }],
+    transform: [{ scale: 0.65 + sparkB.value * 0.4 }],
   }));
   const sparkCStyle = useAnimatedStyle(() => ({
     opacity: sparkC.value,
-    transform: [{ scale: 0.65 + sparkC.value * 0.35 }],
+    transform: [{ scale: 0.65 + sparkC.value * 0.4 }],
   }));
 
   const isSuccess = mode === 'success';
+  const imgH = Math.round(size * (338 / 384));
+  const imgTop = Math.round(size * 0.04);
+  const headWidth = Math.round(size * 0.55);
+  const headHeight = Math.round(headWidth * (338 / 384));
 
   return (
     <View
       style={[styles.root, { width: size, height: size }, style]}
       accessibilityRole="image"
       accessibilityLabel={
-        accessibilityLabel || (isSuccess ? 'NESTYK hatch' : 'NESTYK loading')
+        accessibilityLabel ||
+        (isSuccess
+          ? 'NESTYK Honey and Cream hatched successfully'
+          : 'NESTYK Honey and Cream waiting in egg')
       }
       accessibilityLiveRegion="polite"
     >
-      <Animated.View style={[styles.layer, rockStyle]}>
-        <Svg width={size} height={size} viewBox="0 0 320 320" style={StyleSheet.absoluteFill}>
-          <Ellipse cx={160} cy={266} rx={77} ry={9} fill={SHADOW} opacity={0.4} />
+      <Animated.View style={[styles.shadow, shadowStyle]} pointerEvents="none">
+        <Svg width={size} height={size} viewBox="0 0 320 320">
+          <Ellipse cx={160} cy={270} rx={66} ry={9} fill="#5B381C" />
         </Svg>
-
-        {/* Bird: clip fixed to egg frame; translate lives inside SVG so body never spills under shell. */}
-        <View style={styles.layer} pointerEvents="none">
-          <Svg width={size} height={size} viewBox="0 0 320 320">
-            <Defs>
-              <ClipPath id={clipId}>
-                <Path d={PEEK_CLIP} />
-              </ClipPath>
-              <ClipPath id={stageClipId}>
-                <Rect x={45} y={25} width={235} height={233} />
-              </ClipPath>
-            </Defs>
-            <G clipPath={`url(#${isSuccess ? stageClipId : clipId})`}>
-              <AnimatedG animatedProps={birdAnimatedProps}>
-                <BirdMark />
-              </AnimatedG>
-            </G>
-          </Svg>
-        </View>
-
-        <Animated.View
-          style={[styles.layer, isSuccess ? baseStyle : undefined]}
-          pointerEvents="none"
-        >
-          <Svg width={size} height={size} viewBox="0 0 320 320">
-            <Path
-              d={SHELL_BASE}
-              fill={SHELL}
-              stroke={INK}
-              strokeWidth={STROKE}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          </Svg>
-        </Animated.View>
-
-        {!reduceMotion || !isSuccess ? (
-          <Animated.View
-            style={[styles.layer, isSuccess ? capSuccessStyle : capIdleStyle]}
-            pointerEvents="none"
-          >
-            <Svg width={size} height={size} viewBox="0 0 320 320">
-              <Path
-                d={SHELL_CAP}
-                fill={SHELL}
-                stroke={INK}
-                strokeWidth={STROKE}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-              <Path
-                d={HIGHLIGHT}
-                fill="none"
-                stroke={BRAND}
-                strokeWidth={7}
-                strokeLinecap="round"
-              />
-            </Svg>
-          </Animated.View>
-        ) : null}
-
-        <Animated.View style={[styles.layer, wholeStyle]} pointerEvents="none">
-          <Svg width={size} height={size} viewBox="0 0 320 320">
-            <Path
-              d={SHELL_FULL}
-              fill={SHELL}
-              stroke={INK}
-              strokeWidth={STROKE}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-            <Path
-              d={HIGHLIGHT}
-              fill="none"
-              stroke={BRAND}
-              strokeWidth={7}
-              strokeLinecap="round"
-            />
-          </Svg>
-          <Animated.View style={[styles.layer, crackStyle]} pointerEvents="none">
-            <Svg width={size} height={size} viewBox="0 0 320 320">
-              <Path
-                d={CRACK}
-                fill="none"
-                stroke={INK}
-                strokeWidth={STROKE}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </Animated.View>
-        </Animated.View>
       </Animated.View>
 
-      {isSuccess ? (
+      {mode === 'idle' ? (
+        <Animated.View style={[styles.layer, eggStyle]} pointerEvents="none">
+          <Animated.View style={[styles.layer, peekStyle]}>
+            <Image
+              source={hatchHead as ImageSourcePropType}
+              style={{
+                position: 'absolute',
+                left: size * 0.106,
+                top: size * 0.253,
+                width: headWidth,
+                height: headHeight,
+              }}
+              resizeMode="stretch"
+              accessibilityIgnoresInvertColors
+            />
+          </Animated.View>
+          <View style={styles.layer}>
+            <EggBase size={size} />
+          </View>
+          <Animated.View style={[styles.layer, capStyle]}>
+            <EggCap size={size} />
+          </Animated.View>
+          <Animated.View style={[styles.layer, crackStyle]}>
+            <Svg width={size} height={size} viewBox="0 0 320 320">
+              <Path
+                d="M88 186 111 201 135 181 160 201 186 181 212 201 233 186"
+                fill="none"
+                stroke="#9D7B56"
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          </Animated.View>
+        </Animated.View>
+      ) : (
+        <Animated.View style={[styles.layer, eggStyle]} pointerEvents="none">
+          <SoftEgg size={size} />
+          <Animated.View style={[styles.layer, crackStyle]}>
+            <Svg width={size} height={size} viewBox="0 0 320 320">
+              <Path
+                d="M88 186 111 201 135 181 160 201 186 181 212 201 233 186"
+                fill="none"
+                stroke="#9D7B56"
+                strokeWidth={3}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          </Animated.View>
+        </Animated.View>
+      )}
+
+      {mode === 'success' ? (
+        <Animated.View style={[styles.layer, successStyle]} pointerEvents="none">
+          <Image
+            source={hatchSuccess as ImageSourcePropType}
+            style={{ width: size, height: imgH, marginTop: imgTop }}
+            resizeMode="contain"
+            accessibilityIgnoresInvertColors
+          />
+        </Animated.View>
+      ) : null}
+
+      {mode === 'success' && !reduceMotion ? (
         <>
-          <Animated.View style={[styles.layer, sparkAStyle]} pointerEvents="none">
-            <Svg width={size} height={size} viewBox="0 0 320 320">
-              <Path d={SPARK_A} fill={BRAND} />
-            </Svg>
-          </Animated.View>
-          <Animated.View style={[styles.layer, sparkBStyle]} pointerEvents="none">
-            <Svg width={size} height={size} viewBox="0 0 320 320">
-              <Path d={SPARK_B} fill={BRAND} />
-            </Svg>
-          </Animated.View>
-          <Animated.View style={[styles.layer, sparkCStyle]} pointerEvents="none">
-            <Svg width={size} height={size} viewBox="0 0 320 320">
-              <Path d={SPARK_C} fill={BRAND} />
-            </Svg>
-          </Animated.View>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.spark,
+              { top: size * 0.14, right: size * 0.16 },
+              sparkAStyle,
+            ]}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.spark,
+              { top: size * 0.36, left: size * 0.12 },
+              sparkBStyle,
+            ]}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.spark,
+              styles.sparkDot,
+              { top: size * 0.52, right: size * 0.14 },
+              sparkCStyle,
+            ]}
+          />
         </>
       ) : null}
     </View>
@@ -567,11 +653,28 @@ const styles = StyleSheet.create({
   root: {
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'visible',
+    overflow: 'hidden',
   },
   layer: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  shadow: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spark: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: '#FFD244',
+  },
+  sparkDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
 });

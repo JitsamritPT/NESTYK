@@ -16,7 +16,8 @@
     "./assets/logo/*": "./assets/logo/*",
     "./assets/logo/IconApp/*": "./assets/logo/IconApp/*",
     "./assets/nestyk/svg/*": "./assets/nestyk/svg/*",
-    "./assets/nestyk/png/*": "./assets/nestyk/png/*"
+    "./assets/nestyk/png/*": "./assets/nestyk/png/*",
+    "./assets/nestyk/hatch/*": "./assets/nestyk/hatch/*"
   },
   "scripts": {
     "build": "tsc",

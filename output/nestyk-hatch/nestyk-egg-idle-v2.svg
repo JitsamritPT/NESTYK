@@ -1,13 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title"><title id="title">NESTYK hatching bird</title><style>.shell{fill:#FFF5DA;stroke:#211E1E;stroke-width:5;stroke-linejoin:round;stroke-linecap:round}</style><style>
-.rock{transform-origin:160px 256px;animation:rock 5.6s infinite}
-.whole{animation:whole 5.6s infinite}
-.crack{stroke-dasharray:220;stroke-dashoffset:220;animation:crack 5.6s infinite}
-.cap{animation:cap 5.6s infinite}
-.bird{animation:peek 5.6s infinite}
-@keyframes rock{0%,15%,32%,100%{transform:rotate(0)}20%{transform:rotate(-3deg)}25%{transform:rotate(3deg)}}
-@keyframes whole{0%,28%{opacity:1}29%,87%{opacity:0}92%,100%{opacity:1}}
-@keyframes crack{0%,16%{stroke-dashoffset:220;opacity:0}17%{opacity:1}28%,80%{stroke-dashoffset:0;opacity:1}88%,100%{stroke-dashoffset:220;opacity:0}}
-@keyframes cap{0%,32%,83%,100%{transform:translateY(0)}46%,65%{transform:translateY(-66px)}}
-@keyframes peek{0%,32%,83%,100%{transform:translateY(140px)}46%,65%{transform:translateY(40px)}52%{transform:translate(3px,40px)}60%{transform:translate(-3px,40px)}}
-@media(prefers-reduced-motion:reduce){*{animation:none!important}.bird{opacity:0}.whole{opacity:1}.crack{opacity:0}}
-</style><defs><clipPath id="peek"><path d="M70 0H250V197L213 199 187 180 160 199 134 180 109 199 70 180Z"/></clipPath></defs><ellipse cx="160" cy="266" rx="77" ry="9" fill="#EAD9B0" opacity=".4"/><g class="rock"><g clip-path="url(#peek)"><g class="bird"><path d="M126 220V131L108 123 127 114C128 82 172 82 179 113L185 159Q214 154 225 170Q237 187 222 211Q210 232 179 234L150 234Q134 234 126 220Z" fill="#F8B615" stroke="#211E1E" stroke-width="5" stroke-linejoin="round"/><circle cx="149" cy="113" r="5" fill="#211E1E"/><path d="M175 181Q191 164 210 176Q212 195 188 205" fill="none" stroke="#211E1E" stroke-width="5" stroke-linecap="round"/><path d="M149 235v16h-12m50-16v16h12" fill="none" stroke="#211E1E" stroke-width="5" stroke-linecap="round"/></g></g><path class="shell" d="M83 185L109 199 134 180 160 199 187 180 213 199 237 185C237 232 208 256 160 256S83 232 83 185Z"/><g class="cap"><path class="shell" d="M83 185C83 126 119 60 160 60S237 126 237 185L213 199 187 180 160 199 134 180 109 199Z"/><path d="M118 118Q128 95 143 88" fill="none" stroke="#F8B615" stroke-width="7" stroke-linecap="round"/></g><g class="whole"><path class="shell" d="M160 60C119 60 83 126 83 185C83 232 112 256 160 256S237 232 237 185C237 126 201 60 160 60Z"/><path d="M118 118Q128 95 143 88" fill="none" stroke="#F8B615" stroke-width="7" stroke-linecap="round"/><path class="crack" d="M84 185L109 199 134 180 160 199 187 180 213 199 236 185" fill="none" stroke="#211E1E" stroke-width="5"/></g></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title">
+  <title id="title">NESTYK bird gently peeking from an egg</title>
+  <defs>
+    <linearGradient id="egg" x1=".2" y1="0" x2=".78" y2="1"><stop offset="0" stop-color="#FFFDF7"/><stop offset=".48" stop-color="#FFF8E8"/><stop offset="1" stop-color="#DDC9A3"/></linearGradient>
+    <radialGradient id="eggLight" cx="31%" cy="22%" r="70%"><stop offset="0" stop-color="#FFF" stop-opacity=".9"/><stop offset=".58" stop-color="#FFF" stop-opacity="0"/></radialGradient>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="7" stdDeviation="5" flood-color="#5B381C" flood-opacity=".18"/></filter>
+    <clipPath id="birdWindow"><rect x="72" y="38" width="176" height="149" rx="12"/></clipPath>
+  </defs>
+  <style>
+    .assembly{transform-origin:160px 259px;animation:egg-rock 6.2s ease-in-out infinite}.ground{transform-origin:160px 270px;animation:shadow 6.2s ease-in-out infinite}.crack{stroke-dasharray:190;stroke-dashoffset:190;animation:crack 6.2s ease-in-out infinite}.cap{transform-origin:160px 181px;animation:cap 6.2s cubic-bezier(.38,.05,.2,1) infinite}.bird{transform-origin:160px 188px;opacity:0;animation:peek 6.2s cubic-bezier(.32,.05,.22,1) infinite}
+    @keyframes egg-rock{0%,14%,30%,78%,100%{transform:rotate(0)}18%{transform:rotate(-1.8deg)}22%{transform:rotate(1.8deg)}26%{transform:rotate(-.7deg)}}
+    @keyframes crack{0%,21%,79%,100%{stroke-dashoffset:190;opacity:0}23%{opacity:.58}32%,69%{stroke-dashoffset:0;opacity:.58}75%{opacity:0}}
+    @keyframes cap{0%,31%,77%,100%{transform:translateY(0) rotate(0)}41%{transform:translateY(-22px) rotate(-1deg)}48%,63%{transform:translateY(-29px) rotate(-2deg)}70%{transform:translateY(-20px) rotate(-.7deg)}}
+    @keyframes peek{0%,34%,75%,100%{opacity:0;transform:translateY(18px) scale(.98)}41%{opacity:.35;transform:translateY(10px) scale(.99)}48%{opacity:1;transform:translateY(0) scale(1)}53%{transform:translate(2px,-1px) rotate(.7deg)}58%{transform:translate(-2px,0) rotate(-.7deg)}63%{opacity:1;transform:translateY(0) scale(1)}70%{opacity:.7;transform:translateY(9px) scale(.99)}}
+    @keyframes shadow{0%,30%,77%,100%{transform:scaleX(1);opacity:.13}48%,63%{transform:scaleX(.9);opacity:.1}}
+    @media(prefers-reduced-motion:reduce){*{animation:none!important}.bird{opacity:0}.cap{transform:none}.crack{opacity:0}.ground{opacity:.13}}
+  </style>
+  <ellipse class="ground" cx="160" cy="270" rx="66" ry="9" fill="#5B381C" opacity=".13"/>
+  <g class="assembly" filter="url(#softShadow)">
+    <g class="bird" clip-path="url(#birdWindow)"><image x="34" y="81" width="176" height="155" href="nestyk-honey-cream-head-v3.png" xlink:href="nestyk-honey-cream-head-v3.png" preserveAspectRatio="none"/></g>
+    <g class="base"><path fill="url(#egg)" d="M82 185 107 200 133 180 160 200 187 180 214 200 238 185C238 233 209 259 160 259S82 233 82 185Z"/><path fill="url(#eggLight)" d="M82 185 107 200 133 180 160 200 187 180 214 200 238 185C238 233 209 259 160 259S82 233 82 185Z" opacity=".62"/><path d="M103 221Q130 247 175 245" fill="none" stroke="#FFF" stroke-width="7" stroke-linecap="round" opacity=".3"/></g>
+    <g class="cap"><path fill="url(#egg)" d="M82 185C82 120 118 49 160 49S238 120 238 185L214 200 187 180 160 200 133 180 107 200Z"/><path fill="url(#eggLight)" d="M82 185C82 120 118 49 160 49S238 120 238 185L214 200 187 180 160 200 133 180 107 200Z"/><path d="M105 120Q121 79 151 67" fill="none" stroke="#FFF" stroke-width="10" stroke-linecap="round" opacity=".52"/></g>
+    <path class="crack" d="M86 185 108 199 133 180 160 199 187 180 213 199 235 185" fill="none" stroke="#9D7B56" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

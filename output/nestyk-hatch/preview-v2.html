@@ -2,7 +2,7 @@
 <html lang="th">
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>NESTYK Hatch v2</title>
+<title>NESTYK Honey &amp; Cream Hatch</title>
 <style>
   body {
     font: 16px system-ui, sans-serif;
@@ -32,10 +32,10 @@
     text-align: center;
     margin-bottom: 20px;
   }
-  .stage img {
+  .stage object {
     width: 100%;
     max-width: 280px;
-    height: auto;
+    height: 280px;
     display: block;
     margin: 0 auto 12px;
   }
@@ -69,10 +69,6 @@
     background: #fff;
     border: 1.5px solid #f8b615;
   }
-  button:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
   .note {
     color: #64748b;
     font-size: 14px;
@@ -92,46 +88,75 @@
     padding: 20px;
     text-align: center;
   }
-  .card img {
+  .card object {
     width: 100%;
     max-width: 200px;
+    height: 200px;
+  }
+  .refs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 12px;
+  }
+  .refs img {
+    width: 120px;
+    height: auto;
+    background: #111;
+    border-radius: 12px;
   }
 </style>
 <main>
-  <h1>NESTYK · Hatch v2</h1>
+  <h1>NESTYK · Honey &amp; Cream Hatch</h1>
   <p class="lead">
-    แอนิเมชันต้นแบบ — Idle วน 5.6s · Success ฟักครั้งเดียวแล้วค้าง + ประกายวน · ไฟล์เดิมยังเก็บไว้
+    มาสคอต 2.5D clay จาก PNG v3 — Idle วน 6.2s · Success ฟักครั้งเดียวแล้วค้าง + ประกายวน
   </p>
 
   <section class="stage">
     <div class="label" id="stateLabel">Idle · กำลังรอ</div>
-    <p class="meta" id="stateMeta">ไข่เต็มใบ → ร้าว → แอบมอง → ปิด → เริ่มใหม่</p>
-    <img id="anim" src="nestyk-egg-idle-v2.svg" width="280" height="280" alt="NESTYK hatch animation" />
+    <p class="meta" id="stateMeta">ไข่ขยับ → ร้าว → แง้มดูเล็กน้อย → หลบกลับ → เริ่มใหม่</p>
+    <object
+      id="anim"
+      data="nestyk-egg-idle-v2.svg"
+      type="image/svg+xml"
+      width="280"
+      height="280"
+      aria-label="NESTYK Honey and Cream waiting in egg"
+    ></object>
     <div class="row">
       <button type="button" id="btnIdle">เริ่มรอ (Idle)</button>
       <button type="button" id="btnSuccess" class="secondary">จำลองสำเร็จ</button>
       <button type="button" id="btnReplay" class="secondary">เล่นใหม่</button>
     </div>
     <p class="note" style="margin-top: 16px">
-      ทดลองกด «จำลองสำเร็จ» ตอนต้น / กลาง / ท้ายลูป Idle เพื่อตรวจการเปลี่ยนสถานะ
+      ทดลองกด «จำลองสำเร็จ» ตอนต้น / กลาง / ท้ายลูป Idle — สลับโหมดไม่บังคับโหลดไฟล์ซ้ำ (Replay เท่านั้นที่รีสตาร์ทแอนิเมชัน)
     </p>
   </section>
 
   <div class="grid">
     <section class="card">
-      <h2>Idle แยกไฟล์</h2>
-      <img src="nestyk-egg-idle-v2.svg" alt="Idle loop" />
-      <p class="meta">5.6s infinite</p>
+      <h2>Idle SVG</h2>
+      <object data="nestyk-egg-idle-v2.svg" type="image/svg+xml" aria-label="Idle loop"></object>
+      <p class="meta">6.2s infinite · แง้มดูเล็กน้อย</p>
     </section>
     <section class="card">
-      <h2>Success แยกไฟล์</h2>
-      <img src="nestyk-egg-hatch-v2.svg" alt="Success hatch" />
+      <h2>Success SVG</h2>
+      <object data="nestyk-egg-hatch-v2.svg" type="image/svg+xml" aria-label="Success hatch"></object>
       <p class="meta">ฟักครั้งเดียว · ประกาย infinite</p>
     </section>
   </div>
 
-  <p class="note">
-    Reduce Motion = ภาพนิ่ง · v1 ยังอยู่ที่ nestyk-egg-idle.svg / nestyk-egg-hatch.svg / preview.html
+  <p class="note" style="margin-top: 20px; text-align: center">
+    ต้นแบบ PNG (พื้นโปร่ง):
+  </p>
+  <div class="refs">
+    <img src="nestyk-honey-cream-peek-v3.png" alt="Peek reference" width="120" height="106" />
+    <img src="nestyk-honey-cream-success-v3.png" alt="Success reference" width="120" height="106" />
+  </div>
+
+  <p class="note" style="margin-top: 20px">
+    Reduce Motion = ภาพนิ่ง · ไฟล์เดิมยังอยู่ที่ nestyk-egg-idle.svg / nestyk-egg-hatch.svg / preview.html
   </p>
 </main>
 <script>
@@ -140,33 +165,38 @@
   const meta = document.getElementById('stateMeta');
   let mode = 'idle';
 
-  function bust(src) {
-    return src + '?t=' + Date.now();
+  const IDLE = 'nestyk-egg-idle-v2.svg';
+  const SUCCESS = 'nestyk-egg-hatch-v2.svg';
+
+  function setSource(src, forceReload) {
+    const next = forceReload ? src + '?t=' + Date.now() : src;
+    if (!forceReload && anim.getAttribute('data') === src) return;
+    anim.data = next;
   }
 
-  function setIdle() {
+  function setIdle(forceReload) {
     mode = 'idle';
     label.textContent = 'Idle · กำลังรอ';
-    meta.textContent = 'ไข่เต็มใบ → ร้าว → แอบมอง → ปิด → เริ่มใหม่';
-    anim.src = bust('nestyk-egg-idle-v2.svg');
-    anim.alt = 'Idle loop';
+    meta.textContent = 'ไข่ขยับ → ร้าว → แง้มดูเล็กน้อย → หลบกลับ → เริ่มใหม่';
+    anim.setAttribute('aria-label', 'NESTYK Honey and Cream waiting in egg');
+    setSource(IDLE, !!forceReload);
   }
 
-  function setSuccess() {
+  function setSuccess(forceReload) {
     mode = 'success';
     label.textContent = 'Success · สร้างเสร็จ';
-    meta.textContent = 'ฟักครั้งเดียว แล้วค้างเป็นนกเต็มตัว · ประกายกระพริบต่อเนื่อง';
-    anim.src = bust('nestyk-egg-hatch-v2.svg');
-    anim.alt = 'Success hatch';
+    meta.textContent = 'ฟักครั้งเดียว แล้วค้าง · ประกายกระพริบต่อเนื่อง';
+    anim.setAttribute('aria-label', 'NESTYK Honey and Cream hatched successfully');
+    setSource(SUCCESS, !!forceReload);
   }
 
   function replay() {
-    if (mode === 'success') setSuccess();
-    else setIdle();
+    if (mode === 'success') setSuccess(true);
+    else setIdle(true);
   }
 
-  document.getElementById('btnIdle').addEventListener('click', setIdle);
-  document.getElementById('btnSuccess').addEventListener('click', setSuccess);
+  document.getElementById('btnIdle').addEventListener('click', () => setIdle(false));
+  document.getElementById('btnSuccess').addEventListener('click', () => setSuccess(false));
   document.getElementById('btnReplay').addEventListener('click', replay);
 </script>
 </html>

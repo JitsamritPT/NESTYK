@@ -48,6 +48,7 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
     ref,
   ) => {
     const hasChrome = !!leadingIcon || !!trailingText;
+    const alignVertical = multiline ? 'top' : 'center';
 
     return (
       <View
@@ -81,10 +82,11 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
               ref={ref}
               editable={editable}
               multiline={multiline}
-              textAlignVertical="center"
+              textAlignVertical={alignVertical}
+              underlineColorAndroid="transparent"
               style={[
                 styles.inputInner,
-                multiline ? styles.inputInnerMultiline : null,
+                multiline ? styles.inputInnerMultiline : styles.inputInnerSingle,
                 !editable && Platform.OS === 'web' ? readOnlyWebStyle : null,
                 style,
               ]}
@@ -100,10 +102,11 @@ export const MobileInput = React.forwardRef<TextInput, MobileInputProps>(
             ref={ref}
             editable={editable}
             multiline={multiline}
-            textAlignVertical="center"
+            textAlignVertical={alignVertical}
+            underlineColorAndroid="transparent"
             style={[
-              styles.input,
-              multiline ? styles.inputMultiline : null,
+              styles.inputBase,
+              multiline ? styles.inputMultiline : styles.inputSingle,
               !editable ? styles.inputReadOnly : null,
               !editable && Platform.OS === 'web' ? readOnlyWebStyle : null,
               error ? { borderColor: tokens.colors.error } : null,
@@ -137,8 +140,8 @@ const styles = StyleSheet.create({
     color: tokens.colors.error,
     fontWeight: '700',
   },
-  input: {
-    height: 44,
+  /** Shared chrome without fixed height — multiline must never inherit height:44. */
+  inputBase: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: tokens.colors.border,
@@ -148,12 +151,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     color: tokens.colors.primary,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  inputSingle: {
+    height: 44,
   },
   inputMultiline: {
-    height: undefined,
-    minHeight: 44,
+    minHeight: 88,
     paddingVertical: 11,
-    textAlignVertical: 'center',
+    textAlignVertical: 'top',
   },
   inputShell: {
     minHeight: 44,
@@ -167,24 +173,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   inputShellMultiline: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 4,
   },
   inputInner: {
     flex: 1,
     minWidth: 0,
-    height: 44,
     fontFamily: tokens.typography.native.body,
     fontSize: 14,
     lineHeight: 21,
     color: tokens.colors.primary,
     padding: 0,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  inputInnerSingle: {
+    height: 44,
   },
   inputInnerMultiline: {
-    height: undefined,
-    minHeight: 44,
+    minHeight: 88,
     paddingVertical: 11,
-    textAlignVertical: 'center',
+    textAlignVertical: 'top',
   },
   trailingText: {
     fontFamily: tokens.typography.native.body,
