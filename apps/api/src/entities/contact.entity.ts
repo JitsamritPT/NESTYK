@@ -14,6 +14,12 @@ export class ContactEntity extends SerialCreatedEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   email: string | null;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  line_id: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  facebook: string | null;
+
   @Column({ type: 'varchar', length: 500, nullable: true })
   note: string | null;
 

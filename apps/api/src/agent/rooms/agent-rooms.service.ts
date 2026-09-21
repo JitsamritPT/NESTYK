@@ -86,8 +86,25 @@ export class AgentRoomsService {
   }
 
   async listFacilities() {
-    const rows = await this.facilitiesRepo.find({ relations: { group: true }, order: { group: { sort_order: 'ASC', id: 'ASC' }, sort_order: 'ASC', id: 'ASC' } });
-    return rows.filter((row) => !['aircon', 'air_con', 'air_conditioner'].includes(row.code)).map((row) => ({ code: row.code, groupCode: row.group.code, isExtraCharge: row.is_extra_charge }));
+    const catalogGroups = new Set([
+      'furniture',
+      'appliances',
+      'room_features',
+      'parking',
+      'project_facilities',
+      'security_services',
+    ]);
+    const rows = await this.facilitiesRepo.find({
+      relations: { group: true },
+      order: { group: { sort_order: 'ASC', id: 'ASC' }, sort_order: 'ASC', id: 'ASC' },
+    });
+    return rows
+      .filter((row) => catalogGroups.has(row.group?.code ?? ''))
+      .map((row) => ({
+        code: row.code,
+        groupCode: row.group.code,
+        isExtraCharge: row.is_extra_charge,
+      }));
   }
 
   async listRoomTypes() {
@@ -108,6 +125,8 @@ export class AgentRoomsService {
       name: string;
       phone: string;
       email: string | null;
+      lineId: string | null;
+      facebook: string | null;
       note: string | null;
       roomCount: number | string;
     }> = await this.dataSource.query(
@@ -117,6 +136,8 @@ export class AgentRoomsService {
         c.name,
         c.phone,
         c.email,
+        c.line_id AS "lineId",
+        c.facebook,
         c.note,
         COUNT(rrc.id)::int AS "roomCount"
       FROM contacts c
@@ -132,6 +153,8 @@ export class AgentRoomsService {
       name: row.name,
       phone: row.phone,
       email: row.email,
+      lineId: row.lineId,
+      facebook: row.facebook,
       note: row.note,
       roomCount: Number(row.roomCount) || 0,
     }));
@@ -213,7 +236,14 @@ export class AgentRoomsService {
         ...(existing ? { id: existing.id } : {}),
         room_id: body.roomId ?? null,
         listing_title: body.listingTitle!.trim(),
-        listing_description: body.listingDescription ?? existing?.listing_description ?? null,
+        promo_title:
+          body.promoTitle !== undefined
+            ? body.promoTitle.trim() || null
+            : existing?.promo_title ?? null,
+        listing_description:
+          body.listingDescription !== undefined
+            ? body.listingDescription
+            : existing?.listing_description ?? null,
         available_from_date: body.availableFromDate ?? existing?.available_from_date ?? new Date().toISOString().slice(0, 10),
         prices: priceRows.map((row) => ({
           contractTypeId: row.contractType.id,
@@ -386,6 +416,9 @@ export class AgentRoomsService {
     if ((body.latitude !== undefined || body.longitude !== undefined) && !validCoordinates(body.latitude, body.longitude)) throw new BadRequestException('Valid latitude and longitude required');
     if (body.listingDescription !== undefined && (typeof body.listingDescription !== 'string' || body.listingDescription.length > 10000)) {
       throw new BadRequestException('listingDescription must be text up to 10000 characters');
+    }
+    if (body.promoTitle !== undefined && (typeof body.promoTitle !== 'string' || body.promoTitle.length > 255)) {
+      throw new BadRequestException('promoTitle must be text up to 255 characters');
     }
     if (body.nearbyOther !== undefined && (typeof body.nearbyOther !== 'string' || body.nearbyOther.length > 500)) {
       throw new BadRequestException('nearbyOther must be text up to 500 characters');
@@ -577,6 +610,9 @@ export class AgentRoomsService {
       if (reused) {
         reused.name = input.name.trim();
         reused.email = input.email ?? reused.email;
+        reused.line_id = input.lineId !== undefined ? input.lineId.trim() || null : reused.line_id;
+        reused.facebook =
+          input.facebook !== undefined ? input.facebook.trim() || null : reused.facebook;
         reused.note = input.note ?? reused.note;
         await manager.save(reused);
         if (!ids.includes(reused.id)) ids.push(reused.id);
@@ -587,6 +623,8 @@ export class AgentRoomsService {
           name: input.name.trim(),
           phone,
           email: input.email ?? null,
+          line_id: input.lineId?.trim() || null,
+          facebook: input.facebook?.trim() || null,
           note: input.note ?? null,
           created_by_user_id: agentId,
         }),

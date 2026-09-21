@@ -18,7 +18,7 @@ import {
   type NativeSyntheticEvent,
   type ListRenderItemInfo,
 } from 'react-native';
-import { useLocale } from '@nestyk/i18n';
+import { AMENITIES_CATALOG_GROUP_ORDER, useLocale } from '@nestyk/i18n';
 import {
   MobileButton,
   MobileIcon,
@@ -33,6 +33,8 @@ import {
 export type AgentRoomDetail = {
   id: number;
   listingTitle: string | null;
+  /** Public share headline. */
+  promoTitle?: string | null;
   description: string | null;
   roomId: string | null;
   visibility: 'private' | 'published' | null;
@@ -75,6 +77,8 @@ export type AgentRoomDetail = {
   facilityItems?: { code: string; groupCode?: string }[];
   customFacilities?: string[];
   nearbyPlaces?: NearbyPlace[];
+  /** Client-only warning when listing copy may be out of date. */
+  promoCopyStale?: boolean;
   documents?: {
     kind: 'id_passport' | 'bookbank' | 'ownership' | 'other';
     mediaUrl: string;
@@ -85,6 +89,8 @@ export type AgentRoomDetail = {
     name: string;
     phone: string;
     email: string | null;
+    lineId?: string | null;
+    facebook?: string | null;
     note: string | null;
     isPrimary: boolean;
   }[];
@@ -452,6 +458,9 @@ export function MobileAgentRoomBody({
   if (room.listingTitle) {
     roomInfoRows.push({ icon: 'note', label: cr.listingTitle, value: room.listingTitle });
   }
+  if (room.promoTitle) {
+    roomInfoRows.push({ icon: 'sparkle', label: cr.promoListingTitle, value: room.promoTitle });
+  }
   if (room.property?.propertyTypeCode || room.property?.name) {
     roomInfoRows.push({
       icon: 'buildings',
@@ -698,7 +707,17 @@ export function MobileAgentRoomBody({
                     <View style={styles.infoRow}>
                       <MobileIcon name="note" size={18} color={tokens.colors.icon.secondary} />
                       <View style={{ flex: 1, gap: 4, minWidth: 0 }}>
-                        <Text style={styles.infoLabel}>{cr.listingDescription}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={styles.infoLabel}>{cr.listingDescription}</Text>
+                          {room.promoCopyStale ? (
+                            <MobileIcon name="warning" size={16} color={tokens.colors.warning} />
+                          ) : null}
+                        </View>
+                        {room.promoCopyStale ? (
+                          <Text style={[styles.infoLabel, { color: tokens.colors.subtle.warningFg }]}>
+                            {cr.promoStaleBadge}
+                          </Text>
+                        ) : null}
                         <Text style={styles.infoValueLeft} selectable>
                           {room.description}
                         </Text>
@@ -744,8 +763,18 @@ export function MobileAgentRoomBody({
               <SectionTitle title={cr.steps.facilities} />
               <View style={[styles.infoCard, { backgroundColor: theme.surface, padding: 14, gap: 10 }]}>
                 {room.facilityItems?.length ? (
-                  [...new Set(room.facilityItems.map((f) => f.groupCode ?? 'other'))].map(
-                    (group) => (
+                  [
+                    ...AMENITIES_CATALOG_GROUP_ORDER.filter((g) =>
+                      room.facilityItems!.some((f) => (f.groupCode ?? 'other') === g),
+                    ),
+                    ...[
+                      ...new Set(
+                        room
+                          .facilityItems!.map((f) => f.groupCode ?? 'other')
+                          .filter((g) => !(AMENITIES_CATALOG_GROUP_ORDER as readonly string[]).includes(g)),
+                      ),
+                    ],
+                  ].map((group) => (
                       <View key={group} style={{ gap: 4 }}>
                         <Text style={styles.groupHeading}>
                           {t.masters.facilityGroups[group] ?? group}
@@ -757,8 +786,7 @@ export function MobileAgentRoomBody({
                             .join(' · ')}
                         </Text>
                       </View>
-                    ),
-                  )
+                    ))
                 ) : (
                   <Text style={styles.infoValueLeft}>
                     {room.facilities.map((code) => t.masters.facilities[code] ?? code).join(' · ')}
@@ -766,7 +794,7 @@ export function MobileAgentRoomBody({
                 )}
                 {!!room.customFacilities?.length && (
                   <View style={{ gap: 4 }}>
-                    <Text style={styles.groupHeading}>{cr.customFacilities}</Text>
+                    <Text style={styles.groupHeading}>{t.masters.facilityGroups.other ?? cr.customFacilities}</Text>
                     <Text style={styles.infoValueLeft}>{room.customFacilities.join(' · ')}</Text>
                   </View>
                 )}
@@ -809,32 +837,9 @@ export function MobileAgentRoomBody({
             </View>
           ) : null}
 
-          {!!room.documents?.length ? (
-            <View style={styles.block}>
-              <SectionTitle title={cr.steps.documents} />
-              <View style={{ gap: 8 }}>
-                {room.documents.map((document, index) => (
-                  <MobileButton
-                    key={index}
-                    variant="outline"
-                    onPress={() => {
-                      try {
-                        const url = new URL(document.mediaUrl);
-                        if (url.protocol === 'https:') void Linking.openURL(url.toString());
-                      } catch {
-                        /* Invalid legacy links cannot be opened. */
-                      }
-                    }}
-                  >
-                    {cr.documentKinds[document.kind]} {index + 1}
-                  </MobileButton>
-                ))}
-              </View>
-            </View>
-          ) : null}
 
           <View style={styles.block}>
-            <SectionTitle title={cr.sourceSection} />
+            <SectionTitle title={cr.steps.ownerVisibility} />
             <View style={[styles.infoCard, { backgroundColor: theme.surface, padding: 14, gap: 12 }]}>
               {(room.listingSourceCode === 'owner' || room.listingSourceCode === 'co_agent') && (
                 <Text style={styles.groupHeading}>
@@ -852,6 +857,16 @@ export function MobileAgentRoomBody({
                     <Text style={styles.infoValueLeft} selectable>
                       {contact.phone}
                     </Text>
+                    {contact.lineId ? (
+                      <Text style={styles.muted} selectable>
+                        {cr.contactLine}: {contact.lineId}
+                      </Text>
+                    ) : null}
+                    {contact.facebook ? (
+                      <Text style={styles.muted} selectable>
+                        {cr.contactFacebook}: {contact.facebook}
+                      </Text>
+                    ) : null}
                     {contact.email ? (
                       <Text style={styles.muted} selectable>
                         {contact.email}

@@ -89,10 +89,13 @@ function Chip({
   label,
   selected,
   onPress,
+  columns,
 }: {
   label: string;
   selected: boolean;
   onPress: () => void;
+  /** Equal-width grid columns (e.g. 3 → ~3 per row). */
+  columns?: 2 | 3;
 }) {
   return (
     <SelectionChip
@@ -100,7 +103,11 @@ function Chip({
       selected={selected}
       onPress={onPress}
       showCheck={false}
-      style={styles.filterChip}
+      style={[
+        styles.filterChip,
+        columns === 3 ? styles.filterChipCol3 : null,
+        columns === 2 ? styles.filterChipCol2 : null,
+      ]}
       labelStyle={styles.chipLabel}
     />
   );
@@ -111,11 +118,13 @@ function FilterOptionRow({
   options,
   value,
   onChange,
+  columns,
 }: {
   title?: string;
   options: Array<{ value: string; label: string }>;
   value: string;
   onChange: (value: string) => void;
+  columns?: 2 | 3;
 }) {
   const { theme } = useMobileTheme();
   return (
@@ -130,6 +139,7 @@ function FilterOptionRow({
             label={opt.label}
             selected={value === opt.value}
             onPress={() => onChange(opt.value)}
+            columns={columns}
           />
         ))}
       </View>
@@ -278,6 +288,7 @@ export function AgentRoomsScreen({
   const [room, setRoom] = useState<AgentRoomDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
+  const promoStaleByRoomRef = useRef<Record<number, boolean>>({});
   const searchRef = React.useRef<TextInput>(null);
   const editRoomBackRef = useRef<(() => boolean) | null>(null);
   const [editHeaderTitle, setEditHeaderTitle] = useState('');
@@ -353,7 +364,12 @@ export function AgentRoomsScreen({
     setDetailError(null);
     fetchAgentRoom(selected)
       .then((result) => {
-        if (!cancelled) setRoom(result);
+        if (!cancelled) {
+          setRoom({
+            ...result,
+            promoCopyStale: promoStaleByRoomRef.current[result.id],
+          });
+        }
       })
       .catch((err) => {
         if (!cancelled) setDetailError(err instanceof Error ? err.message : String(err));
@@ -841,7 +857,7 @@ export function AgentRoomsScreen({
         </View>
         <ScrollView
           style={[styles.sheetBody, { maxHeight: undefined }]}
-          scrollEnabled={!draggingPrice}
+          scrollEnabled={!draggingPrice && !roomTypePickerOpen}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -906,45 +922,34 @@ export function AgentRoomsScreen({
                 </View>
               </Pressable>
               {roomTypePickerOpen ? (
-                <View
+                <ScrollView
                   style={[
                     styles.dropdownMenu,
                     { borderColor: theme.border, backgroundColor: theme.surface },
                   ]}
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator
                 >
-                  <Pressable
-                    onPress={() => applyRoomType('')}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: !draft.roomType }}
-                    style={({ pressed }) => [
-                      styles.dropdownOption,
-                      !draft.roomType ? styles.dropdownOptionSelected : null,
-                      pressed ? { opacity: 0.88 } : null,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.dropdownOptionLabel,
-                        {
-                          color: !draft.roomType
-                            ? tokens.colors.primary
-                            : theme.textHeading,
-                        },
-                      ]}
-                    >
-                      {copy.filterAny}
-                    </Text>
-                  </Pressable>
-                  {Object.entries(t.masters.roomTypes).map(([value, label]) => {
-                    const selected = draft.roomType === value;
+                  {(
+                    [
+                      { value: '', label: copy.filterAny },
+                      ...Object.entries(t.masters.roomTypes).map(([value, label]) => ({
+                        value,
+                        label,
+                      })),
+                    ] as Array<{ value: string; label: string }>
+                  ).map((opt, index) => {
+                    const selected = draft.roomType === opt.value;
                     return (
                       <Pressable
-                        key={value}
-                        onPress={() => applyRoomType(value)}
+                        key={opt.value || 'any'}
+                        onPress={() => applyRoomType(opt.value)}
                         accessibilityRole="button"
                         accessibilityState={{ selected }}
                         style={({ pressed }) => [
                           styles.dropdownOption,
+                          index === 0 ? styles.dropdownOptionFirst : null,
                           selected ? styles.dropdownOptionSelected : null,
                           pressed ? { opacity: 0.88 } : null,
                         ]}
@@ -959,12 +964,12 @@ export function AgentRoomsScreen({
                             },
                           ]}
                         >
-                          {label}
+                          {opt.label}
                         </Text>
                       </Pressable>
                     );
                   })}
-                </View>
+                </ScrollView>
               ) : null}
             </View>
 
@@ -1031,6 +1036,7 @@ export function AgentRoomsScreen({
               options={statusOptions}
               value={draft.roomStatus}
               onChange={(v) => setDraft((d) => ({ ...d, roomStatus: v as StatusFilter }))}
+              columns={3}
             />
             <View style={styles.filterSection}>
               <Text style={[styles.filterSectionTitle, { color: theme.textHeading }]}>
@@ -1071,6 +1077,7 @@ export function AgentRoomsScreen({
               options={visibilityOptions}
               value={draft.visibility}
               onChange={(v) => setDraft((d) => ({ ...d, visibility: v as VisibilityFilter }))}
+              columns={3}
             />
           </FilterAccordion>
         </ScrollView>
@@ -1125,6 +1132,8 @@ export function AgentRoomsScreen({
                   room && !editing ? () => setEditing(true) : undefined
                 }
                 actionLabel={room && !editing ? copy.edit : undefined}
+                actionVariant="icon"
+                actionIcon="note"
               />
             </View>
             {!modalReady ? (
@@ -1144,9 +1153,12 @@ export function AgentRoomsScreen({
                     backHandlerRef={editRoomBackRef}
                     onHeaderTitleChange={setEditHeaderTitle}
                     onBusy={setSaving}
-                    onSaved={() => {
+                    onSaved={(result) => {
                       setEditing(false);
                       setEditHeaderTitle('');
+                      if (result?.promoCopyStale != null && room) {
+                        promoStaleByRoomRef.current[room.id] = Boolean(result.promoCopyStale);
+                      }
                       setDetailRefresh((n) => n + 1);
                       setRefresh((n) => n + 1);
                     }}
@@ -1463,21 +1475,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   dropdownMenu: {
+    maxHeight: 260,
     borderWidth: 1,
     borderTopWidth: 0,
     borderBottomLeftRadius: 12,
     borderBottomRightRadius: 12,
-    overflow: 'hidden',
     marginBottom: 4,
   },
   dropdownOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 48,
+    minHeight: 52,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: tokens.colors.border,
+  },
+  dropdownOptionFirst: {
+    borderTopWidth: 0,
   },
   dropdownOptionSelected: {
     backgroundColor: tokens.colors.brand[50],
@@ -1486,7 +1499,7 @@ const styles = StyleSheet.create({
     fontFamily: tokens.typography.native.body,
     fontSize: 15,
     lineHeight: 22,
-    flex: 1,
+    fontWeight: '600',
   },
   segmentRow: {
     flexDirection: 'row',
@@ -1518,19 +1531,32 @@ const styles = StyleSheet.create({
   segmentLabelSelected: {
     color: tokens.colors.primary,
   },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   filterChip: {
     flexGrow: 0,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 10,
     borderRadius: 12,
     minHeight: 44,
+  },
+  filterChipCol3: {
+    width: '31.5%',
+    maxWidth: '31.5%',
+  },
+  filterChipCol2: {
+    width: '48%',
+    maxWidth: '48%',
   },
   chipLabel: {
     fontFamily: tokens.typography.native.body,
     fontSize: 13,
     lineHeight: 19,
     fontWeight: '600',
+    textAlign: 'center',
   },
   sheetFooter: {
     flexDirection: 'row',

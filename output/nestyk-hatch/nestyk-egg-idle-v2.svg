@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title"><title id="title">NESTYK hatching bird</title><style>.shell{fill:#FFF5DA;stroke:#211E1E;stroke-width:5;stroke-linejoin:round;stroke-linecap:round}</style><style>
+.rock{transform-origin:160px 256px;animation:rock 5.6s infinite}
+.whole{animation:whole 5.6s infinite}
+.crack{stroke-dasharray:220;stroke-dashoffset:220;animation:crack 5.6s infinite}
+.cap{animation:cap 5.6s infinite}
+.bird{animation:peek 5.6s infinite}
+@keyframes rock{0%,15%,32%,100%{transform:rotate(0)}20%{transform:rotate(-3deg)}25%{transform:rotate(3deg)}}
+@keyframes whole{0%,28%{opacity:1}29%,87%{opacity:0}92%,100%{opacity:1}}
+@keyframes crack{0%,16%{stroke-dashoffset:220;opacity:0}17%{opacity:1}28%,80%{stroke-dashoffset:0;opacity:1}88%,100%{stroke-dashoffset:220;opacity:0}}
+@keyframes cap{0%,32%,83%,100%{transform:translateY(0)}46%,65%{transform:translateY(-66px)}}
+@keyframes peek{0%,32%,83%,100%{transform:translateY(140px)}46%,65%{transform:translateY(40px)}52%{transform:translate(3px,40px)}60%{transform:translate(-3px,40px)}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}.bird{opacity:0}.whole{opacity:1}.crack{opacity:0}}
+</style><defs><clipPath id="peek"><path d="M70 0H250V197L213 199 187 180 160 199 134 180 109 199 70 180Z"/></clipPath></defs><ellipse cx="160" cy="266" rx="77" ry="9" fill="#EAD9B0" opacity=".4"/><g class="rock"><g clip-path="url(#peek)"><g class="bird"><path d="M126 220V131L108 123 127 114C128 82 172 82 179 113L185 159Q214 154 225 170Q237 187 222 211Q210 232 179 234L150 234Q134 234 126 220Z" fill="#F8B615" stroke="#211E1E" stroke-width="5" stroke-linejoin="round"/><circle cx="149" cy="113" r="5" fill="#211E1E"/><path d="M175 181Q191 164 210 176Q212 195 188 205" fill="none" stroke="#211E1E" stroke-width="5" stroke-linecap="round"/><path d="M149 235v16h-12m50-16v16h12" fill="none" stroke="#211E1E" stroke-width="5" stroke-linecap="round"/></g></g><path class="shell" d="M83 185L109 199 134 180 160 199 187 180 213 199 237 185C237 232 208 256 160 256S83 232 83 185Z"/><g class="cap"><path class="shell" d="M83 185C83 126 119 60 160 60S237 126 237 185L213 199 187 180 160 199 134 180 109 199Z"/><path d="M118 118Q128 95 143 88" fill="none" stroke="#F8B615" stroke-width="7" stroke-linecap="round"/></g><g class="whole"><path class="shell" d="M160 60C119 60 83 126 83 185C83 232 112 256 160 256S237 232 237 185C237 126 201 60 160 60Z"/><path d="M118 118Q128 95 143 88" fill="none" stroke="#F8B615" stroke-width="7" stroke-linecap="round"/><path class="crack" d="M84 185L109 199 134 180 160 199 187 180 213 199 236 185" fill="none" stroke="#211E1E" stroke-width="5"/></g></g></svg>

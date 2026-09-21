@@ -90,6 +90,8 @@ export async function fetchAgentContacts(): Promise<
     id: number;
     name: string;
     phone: string;
+    lineId?: string | null;
+    facebook?: string | null;
     note: string | null;
     roomCount: number;
   }>
@@ -116,8 +118,49 @@ export async function createAgentScoutRoom(
   data: CreateRoomWizardSubmitData,
 ): Promise<CreateRoomResponse> {
   await ensureAgentSession();
-  const { isScoutRoom: _scout, ...body } = data;
+  const { isScoutRoom: _scout, promoCopyStale: _stale, ...body } = data;
   return apiPost<CreateRoomResponse>('/agent/rooms', body);
+}
+
+export async function generateListingPromo(input: {
+  locale: string;
+  listing: Record<string, unknown>;
+  signal?: AbortSignal;
+}): Promise<{ listingTitle: string; listingDescription: string }> {
+  await ensureAgentSession();
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+  input.signal?.addEventListener('abort', onExternalAbort);
+  const timeout = setTimeout(() => controller.abort(), 90_000);
+  try {
+    const result = await apiRequest<{
+      listingTitle?: string;
+      listingDescription?: string;
+    }>('/agent/rooms/generate-listing-promo', {
+      method: 'POST',
+      body: JSON.stringify({ locale: input.locale, listing: input.listing }),
+      signal: controller.signal,
+    });
+    const listingTitle = result?.listingTitle?.trim() ?? '';
+    const listingDescription = result?.listingDescription?.trim() ?? '';
+    if (!listingTitle || !listingDescription) {
+      throw new Error('AI returned empty listing title or description');
+    }
+    return { listingTitle, listingDescription };
+  } catch (err) {
+    if (input.signal?.aborted) {
+      const cancelled = new Error('cancelled');
+      cancelled.name = 'AbortError';
+      throw cancelled;
+    }
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('AI generation timed out — please try again');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+    input.signal?.removeEventListener('abort', onExternalAbort);
+  }
 }
 
 export async function fetchAgentRoom(id: number): Promise<import('@nestyk/feature-listing').AgentRoomDetail> {
@@ -127,7 +170,7 @@ export async function fetchAgentRoom(id: number): Promise<import('@nestyk/featur
 
 export async function updateAgentRoom(id: number, data: CreateRoomWizardSubmitData): Promise<CreateRoomResponse> {
   await ensureAgentSession();
-  const { isScoutRoom: _scout, ...body } = data;
+  const { isScoutRoom: _scout, promoCopyStale: _stale, ...body } = data;
   return apiRequest(`/agent/rooms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 

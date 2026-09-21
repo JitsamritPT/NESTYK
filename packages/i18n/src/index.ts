@@ -18,3 +18,8 @@ export function getTranslations(locale: SupportedLocale = 'th'): TranslationSche
 export * from './LocaleContext';
 export * from './resolveLocale';
 export * from './types';
+export {
+  AMENITIES_CATALOG_GROUP_ORDER,
+  AMENITIES_FACILITY_GROUP_LABELS,
+  AMENITIES_FACILITY_LABELS,
+} from './amenities-catalog-labels';

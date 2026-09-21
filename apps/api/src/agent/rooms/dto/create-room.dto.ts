@@ -39,6 +39,8 @@ export type CreateRoomContactInput = {
   name: string;
   phone: string;
   email?: string;
+  lineId?: string;
+  facebook?: string;
   note?: string;
 };
 
@@ -62,6 +64,8 @@ export type CreateRoomBody = {
   propertyId?: number;
   property?: CreateRoomPropertyInput;
   listingTitle?: string;
+  /** Public share headline (edit / promo section). */
+  promoTitle?: string;
   listingDescription?: string;
   roomTypeId?: number;
   listingSourceCode?: 'co_agent' | 'owner';

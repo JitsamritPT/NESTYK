@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title"><title id="title">NESTYK hatching bird</title><style>.shell{fill:#FFF5DA;stroke:#211E1E;stroke-width:5;stroke-linejoin:round;stroke-linecap:round}</style><style>
+.whole{animation:whole .8s both}.crack{stroke-dasharray:220;animation:crack .8s both}
+.cap{transform-origin:160px 150px;animation:open 1.2s .7s both}
+.base{transform-origin:160px 250px;animation:clear .8s 1.3s both}
+.bird{animation:rise 1s .85s both}
+.spark{transform-box:fill-box;transform-origin:center;opacity:0;animation:twinkle 2s 2s ease-in-out infinite}
+.two{animation-delay:2.6s}.three{animation-delay:3.2s}
+@keyframes whole{0%,95%{opacity:1}100%{opacity:0}}
+@keyframes crack{from{stroke-dashoffset:220}to{stroke-dashoffset:0}}
+@keyframes open{0%{transform:translateY(0);opacity:1}60%{opacity:1}100%{transform:translate(42px,-78px) rotate(30deg);opacity:0}}
+@keyframes clear{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(20px) scale(.9)}}
+@keyframes rise{0%{transform:translateY(130px);opacity:0}20%{opacity:1}80%{transform:translateY(-8px)}100%{transform:translateY(0);opacity:1}}
+@keyframes twinkle{0%,100%{opacity:.2;transform:scale(.65)}50%{opacity:1;transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}.whole,.base,.cap{opacity:0}.bird{opacity:1}.spark{opacity:.8}}
+</style><defs><clipPath id="stage"><rect x="45" y="25" width="235" height="233"/></clipPath></defs><ellipse cx="160" cy="266" rx="77" ry="9" fill="#EAD9B0" opacity=".4"/><g clip-path="url(#stage)"><g class="bird"><path d="M126 220V131L108 123 127 114C128 82 172 82 179 113L185 159Q214 154 225 170Q237 187 222 211Q210 232 179 234L150 234Q134 234 126 220Z" fill="#F8B615" stroke="#211E1E" stroke-width="5" stroke-linejoin="round"/><circle cx="149" cy="113" r="5" fill="#211E1E"/><path d="M175 181Q191 164 210 176Q212 195 188 205" fill="none" stroke="#211E1E" stroke-width="5" stroke-linecap="round"/><path d="M149 235v16h-12m50-16v16h12" fill="none" stroke="#211E1E" stroke-width="5" stroke-linecap="round"/></g></g><g class="base"><path class="shell" d="M83 185L109 199 134 180 160 199 187 180 213 199 237 185C237 232 208 256 160 256S83 232 83 185Z"/></g><g class="cap"><path class="shell" d="M83 185C83 126 119 60 160 60S237 126 237 185L213 199 187 180 160 199 134 180 109 199Z"/><path d="M118 118Q128 95 143 88" fill="none" stroke="#F8B615" stroke-width="7" stroke-linecap="round"/></g><g class="whole"><path class="shell" d="M160 60C119 60 83 126 83 185C83 232 112 256 160 256S237 232 237 185C237 126 201 60 160 60Z"/><path d="M118 118Q128 95 143 88" fill="none" stroke="#F8B615" stroke-width="7" stroke-linecap="round"/><path class="crack" d="M84 185L109 199 134 180 160 199 187 180 213 199 236 185" fill="none" stroke="#211E1E" stroke-width="5"/></g>
+<path class="spark" d="M239 75Q242 88 254 91Q242 94 239 107Q236 94 224 91Q236 88 239 75" fill="#F8B615"/>
+<path class="spark two" d="M80 119Q82 129 92 131Q82 133 80 143Q78 133 68 131Q78 129 80 119" fill="#F8B615"/>
+<path class="spark three" d="M244 192Q246 201 254 203Q246 205 244 214Q242 205 234 203Q242 201 244 192" fill="#F8B615"/>
+</svg>

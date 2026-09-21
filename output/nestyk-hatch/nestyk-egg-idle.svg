@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" role="img" aria-labelledby="title"><title id="title">NESTYK egg animation</title><style>
+.shell{fill:#FFF5DA;stroke:#211E1E;stroke-width:6;stroke-linejoin:round;stroke-linecap:round}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style><style>
+.egg{transform-origin:160px 250px;animation:rock 2.4s ease-in-out infinite}
+.glow{animation:breathe 2.4s ease-in-out infinite;transform-origin:160px 265px}
+@keyframes rock{0%,45%,100%{transform:rotate(0)}12%{transform:rotate(-5deg)}25%{transform:rotate(5deg)}36%{transform:rotate(-2deg)}}
+@keyframes breathe{0%,45%,100%{opacity:.6;transform:scaleX(1)}25%{opacity:.4;transform:scaleX(.92)}}
+</style><g class="glow"><ellipse cx="160" cy="265" rx="78" ry="10" fill="#EAD9B0" opacity=".4"/></g><g class="egg"><path class="shell" d="M160 60C119 60 83 126 83 185C83 232 112 256 160 256S237 232 237 185C237 126 201 60 160 60Z"/><path d="M118 118Q128 95 143 88" fill="none" stroke="#F8B615" stroke-width="7" stroke-linecap="round"/><path d="M168 131l12-7 12 19 14-9" fill="none" stroke="#211E1E" stroke-width="4" stroke-linejoin="round"/></g></svg>

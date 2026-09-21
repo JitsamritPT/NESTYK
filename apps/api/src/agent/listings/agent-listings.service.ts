@@ -254,7 +254,8 @@ export class AgentListingsService {
     if (!room) throw new NotFoundException('Room not found');
     const p = room.property;
     return {
-      id: room.id, listingTitle: room.listing_title, description: room.listing_description,
+      id: room.id, listingTitle: room.listing_title, promoTitle: room.promo_title,
+      description: room.listing_description,
       roomId: room.room_id, visibility: room.visibility,
       roomStatusCode: room.room_status?.code ?? null,
       roomTypeCode: room.room_type?.code ?? null, roomTypeId: room.room_type_id,
@@ -281,7 +282,8 @@ export class AgentListingsService {
       contacts: [...(room.room_contacts ?? [])].sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
         .filter((link) => link.contact?.created_by_user_id === agentId)
         .map((link) => ({ id: link.contact.id, name: link.contact.name, phone: link.contact.phone,
-          email: link.contact.email, note: link.contact.note, isPrimary: link.is_primary })),
+          email: link.contact.email, lineId: link.contact.line_id, facebook: link.contact.facebook,
+          note: link.contact.note, isPrimary: link.is_primary })),
     };
   }
 
