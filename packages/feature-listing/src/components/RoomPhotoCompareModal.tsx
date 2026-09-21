@@ -74,11 +74,12 @@ export function RoomPhotoCompareModal({
                 onPress={() => onPreview?.({ uri: beforeUri })}
                 style={({ pressed }) => [styles.imageHit, pressed && !busy ? styles.imagePressed : null]}
               >
-                <Image
-                  source={{ uri: beforeUri, cache: 'force-cache' }}
-                  style={styles.image}
-                  pointerEvents="none"
-                />
+                <View pointerEvents="none">
+                  <Image
+                    source={{ uri: beforeUri, cache: 'force-cache' }}
+                    style={styles.image}
+                  />
+                </View>
               </Pressable>
             </View>
             <View style={styles.col}>
@@ -90,11 +91,12 @@ export function RoomPhotoCompareModal({
                 onPress={() => onPreview?.({ uri: afterUri, beforeUri })}
                 style={({ pressed }) => [styles.imageHit, pressed && !busy ? styles.imagePressed : null]}
               >
-                <Image
-                  source={{ uri: afterUri, cache: 'force-cache' }}
-                  style={styles.image}
-                  pointerEvents="none"
-                />
+                <View pointerEvents="none">
+                  <Image
+                    source={{ uri: afterUri, cache: 'force-cache' }}
+                    style={styles.image}
+                  />
+                </View>
               </Pressable>
             </View>
           </View>

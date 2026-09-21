@@ -71,7 +71,7 @@ function extraSlotsFor(formKind?: string | null): ExtraSlot[] {
 }
 
 function namedExtraCodes(slots: ExtraSlot[]) {
-  return new Set(
+  return new Set<string>(
     slots.filter((slot) => slot.code !== "other").map((slot) => slot.code),
   );
 }
@@ -205,7 +205,7 @@ export function AgreementAttachments({
   function docsForExtraSlot(code: ExtraSlotCode) {
     if (code === "other") {
       return extraDocs.filter(
-        (d) => !namedExtras.has(d.documentTypeCode as ExtraSlotCode),
+        (d) => !namedExtras.has(d.documentTypeCode),
       );
     }
     return extraDocs.filter((d) => d.documentTypeCode === code);
@@ -703,7 +703,7 @@ export function AgreementAttachments({
                   .filter(
                     (t) =>
                       t.code === "other" ||
-                      (!namedExtras.has(t.code as ExtraSlotCode) &&
+                      (!namedExtras.has(t.code) &&
                         t.code !== "ownership_proof"),
                   )
                   .map((t) => (
