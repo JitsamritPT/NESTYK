@@ -33,6 +33,12 @@ export async function getBrokerAppointmentLeadDefaults(
   await ensureAgentSession();
   return apiGet(`/agent/contracts/broker-appointment-defaults/${leadId}`);
 }
+export async function getLeaseDefaults(
+  leadId: number,
+): Promise<import("@nestyk/types").LeaseAgreementInput> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/lease-defaults/${leadId}`);
+}
 export async function previewAgentBrokerAppointment(
   id: number,
 ): Promise<AgentContract> {
@@ -44,6 +50,18 @@ export async function generateAgentBrokerAppointment(
 ): Promise<AgentContract> {
   await ensureAgentSession();
   return apiPost(`/agent/contracts/${id}/generate-broker-appointment`, {});
+}
+export async function previewAgentLeaseAgreement(
+  id: number,
+): Promise<AgentContract> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/lease-preview`, {});
+}
+export async function generateAgentLeaseAgreement(
+  id: number,
+): Promise<AgentContract> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/generate-lease`, {});
 }
 export async function createAgentContract(
   input: CreateAgentContract,

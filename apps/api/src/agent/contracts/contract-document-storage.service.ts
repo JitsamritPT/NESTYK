@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { MOCK_RESERVATION_VERSION } from "./reservation-pdf";
 import { BROKER_APPOINTMENT_VERSION } from "./broker-appointment-pdf";
+import { LEASE_AGREEMENT_VERSION } from "./lease-agreement-pdf";
 import { randomUUID } from "crypto";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { AgentContractDocumentKind } from "@nestyk/types";
@@ -229,6 +230,30 @@ export class ContractDocumentStorageService {
       throw new BadRequestException("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกิน 10 MB");
     await this.ensureBucket();
     const path = `${agentId}/${contractId}/${generated ? "generated" : "mock"}/broker_appointment/${BROKER_APPOINTMENT_VERSION}/${randomUUID()}.pdf`;
+    const { error } = await this.storage().upload(path, pdf, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "สร้างเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path };
+  }
+
+  async uploadLeaseAgreementPdf(
+    agentId: number,
+    contractId: number,
+    pdf: Buffer,
+    generated: boolean,
+  ) {
+    if (
+      this.sniff(pdf).mime !== "application/pdf" ||
+      pdf.length > MAX_CONTRACT_DOCUMENT_BYTES
+    )
+      throw new BadRequestException("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกิน 10 MB");
+    await this.ensureBucket();
+    const path = `${agentId}/${contractId}/${generated ? "generated" : "mock"}/lease_agreement/${LEASE_AGREEMENT_VERSION}/${randomUUID()}.pdf`;
     const { error } = await this.storage().upload(path, pdf, {
       contentType: "application/pdf",
       upsert: false,

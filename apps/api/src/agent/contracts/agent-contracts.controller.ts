@@ -54,6 +54,12 @@ export class AgentContractsController {
   ) {
     return this.contracts.brokerAppointmentDefaults(user.id, leadId);
   }
+  @Get("lease-defaults/:leadId") leaseDefaults(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("leadId", ParseIntPipe) leadId: number,
+  ) {
+    return this.contracts.leaseDefaults(user.id, leadId);
+  }
   @Get() list(@CurrentUser() user: AuthRequestUser) {
     return this.contracts.list(user.id);
   }
@@ -97,6 +103,22 @@ export class AgentContractsController {
     @Param("id", ParseIntPipe) id: number,
   ) {
     return this.contracts.brokerAppointmentPdf(user.id, id, true);
+  }
+  @Post(":id/lease-preview")
+  @HttpCode(HttpStatus.OK)
+  leasePreview(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.contracts.leaseAgreementPdf(user.id, id, false);
+  }
+  @Post(":id/generate-lease")
+  @HttpCode(HttpStatus.OK)
+  generateLease(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+  ) {
+    return this.contracts.leaseAgreementPdf(user.id, id, true);
   }
   @Post(":id/sign")
   @HttpCode(HttpStatus.OK)

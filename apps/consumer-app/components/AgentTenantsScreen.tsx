@@ -21,13 +21,9 @@ const filters: Record<Filter, string> = {
   active: "ผู้เช่าแล้ว",
   signing: "กำลังทำสัญญา",
 };
-// A completed tenancy remains a tenant record, including after its lease ends.
+// "ผู้เช่าแล้ว" only while a residential lease contract is currently active.
 const stateOf = (t: AgentTenant): Exclude<Filter, "all"> =>
-  t.contracts.some(
-    (c) =>
-      c.formKind !== "reservation" &&
-      ["active", "expired", "terminated"].includes(c.status),
-  )
+  t.contracts.some((c) => c.formKind === "lease" && c.status === "active")
     ? "active"
     : "signing";
 const statusColor = {

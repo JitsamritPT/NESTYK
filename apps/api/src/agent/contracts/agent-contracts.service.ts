@@ -32,10 +32,21 @@ import {
   stampBrokerAppointmentSignatures,
 } from "./broker-appointment-pdf";
 import {
+  LEASE_AGREEMENT_VERSION,
+  createLeaseAgreementPdf,
+  stampLeaseAgreementSignatures,
+} from "./lease-agreement-pdf";
+import {
   validateBrokerAppointment,
   brokerAppointmentSnapshot,
   pickBrokerRentFromRoom,
 } from "./broker-appointment";
+import {
+  validateLeaseAgreement,
+  leaseAgreementSnapshot,
+  emptyLeaseAgreement,
+  pickLeaseRentFromRoom,
+} from "./lease-agreement";
 import { validateReservationLetter, emptyReservationLetter } from "./reservation-letter";
 import type {
   AgentContract,
@@ -43,6 +54,7 @@ import type {
   AgentContractSignParty,
   BrokerAppointmentInput,
   CreateAgentContract,
+  LeaseAgreementInput,
   ReservationLetterInput,
 } from "@nestyk/types";
 import { AgreementSignInviteEntity } from "../../entities/agreement-sign-invite.entity";
@@ -329,6 +341,35 @@ export class AgentContractsService {
       path: (generated && complete) || mock ? c.document_url : null,
     };
   }
+  private leaseDocument(c: LeaseContractEntity) {
+    if ((c.template?.form_kind ?? c.agreement_type?.form_kind) !== "lease")
+      return null;
+    const templateKey = c.template?.document_template_key ?? "";
+    if (templateKey && templateKey !== "lease/v1") {
+      return {
+        status: null,
+        path: c.document_url?.endsWith(".pdf") ? c.document_url : null,
+      };
+    }
+    const complete = (["owner", "tenant"] as const).every(
+      (party) => c[SIGN_COLUMNS[party].at] && c[SIGN_COLUMNS[party].url],
+    );
+    const root = `${c.created_by_user_id}/${c.id}/`;
+    const versionOk = (kind: "generated" | "mock") =>
+      c.document_url?.startsWith(
+        `${root}${kind}/lease_agreement/${LEASE_AGREEMENT_VERSION}/`,
+      ) && c.document_url.endsWith(".pdf");
+    const generated = versionOk("generated");
+    const mock = versionOk("mock");
+    return {
+      status: complete
+        ? generated
+          ? ("ready" as const)
+          : ("ready_to_generate" as const)
+        : ("awaiting_signatures" as const),
+      path: (generated && complete) || mock ? c.document_url : null,
+    };
+  }
   /** After a stamped letter exists, the agreement is view-only. */
   private assertDocumentMutable(c: LeaseContractEntity) {
     if (
@@ -346,6 +387,14 @@ export class AgentContractsService {
       throw new BadRequestException(
         "สร้างเอกสารแต่งตั้งนายหน้าแล้ว แก้ไขไม่ได้",
       );
+    if (
+      this.leaseDocument(c)?.status === "ready" ||
+      !!(
+        c.document_url?.includes("/generated/lease_agreement/") &&
+        c.document_url.endsWith(".pdf")
+      )
+    )
+      throw new BadRequestException("สร้างเอกสารสัญญาเช่าแล้ว แก้ไขไม่ได้");
   }
 
   private serialize(
@@ -409,10 +458,12 @@ export class AgentContractsService {
       reservationLetterStatus: this.reservationDocument(c)?.status ?? null,
       brokerAppointmentUrl: url(this.brokerDocument(c)?.path),
       brokerAppointmentStatus: this.brokerDocument(c)?.status ?? null,
-      leaseDocumentUrl:
+      leaseDocumentUrl: url(this.leaseDocument(c)?.path ?? (
         (c.template?.form_kind ?? c.agreement_type?.form_kind) === "lease"
-          ? url(c.document_url)
-          : null,
+          ? c.document_url
+          : null
+      )),
+      leaseAgreementStatus: this.leaseDocument(c)?.status ?? null,
       invoiceUrl: url(c.invoice_url),
       receiptUrl: url(c.receipt_url),
     };
@@ -421,9 +472,10 @@ export class AgentContractsService {
     return [
       this.reservationDocument(c)?.path,
       this.brokerDocument(c)?.path,
-      (c.template?.form_kind ?? c.agreement_type?.form_kind) === "lease"
-        ? c.document_url
-        : null,
+      this.leaseDocument(c)?.path ??
+        ((c.template?.form_kind ?? c.agreement_type?.form_kind) === "lease"
+          ? c.document_url
+          : null),
       c.invoice_url,
       c.receipt_url,
       c.owner_signature_url,
@@ -681,6 +733,90 @@ export class AgentContractsService {
     return this.view(agentId, id);
   }
 
+  async leaseAgreementPdf(agentId: number, id: number, generate: boolean) {
+    const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
+    if (!c) throw new NotFoundException("ไม่พบสัญญา");
+    if ((c.template?.form_kind ?? c.agreement_type?.form_kind) !== "lease")
+      throw new BadRequestException("รองรับเฉพาะสัญญาเช่า");
+    if (c.template && c.template.document_template_key !== "lease/v1")
+      throw new BadRequestException(
+        "แม่แบบนี้ยังไม่รองรับการสร้างเอกสารสัญญาเช่า",
+      );
+    const state = this.leaseDocument(c)!;
+    if (generate && state.status === "awaiting_signatures")
+      throw new BadRequestException(
+        "กรุณาลงนามให้ครบทั้งผู้ให้เช่าและผู้เช่าก่อนสร้างเอกสาร",
+      );
+    if (!this.documents)
+      throw new ServiceUnavailableException(
+        "ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา",
+      );
+    if (state.status === "ready") return this.view(agentId, id);
+    const saved = (c.data?.leaseAgreement ?? null) as LeaseAgreementInput | null;
+    if (!saved)
+      throw new BadRequestException("ไม่พบข้อมูลฟอร์มสัญญาเช่า");
+    const data: LeaseAgreementInput = {
+      ...saved,
+      documentNo: saved.documentNo || c.contract_no || `LS-${c.id}`,
+      landlordSignName: saved.landlordName || saved.landlordSignName || "",
+      tenantSignName: saved.tenantName || saved.tenantSignName || "",
+      witnessSignName: saved.witnessSignName || saved.agentContact || "",
+      landlordSignaturePng: "",
+      tenantSignaturePng: "",
+    };
+    const base = await createLeaseAgreementPdf(data);
+    let pdf = base;
+    if (generate) {
+      const ownerPath = c.owner_signature_url!;
+      const tenantPath = c.tenant_signature_url!;
+      if (
+        !ownerPath.startsWith(`${agentId}/${id}/signatures/`) ||
+        !tenantPath.startsWith(`${agentId}/${id}/signatures/`)
+      )
+        throw new BadRequestException("ไฟล์ลายเซ็นไม่ตรงกับสัญญา");
+      try {
+        pdf = await stampLeaseAgreementSignatures(base, {
+          owner: await this.documents.download(ownerPath),
+          tenant: await this.documents.download(tenantPath),
+        });
+      } catch {
+        throw new BadRequestException(
+          "ไม่สามารถอ่านภาพลายเซ็นเพื่อสร้าง PDF ได้",
+        );
+      }
+    }
+    const stored = await this.documents.uploadLeaseAgreementPdf(
+      agentId,
+      id,
+      pdf,
+      generate,
+    );
+    try {
+      const result = await this.db.getRepository(LeaseContractEntity).update(
+        {
+          id,
+          created_by_user_id: agentId,
+          document_url: c.document_url ?? IsNull(),
+        },
+        {
+          document_url: stored.path,
+          ...(generate &&
+          ["draft", "awaiting_signatures", "awaiting_agent_review"].includes(
+            c.status,
+          )
+            ? { status: "active" as const }
+            : {}),
+        },
+      );
+      if (result.affected !== 1)
+        throw new ConflictException("เอกสารถูกเปลี่ยนแล้ว กรุณาลองอีกครั้ง");
+    } catch (error) {
+      await this.documents.remove(stored.path).catch(() => undefined);
+      throw error;
+    }
+    return this.view(agentId, id);
+  }
+
   async financialDocumentDefaults(agentId: number, id: number, kindInput: string) {
     const kind = financialKind(kindInput);
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
@@ -852,6 +988,10 @@ export class AgentContractsService {
       throw new BadRequestException(
         "สัญญาแต่งตั้งนายหน้าลงนามได้เฉพาะผู้ให้เช่าและนายหน้า",
       );
+    if (formKind === "lease" && parties.includes("agent"))
+      throw new BadRequestException(
+        "สัญญาเช่าลงนามได้เฉพาะผู้ให้เช่าและผู้เช่า",
+      );
     if (this.attachments) await this.attachments.assertReady(c);
     const pending = parties.filter((party) => !c[SIGN_COLUMNS[party].at]);
     if (!pending.length) throw new BadRequestException("ฝ่ายที่เลือกลงนามแล้ว");
@@ -884,7 +1024,9 @@ export class AgentContractsService {
       const complete =
         formKind === "broker_appointment"
           ? !!(ownerAt && agentAt)
-          : !!(ownerAt && tenantAt && agentAt);
+          : formKind === "lease"
+            ? !!(ownerAt && tenantAt)
+            : !!(ownerAt && tenantAt && agentAt);
       patch.status = complete ? "awaiting_agent_review" : "awaiting_signatures";
     }
     try {
@@ -1059,7 +1201,9 @@ export class AgentContractsService {
       const complete =
         formKind === "broker_appointment"
           ? !!(ownerAt && agentAt)
-          : !!(ownerAt && tenantAt && agentAt);
+          : formKind === "lease"
+            ? !!(ownerAt && tenantAt)
+            : !!(ownerAt && tenantAt && agentAt);
       patch.status = complete ? "awaiting_agent_review" : "awaiting_signatures";
     }
     try {
@@ -1246,6 +1390,94 @@ export class AgentContractsService {
     };
   }
 
+  async leaseDefaults(
+    agentId: number,
+    leadId: number,
+  ): Promise<LeaseAgreementInput> {
+    const base = await this.reservationDefaults(agentId, leadId);
+    const lead = await this.db.getRepository(LeadEntity).findOne({
+      where: { id: leadId, created_by_user_id: agentId },
+      relations: {
+        tenant: true,
+        rent_room: {
+          price_rows: { contract_type: true },
+          property: { property_type: true },
+          room_type: true,
+          layout_values: { layout: true },
+        },
+      },
+    });
+    const room = lead?.rent_room;
+    const tenant = lead?.tenant;
+    const property = room?.property;
+    const { monthlyRent, termMonths, advanceMonths, depositMonths } =
+      pickLeaseRentFromRoom(room, lead?.lease_duration_months);
+    const rentNum = Number(String(monthlyRent).replace(/,/g, ""));
+    const advanceNum =
+      Number.isFinite(rentNum) && advanceMonths
+        ? rentNum * Number(advanceMonths)
+        : NaN;
+    const depositNum =
+      Number.isFinite(rentNum) && depositMonths
+        ? rentNum * Number(depositMonths)
+        : NaN;
+    const months = Number(termMonths);
+    let termTo = "";
+    if (base.issueDate && Number.isFinite(months) && months > 0) {
+      const start = new Date(`${base.issueDate}T00:00:00Z`);
+      start.setUTCMonth(start.getUTCMonth() + months);
+      start.setUTCDate(start.getUTCDate() - 1);
+      termTo = start.toISOString().slice(0, 10);
+    }
+    const floor =
+      room?.layout_values?.find((row) => row.layout?.code === "floor")
+        ?.value ??
+      "";
+    const area =
+      room?.layout_values?.find((row) => row.layout?.code === "area_sqm")
+        ?.value ??
+      room?.layout_values?.find((row) => row.layout?.code === "area")?.value ??
+      "";
+    const agentContact = [base.agentName, base.agentPhone, "NESTYK"]
+      .filter(Boolean)
+      .join(" · ");
+    return {
+      ...emptyLeaseAgreement(),
+      issueDate: base.issueDate,
+      landlordName: base.landlordName,
+      landlordId: base.landlordId,
+      landlordAddress: base.address,
+      landlordPhone: base.landlordPhone,
+      tenantName: base.tenantName,
+      tenantNationality: base.tenantNationality,
+      tenantId: base.tenantId,
+      tenantPhone: base.tenantPhone,
+      tenantEmail: tenant?.email ?? "",
+      propertyType: property?.property_type?.code ?? "",
+      project: base.project,
+      houseNo: base.unitNo,
+      propertyAddress: base.address,
+      roomType: room?.room_type?.code ?? "",
+      floor,
+      area,
+      termMonths,
+      termFrom: base.issueDate,
+      termTo,
+      monthlyRent,
+      advanceMonths,
+      advanceAmount: Number.isFinite(advanceNum) ? String(advanceNum) : "",
+      depositMonths,
+      depositAmount: Number.isFinite(depositNum) ? String(depositNum) : "",
+      bankName: room?.owner_bank_name ?? "",
+      accountName: base.landlordName,
+      accountNo: room?.owner_bank_account ?? "",
+      agentContact,
+      landlordSignName: base.landlordName,
+      tenantSignName: base.tenantName,
+      witnessSignName: base.agentName,
+    };
+  }
+
   async create(agentId: number, input: unknown) {
     if (!input || typeof input !== "object" || Array.isArray(input))
       throw new BadRequestException("กรุณาระบุข้อมูลสัญญา");
@@ -1289,6 +1521,7 @@ export class AgentContractsService {
         : {};
     let reservationLetter: ReservationLetterInput | undefined;
     let brokerAppointment: BrokerAppointmentInput | undefined;
+    let leaseAgreement: LeaseAgreementInput | undefined;
     if (type.form_kind === "reservation" && rawData.reservationLetter != null) {
       reservationLetter = validateReservationLetter(rawData.reservationLetter);
       delete rawData.reservationLetter;
@@ -1297,15 +1530,36 @@ export class AgentContractsService {
       brokerAppointment = validateBrokerAppointment(rawData.brokerAppointment);
       delete rawData.brokerAppointment;
     }
+    if (type.form_kind === "lease" && rawData.leaseAgreement != null) {
+      leaseAgreement = validateLeaseAgreement(rawData.leaseAgreement);
+      delete rawData.leaseAgreement;
+    }
+    // Prefer lease form dates/money when the overlay payload is present.
+    let contractInput = b;
+    if (leaseAgreement) {
+      const rent = Number(String(leaseAgreement.monthlyRent).replace(/,/g, ""));
+      const deposit = Number(
+        String(leaseAgreement.depositAmount).replace(/,/g, ""),
+      );
+      contractInput = {
+        ...b,
+        startDate: leaseAgreement.termFrom || b.startDate,
+        endDate: leaseAgreement.termTo || b.endDate,
+        monthlyRent: Number.isFinite(rent) && rent > 0 ? rent : b.monthlyRent,
+        deposit: Number.isFinite(deposit) && deposit >= 0 ? deposit : b.deposit,
+      };
+    }
     const data = validateAgreementData(
       template.data_schema,
       Object.keys(rawData).length ? rawData : undefined,
-      b,
+      contractInput,
       template.form_kind,
     );
     if (reservationLetter) data.reservationLetter = reservationLetter;
     if (brokerAppointment)
       data.brokerAppointment = brokerAppointmentSnapshot(brokerAppointment);
+    if (leaseAgreement)
+      data.leaseAgreement = leaseAgreementSnapshot(leaseAgreement);
     const id = await this.db.transaction(async (manager) => {
       const lead = await manager.findOne(LeadEntity, {
         where: { id: b.leadId, created_by_user_id: agentId },
@@ -1350,7 +1604,7 @@ export class AgentContractsService {
           previous.rent_room_id !== room.id ||
           previous.lead_id !== lead.id ||
           !previous.end_date ||
-          b.startDate <= previous.end_date
+          contractInput.startDate <= previous.end_date
         )
           throw new BadRequestException(
             "ต่ออายุได้เฉพาะสัญญาเช่าที่ใช้งานหรือหมดอายุ ผู้เช่าและห้องเดิม และเริ่มหลังวันสิ้นสุดเดิม",
@@ -1384,12 +1638,14 @@ export class AgentContractsService {
           "(CAST(:end AS date) IS NULL OR (CASE WHEN COALESCE(contractTemplate.form_kind, agreementType.form_kind) = 'reservation' THEN COALESCE(c.move_in_date, c.start_date) ELSE c.start_date END) <= :end) AND (COALESCE(contractTemplate.form_kind, agreementType.form_kind) = 'reservation' OR c.end_date IS NULL OR c.end_date >= :start)",
           {
             start:
-              type.form_kind === "reservation" ? b.moveInDate : b.startDate,
+              type.form_kind === "reservation"
+                ? contractInput.moveInDate
+                : contractInput.startDate,
             end:
               type.form_kind === "reservation" ||
               type.form_kind === "broker_appointment"
                 ? null
-                : b.endDate,
+                : contractInput.endDate,
           },
         )
         .getCount();
@@ -1427,6 +1683,10 @@ export class AgentContractsService {
         brokerAppointment = { ...brokerAppointment, documentNo: contractNo };
       if (brokerAppointment)
         data.brokerAppointment = brokerAppointmentSnapshot(brokerAppointment);
+      if (leaseAgreement && !leaseAgreement.documentNo)
+        leaseAgreement = { ...leaseAgreement, documentNo: contractNo };
+      if (leaseAgreement)
+        data.leaseAgreement = leaseAgreementSnapshot(leaseAgreement);
       const letterRent = reservationLetter?.monthlyRent
         ? Number(String(reservationLetter.monthlyRent).replace(/,/g, ""))
         : null;
@@ -1482,33 +1742,36 @@ export class AgentContractsService {
           property_owner_id: room.property_owner_id,
           owner_user_id: room.owner_id,
           created_by_user_id: agentId,
-          start_date: b.startDate,
+          start_date: contractInput.startDate,
           end_date:
             type.form_kind === "reservation" ||
             type.form_kind === "broker_appointment"
               ? null
-              : b.endDate,
-          move_in_date: type.form_kind === "reservation" ? b.moveInDate : null,
+              : contractInput.endDate,
+          move_in_date:
+            type.form_kind === "reservation" ? contractInput.moveInDate : null,
           agreement_type_code: type.code,
           reservation_fee:
-            b.reservationFee == null ? null : b.reservationFee.toFixed(2),
+            contractInput.reservationFee == null
+              ? null
+              : contractInput.reservationFee.toFixed(2),
           monthly_rent:
             type.form_kind === "reservation"
               ? letterRent != null && Number.isFinite(letterRent)
                 ? letterRent.toFixed(2)
                 : null
-              : b.monthlyRent == null
+              : contractInput.monthlyRent == null
                 ? null
-                : b.monthlyRent.toFixed(2),
+                : contractInput.monthlyRent.toFixed(2),
           deposit:
             type.form_kind === "reservation"
               ? letterDeposit != null && Number.isFinite(letterDeposit)
                 ? letterDeposit.toFixed(2)
                 : null
-              : b.deposit == null
+              : contractInput.deposit == null
                 ? null
-                : b.deposit.toFixed(2),
-          notes: b.notes || null,
+                : contractInput.deposit.toFixed(2),
+          notes: contractInput.notes || null,
           status: "draft",
         }),
       );

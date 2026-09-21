@@ -62,6 +62,8 @@ export interface AgentContract {
   brokerAppointmentStatus:
     "awaiting_signatures" | "ready_to_generate" | "ready" | null;
   leaseDocumentUrl: string | null;
+  leaseAgreementStatus:
+    "awaiting_signatures" | "ready_to_generate" | "ready" | null;
   invoiceUrl: string | null;
   receiptUrl: string | null;
 }
@@ -158,6 +160,57 @@ export interface FinancialDocumentInput {
   paymentDetails: string;
   receiverName: string;
   notes: string;
+}
+
+/** Fillable fields for residential lease PDF (สัญญาเช่า). */
+export interface LeaseAgreementInput {
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  landlordNationality: string;
+  landlordId: string;
+  landlordAddress: string;
+  landlordPhone: string;
+  landlordEmail: string;
+  tenantName: string;
+  tenantNationality: string;
+  tenantId: string;
+  tenantAddress: string;
+  tenantPhone: string;
+  tenantEmail: string;
+  propertyType: string;
+  project: string;
+  houseNo: string;
+  propertyAddress: string;
+  roomType: string;
+  floor: string;
+  area: string;
+  termMonths: string;
+  termFrom: string;
+  termTo: string;
+  monthlyRent: string;
+  monthlyRentWords: string;
+  rentDueDay: string;
+  graceDay: string;
+  latePenalty: string;
+  latePenaltyWords: string;
+  bankName: string;
+  accountName: string;
+  accountNo: string;
+  otherPaymentMethod: string;
+  advanceMonths: string;
+  advanceAmount: string;
+  depositMonths: string;
+  depositAmount: string;
+  otherInitialPayment: string;
+  additionalTerms: string;
+  agentContact: string;
+  landlordSignName: string;
+  tenantSignName: string;
+  witnessSignName: string;
+  /** Optional PNG data URL — not persisted on the contract JSON. */
+  landlordSignaturePng: string;
+  tenantSignaturePng: string;
 }
 
 /** Fillable fields for residential rental reservation PDF (หนังสือจอง). */

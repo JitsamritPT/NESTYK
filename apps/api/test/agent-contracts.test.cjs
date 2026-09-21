@@ -63,6 +63,44 @@ test('broker appointment defaults pick rent matching lead lease duration', () =>
     leaseMonths: '12',
   });
 });
+test('lease agreement validates required dates and syncs sign names', () => {
+  const {
+    emptyLeaseAgreement,
+    validateLeaseAgreement,
+    pickLeaseRentFromRoom,
+  } = require('../src/agent/contracts/lease-agreement.ts');
+  const base = {
+    ...emptyLeaseAgreement(),
+    issueDate: '2026-10-01',
+    landlordName: 'Owner',
+    tenantName: 'Tenant',
+    project: 'Project',
+    termFrom: '2026-10-01',
+    termTo: '2027-09-30',
+    monthlyRent: '25000',
+    depositAmount: '50000',
+  };
+  const ok = validateLeaseAgreement(base);
+  assert.equal(ok.landlordSignName, 'Owner');
+  assert.equal(ok.tenantSignName, 'Tenant');
+  assert.throws(() => validateLeaseAgreement({ ...base, termTo: '2026-09-01' }));
+  assert.deepEqual(
+    pickLeaseRentFromRoom(
+      {
+        price_rows: [{ price: '20000', contract_type: { term_months: 12 } }],
+        advance_rent_months: 1,
+        deposit_months: 2,
+      },
+      12,
+    ),
+    {
+      monthlyRent: '20000',
+      termMonths: '12',
+      advanceMonths: '1',
+      depositMonths: '2',
+    },
+  );
+});
 function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0 } = {}) {
   const saved = []; const calls = []; let rolledBack = false;
   const qb = {};
