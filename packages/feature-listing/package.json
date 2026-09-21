@@ -18,12 +18,16 @@
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0",
+    "react-native-calendars": "*",
     "react-native-gesture-handler": ">=2.0.0",
     "react-native-maps": "*",
     "react-native-reanimated": ">=3.0.0",
     "react-native-safe-area-context": ">=4.0.0"
   },
   "peerDependenciesMeta": {
+    "react-native-calendars": {
+      "optional": true
+    },
     "react-native-maps": {
       "optional": true
     },

@@ -22,14 +22,16 @@ export type SelectionChipProps = {
   accentColor?: string;
   /** Selected label color (default primary dark — never match check amber). */
   inkColor?: string;
+  /** When false, selected state is border/fill only (filter pills). Default true. */
+  showCheck?: boolean;
   style?: StyleProp<ViewStyle>;
   labelStyle?: StyleProp<TextStyle>;
   testID?: string;
 };
 
 /**
- * Selectable chip — cream + yellow border + outline check when selected.
- * Label stays dark ink; check uses selectionMark amber.
+ * Selectable chip — cream + yellow border when selected.
+ * Optional outline check (default on); filter pills can omit it.
  */
 export function SelectionChip({
   label,
@@ -39,6 +41,7 @@ export function SelectionChip({
   onPress,
   accentColor = tokens.colors.brand[500],
   inkColor = tokens.colors.primary,
+  showCheck = true,
   style,
   labelStyle,
   testID,
@@ -61,7 +64,9 @@ export function SelectionChip({
     >
       <View style={styles.inner}>
         <View style={styles.labelRow}>
-          <SelectionCheck selected={selected} variant="chip" size="sm" />
+          {showCheck ? (
+            <SelectionCheck selected={selected} variant="chip" size="sm" />
+          ) : null}
           <Text
             style={[
               styles.label,

@@ -111,6 +111,8 @@ CREATE TABLE IF NOT EXISTS contacts (
   name               VARCHAR(255) NOT NULL,
   phone              VARCHAR(50)  NOT NULL,
   email              VARCHAR(255) NULL,
+  line_id            VARCHAR(100) NULL,
+  facebook           VARCHAR(255) NULL,
   note               VARCHAR(500) NULL,
   created_by_user_id INT          NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
@@ -144,7 +146,13 @@ CREATE TABLE IF NOT EXISTS master_facilities_groups (
 );
 
 INSERT INTO master_facilities_groups (code)
-VALUES ('room'), ('building'), ('security')
+VALUES
+  ('furniture'),
+  ('appliances'),
+  ('room_features'),
+  ('parking'),
+  ('project_facilities'),
+  ('security_services')
 ON CONFLICT (code) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS master_facilities (
@@ -162,6 +170,7 @@ CREATE TABLE IF NOT EXISTS rent_rooms (
   id                     SERIAL PRIMARY KEY,
   room_id                VARCHAR(100) NULL,
   listing_title          VARCHAR(255) NULL,
+  promo_title            VARCHAR(255) NULL,
   listing_description    TEXT         NULL,
   available_from_date    DATE         NOT NULL DEFAULT CURRENT_DATE,
   prices                 JSONB        NULL,

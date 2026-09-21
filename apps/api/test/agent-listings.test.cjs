@@ -36,6 +36,31 @@ const room = {
   owner_identity_number: 'must-not-leak', documents: [{ id: 1, kind: 'ownership', media_url: 'https://example.com/ownership.pdf', sort_order: 0 }],
 };
 
+test('room filters apply before count and pagination, including zero and 4+ bedrooms', async () => {
+  const calls = [];
+  const qb = {};
+  for (const method of ['leftJoin', 'where', 'andWhere', 'select', 'addSelect', 'groupBy', 'orderBy', 'addOrderBy', 'offset', 'limit']) {
+    qb[method] = (...args) => { calls.push([method, ...args]); return qb; };
+  }
+  qb.clone = () => qb;
+  qb.getCount = async () => { calls.push(['count']); return 0; };
+  qb.getRawMany = async () => [];
+  const service = new AgentListingsService({ createQueryBuilder: () => qb });
+  await service.listMine(7, { propertyType: 'condo', roomType: 'duplex', bedrooms: '4', minPrice: '0', maxPrice: '25000' });
+  const countIndex = calls.findIndex(([method]) => method === 'count');
+  for (const key of ['propertyType', 'roomType', 'bedrooms', 'minPrice', 'maxPrice']) {
+    const index = calls.findIndex(([method, sql, params]) => method === 'andWhere' && params && key in params);
+    assert.ok(index >= 0 && index < countIndex, key);
+  }
+  assert.ok(calls.some(([method, sql, params]) => params?.bedrooms === 4 && sql.includes('>= :bedrooms')));
+  calls.length = 0;
+  await service.listMine(7, { bedrooms: '0' });
+  assert.ok(calls.some(([method, sql, params]) => params?.bedrooms === 0 && sql.includes('= :bedrooms')));
+  for (const query of [{ minPrice: '30000', maxPrice: '10000' }, { minPrice: '-1' }, { maxPrice: 'NaN' }, { bedrooms: '5 OR 1=1' }]) {
+    await assert.rejects(service.listMine(7, query), (error) => error.getStatus() === 400);
+  }
+});
+
 test('detail returns independent lease terms and falls back for legacy rooms', async () => {
   const source = { ...room, advance_rent_months: 1, deposit_months: 2, prices: [
     { contractTypeId: 1, contractTypeCode: 'monthly_12', price: 15000, advanceRentMonths: 0, depositMonths: 3 },

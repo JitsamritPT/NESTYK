@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { AgentRoomDetail, CreateRoomWizardSubmitData, MobileCreateListingWizardBody, defaultAgentListingConfig } from '@nestyk/feature-listing';
 import { useLocale } from '@nestyk/i18n';
 import { pickRoomPhotos, uploadRoomPhoto, enhanceRoomPhoto } from '../lib/room-photos';
-import { fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities, updateAgentRoom } from '../lib/agent-listings-api';
+import { fetchAgentContacts, fetchAgentPropertyTypes, fetchAgentContractTypes, fetchAgentRoomTypes, fetchAgentFacilities, updateAgentRoom, generateListingPromo } from '../lib/agent-listings-api';
 import { searchPlaces, getPlaceDetails, searchNearbyPlaces } from '../lib/places-api';
 
 export function AgentRoomEditor({
@@ -13,7 +13,7 @@ export function AgentRoomEditor({
   onHeaderTitleChange,
 }: {
   room: AgentRoomDetail;
-  onSaved: () => void;
+  onSaved: (result?: { promoCopyStale?: boolean }) => void;
   onBusy: (busy: boolean) => void;
   backHandlerRef?: React.MutableRefObject<(() => boolean) | null>;
   onHeaderTitleChange?: (title: string) => void;
@@ -21,7 +21,9 @@ export function AgentRoomEditor({
   const { t, locale } = useLocale();
   const initialData = useMemo<CreateRoomWizardSubmitData>(() => ({
     visibility: room.visibility ?? 'private', isScoutRoom: true,
-    listingTitle: room.listingTitle ?? '', listingDescription: room.description ?? undefined,
+    listingTitle: room.listingTitle ?? '',
+    promoTitle: room.promoTitle ?? undefined,
+    listingDescription: room.description ?? undefined,
     availableFromDate: room.availableFromDate,
     listingSourceCode: room.listingSourceCode === 'owner' ? 'owner' : 'co_agent',
     roomId: room.roomId ?? undefined, roomTypeId: room.roomTypeId ?? undefined,
@@ -36,7 +38,13 @@ export function AgentRoomEditor({
     selectedContacts: [...room.contacts]
       .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
       .slice(0, 2)
-      .map((c) => ({ id: c.id, name: c.name, phone: c.phone })),
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        lineId: c.lineId ?? undefined,
+        facebook: c.facebook ?? undefined,
+      })),
     contactIds: [...room.contacts]
       .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
       .slice(0, 2)
@@ -49,7 +57,8 @@ export function AgentRoomEditor({
     medias: room.medias.filter((m) => m.mediaType === 'image').map((m, index) => ({ mediaUrl: m.mediaUrl, category: 'room', isCover: m.isCover, sortOrder: index })),
     facilities: room.facilityItems ?? [], customFacilities: room.customFacilities ?? [],
     nearbyOther: room.nearbyOther ?? '', nearbyPlaces: room.nearbyPlaces,
-    documents: room.documents ?? [],
+    documents: [],
+    promoCopyStale: room.promoCopyStale,
     latitude: room.latitude == null ? undefined : Number(room.latitude),
     longitude: room.longitude == null ? undefined : Number(room.longitude),
   }), [room]);
@@ -74,9 +83,10 @@ export function AgentRoomEditor({
       searchNearby={(lat, lng) => searchNearbyPlaces(lat, lng, locale)}
       searchPlaces={(q) => searchPlaces(q, locale)}
       getPlaceDetails={(id) => getPlaceDetails(id, locale)}
+      generateListingPromo={generateListingPromo}
       onSubmitListing={async (data) => {
         await updateAgentRoom(room.id, data);
-        onSaved();
+        onSaved({ promoCopyStale: data.promoCopyStale });
       }}
     />
   );

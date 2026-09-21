@@ -20,13 +20,19 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { CurrentUser, AuthRequestUser } from '../../auth/decorators/current-user.decorator';
 import { AgentRoomsService } from './agent-rooms.service';
+import { ListingPromoService } from './listing-promo.service';
 import { CreateRoomBody } from './dto/create-room.dto';
+import { GenerateListingPromoBody } from './dto/generate-listing-promo.dto';
 
 @Controller('agent/rooms')
 @UseGuards(AuthGuard, RolesGuard)
 @Roles('agent')
 export class AgentRoomsController {
-  constructor(private readonly roomsService: AgentRoomsService, private readonly photos: RoomPhotoStorageService) {}
+  constructor(
+    private readonly roomsService: AgentRoomsService,
+    private readonly photos: RoomPhotoStorageService,
+    private readonly listingPromo: ListingPromoService,
+  ) {}
 
   @Get('properties')
   listProperties(@CurrentUser() user: AuthRequestUser) {
@@ -79,6 +85,12 @@ export class AgentRoomsController {
     @UploadedFile() file: { buffer: Buffer; size: number } | undefined,
     @Req() request: { protocol: string; get(name: string): string }) {
     return this.photos.enhance(user.id, file, `${request.protocol}://${request.get('host')}`);
+  }
+
+  @Post('generate-listing-promo')
+  @HttpCode(HttpStatus.OK)
+  generateListingPromo(@Body() body: GenerateListingPromoBody) {
+    return this.listingPromo.generate(body);
   }
 
   @Patch(':id')

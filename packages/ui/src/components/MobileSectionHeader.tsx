@@ -8,6 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { MobileIcon } from '../icons/MobileIcon';
+import type { AppIconName } from '../icons/types';
 import { tokens } from '../theme/tokens';
 import { useMobileTheme } from '../theme/ThemeContext';
 
@@ -29,11 +30,14 @@ export interface MobileSectionHeaderProps {
   addLabel?: string;
   addAccessibilityLabel?: string;
   /**
-   * Secondary solid CTA without “+” prefix (e.g. Edit room).
-   * Prefer this over inventing a second outline/back button row.
+   * Trailing action (e.g. Edit room / Edit lead).
+   * `solid` = brand pill with label; `icon` = outline square matching `addVariant="room"`.
    */
   onActionPress?: () => void;
   actionLabel?: string;
+  /** Icon for `actionVariant="icon"` (default `note`). */
+  actionIcon?: AppIconName;
+  actionVariant?: 'solid' | 'icon';
   actionDisabled?: boolean;
   /** When set, shows search affordance on the right */
   onSearchPress?: () => void;
@@ -59,6 +63,8 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
   addAccessibilityLabel,
   onActionPress,
   actionLabel,
+  actionIcon = 'note',
+  actionVariant = 'solid',
   actionDisabled = false,
   onSearchPress,
   searchActive = false,
@@ -70,6 +76,7 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
   const showAction = Boolean(onActionPress && actionLabel);
   const hasTrailing = Boolean(onAddPress || onSearchPress || showAction);
   const isRoomAdd = addVariant === 'room';
+  const isIconAction = actionVariant === 'icon';
 
   return (
     <View style={styles.row}>
@@ -115,8 +122,8 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
               <Pressable
                 style={({ pressed }) => [
                   styles.addBtn,
-                  isRoomAdd && styles.addBtnRoom,
-                  pressed && (isRoomAdd ? styles.addBtnRoomPressed : { opacity: 0.85 }),
+                  isRoomAdd && styles.outlineIconBtn,
+                  pressed && (isRoomAdd ? styles.outlineIconBtnPressed : { opacity: 0.85 }),
                 ]}
                 onPress={onAddPress}
                 accessibilityRole="button"
@@ -137,9 +144,13 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
             {showAction ? (
               <Pressable
                 style={({ pressed }) => [
-                  styles.actionBtn,
+                  isIconAction ? styles.outlineIconBtn : styles.actionBtn,
                   actionDisabled ? styles.actionBtnDisabled : null,
-                  pressed && !actionDisabled ? { opacity: 0.85 } : null,
+                  pressed && !actionDisabled
+                    ? isIconAction
+                      ? styles.outlineIconBtnPressed
+                      : { opacity: 0.85 }
+                    : null,
                 ]}
                 onPress={onActionPress}
                 disabled={actionDisabled}
@@ -150,9 +161,13 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
                   ? { android_ripple: actionDisabled ? undefined : { color: 'rgba(33,30,30,0.12)' } }
                   : {})}
               >
-                <Text style={styles.actionLabel} numberOfLines={1}>
-                  {actionLabel}
-                </Text>
+                {isIconAction ? (
+                  <MobileIcon name={actionIcon} size={22} color={tokens.colors.primary} />
+                ) : (
+                  <Text style={styles.actionLabel} numberOfLines={1}>
+                    {actionLabel}
+                  </Text>
+                )}
               </Pressable>
             ) : null}
             {onSearchPress ? (
@@ -256,7 +271,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addBtnRoom: {
+  /** Shared outline icon CTA — room list Add + detail Edit */
+  outlineIconBtn: {
     width: 44,
     height: 44,
     minHeight: 44,
@@ -265,8 +281,10 @@ const styles = StyleSheet.create({
     backgroundColor: tokens.colors.white,
     borderWidth: 1,
     borderColor: tokens.colors.brand[500],
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  addBtnRoomPressed: {
+  outlineIconBtnPressed: {
     backgroundColor: tokens.colors.brand[100],
   },
   addLabel: {

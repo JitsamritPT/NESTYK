@@ -33,6 +33,8 @@ import {
   MobileBottomSheet,
   MobileActionSheetBody,
   MobilePhotoViewer,
+  MobileAiQuotaAction,
+  MobileNestykHatchLoader,
   SelectionChip,
   SelectionCheck,
   tokens,
@@ -49,12 +51,13 @@ import {
 import { formatBedroomSpec } from '../bedroom-label';
 import { PlaceDetails, PlaceSuggestion } from '../places';
 import { PropertyPlaceMap } from './PropertyPlaceMap';
+import { MoveInDateField, todayIsoDate, clampMoveInDate } from './MoveInDateField';
 
 export type { ListingSourceCode };
 
 const CREATE_STEPS = [1, 2, 5, 8, 6];
 const EDIT_STEPS = [1, 2, 5, 8, 6, 3, 4, 7];
-/** Required before save on create hub (photos optional). */
+/** Required before save on create hub (photos optional). Promo copy is edit-only. */
 const CREATE_REQUIRED_STEPS = [1, 2, 5, 8];
 const OWNER_NOTE_MAX = 200;
 const DEFAULT_MAP = { latitude: 13.7563, longitude: 100.5018 };
@@ -65,12 +68,31 @@ const PHOTO_GRID_GAP = 10;
 const SUGGESTED_ADVANCE_MONTHS = 1;
 const SUGGESTED_DEPOSIT_MONTHS = 2;
 const MAX_ROOM_CONTACTS = 2;
+const PROMO_TITLE_MAX = 100;
+const PROMO_DESC_MAX = 500;
+
+/** Fit text to max length without cutting mid-word when possible. */
+function softFitText(value: string, max: number): { text: string; truncated: boolean } {
+  const raw = value.trim();
+  if (raw.length <= max) return { text: raw, truncated: false };
+  const sliced = raw.slice(0, max);
+  const breakAt = Math.max(
+    sliced.lastIndexOf('\n'),
+    sliced.lastIndexOf('. '),
+    sliced.lastIndexOf('。'),
+    sliced.lastIndexOf(' '),
+  );
+  const text = (breakAt > max * 0.55 ? sliced.slice(0, breakAt) : sliced).trim();
+  return { text: text || sliced.trim(), truncated: true };
+}
 
 type RoomContactSelection = {
   key: string;
   id?: number;
   name: string;
   phone: string;
+  lineId?: string;
+  facebook?: string;
   roomCount?: number;
 };
 
@@ -83,6 +105,8 @@ export type ContactOption = {
   id: number;
   name: string;
   phone: string;
+  lineId?: string | null;
+  facebook?: string | null;
   note?: string | null;
   roomCount?: number;
 };
@@ -128,12 +152,16 @@ export type CreateRoomWizardSubmitData = {
   contact?: {
     name: string;
     phone: string;
+    lineId?: string;
+    facebook?: string;
     note?: string;
   };
   /** New contacts without id (created on save). Combined with contactIds ≤ 2. */
   contacts?: Array<{
     name: string;
     phone: string;
+    lineId?: string;
+    facebook?: string;
     note?: string;
   }>;
   /** Prefill for edit UI (id optional for unsaved drafts). */
@@ -141,9 +169,14 @@ export type CreateRoomWizardSubmitData = {
     id?: number;
     name: string;
     phone: string;
+    lineId?: string;
+    facebook?: string;
     roomCount?: number;
   }>;
+  /** Agent-only internal name. */
   listingTitle: string;
+  /** Public share headline (edit / promo). */
+  promoTitle?: string;
   listingSourceCode: ListingSourceCode;
   roomTypeId?: number;
   roomId?: string;
@@ -156,6 +189,7 @@ export type CreateRoomWizardSubmitData = {
   facilities: FacilityOption[];
   customFacilities?: string[];
   nearbyPlaces?: NearbyPlace[];
+  /** @deprecated Free-text notes UI removed — omit on submit to preserve existing DB value. */
   nearbyOther?: string;
   medias: Array<{
     mediaUrl: string;
@@ -163,7 +197,9 @@ export type CreateRoomWizardSubmitData = {
     isCover?: boolean;
     sortOrder: number;
   }>;
+  /** @deprecated Documents UI removed — always submit []. */
   documents: Array<{ kind: 'id_passport' | 'bookbank' | 'ownership' | 'other'; mediaUrl: string; sortOrder: number }>;
+  promoCopyStale?: boolean;
   isScoutRoom: true;
   latitude?: number;
   longitude?: number;
@@ -208,6 +244,11 @@ export interface MobileCreateListingWizardBodyProps {
   listFacilities?: () => Promise<FacilityOption[]>;
   searchNearby?: NearbySearch;
   mapsApiKey?: string;
+  generateListingPromo?: (input: {
+    locale: string;
+    listing: Record<string, unknown>;
+    signal?: AbortSignal;
+  }) => Promise<{ listingTitle: string; listingDescription: string }>;
 }
 
 function nativeElevation(level: 1 | 2 | 3) {
@@ -242,6 +283,7 @@ function isFilledCount(value: string) {
 
 /** Dev mock — replace with API quota when backend is ready. */
 const MOCK_AI_ENHANCE_LIMIT = 10;
+const MOCK_AI_PROMO_LIMIT = 10;
 
 export const MobileCreateListingWizardBody: React.FC<
   MobileCreateListingWizardBodyProps
@@ -267,23 +309,33 @@ export const MobileCreateListingWizardBody: React.FC<
   listFacilities,
   searchNearby,
   mapsApiKey,
+  generateListingPromo,
 }) => {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const cr = t.agent.createRoom;
   const accent = tokens.colors.brand[500];
   const accentInk = tokens.colors.primary;
 
   const [step, setStep] = useState(1);
   const [description, setDescription] = useState('');
-  const [availableFrom, setAvailableFrom] = useState('');
-  const [nearbyOther, setNearbyOther] = useState('');
+  const [promoTitle, setPromoTitle] = useState('');
+  const [availableFrom, setAvailableFrom] = useState(todayIsoDate);
   const [nearbyPlaces, setNearbyPlaces] = useState<NearbyPlace[]>([]);
   const [customFacilities, setCustomFacilities] = useState('');
   const [facilities, setFacilities] = useState<CreateRoomWizardSubmitData['facilities']>([]);
   const [facilityOptions, setFacilityOptions] = useState<FacilityOption[]>([]);
   const [facilityError, setFacilityError] = useState('');
   const [facilitiesLoading, setFacilitiesLoading] = useState(false);
-  const [documents, setDocuments] = useState<CreateRoomWizardSubmitData['documents']>([]);
+  const [promoStale, setPromoStale] = useState(false);
+  const [promoFingerprint, setPromoFingerprint] = useState<string | null>(null);
+  const [generatingPromo, setGeneratingPromo] = useState(false);
+  const [promoPreviewOpen, setPromoPreviewOpen] = useState(false);
+  const [promoAiPhase, setPromoAiPhase] = useState<'closed' | 'generating' | 'ready'>('closed');
+  const [promoDraft, setPromoDraft] = useState<{
+    listingTitle: string;
+    listingDescription: string;
+  } | null>(null);
+  const promoAbortRef = useRef<AbortController | null>(null);
   const loadFacilities = async () => {
     if (!listFacilities) return;
     setFacilitiesLoading(true); setFacilityError('');
@@ -379,6 +431,8 @@ export const MobileCreateListingWizardBody: React.FC<
   const [contactSheetError, setContactSheetError] = useState('');
   /** Draft fields for New contact sheet only — committed on Use this contact. */
   const [draftOwnerName, setDraftOwnerName] = useState('');
+  const [draftOwnerLine, setDraftOwnerLine] = useState('');
+  const [draftOwnerFacebook, setDraftOwnerFacebook] = useState('');
   const [draftOwnerPhone, setDraftOwnerPhone] = useState('');
   const [waterRate, setWaterRate] = useState('');
   const [electricRate, setElectricRate] = useState('');
@@ -389,6 +443,7 @@ export const MobileCreateListingWizardBody: React.FC<
   const [pickingPhotos, setPickingPhotos] = useState(false);
   const [enhancingUri, setEnhancingUri] = useState<string | null>(null);
   const [enhanceRemaining, setEnhanceRemaining] = useState(MOCK_AI_ENHANCE_LIMIT);
+  const [promoRemaining, setPromoRemaining] = useState(MOCK_AI_PROMO_LIMIT);
   const [galleryPreviewIndex, setGalleryPreviewIndex] = useState<number | null>(null);
   const [comparePreviewSide, setComparePreviewSide] = useState<'before' | 'after' | null>(null);
   const [compare, setCompare] = useState<{ sourceUri: string; beforeUri: string; after: RoomPhoto } | null>(null);
@@ -413,6 +468,8 @@ export const MobileCreateListingWizardBody: React.FC<
 
   const [ownerName, setOwnerName] = useState('');
   const [ownerPhone, setOwnerPhone] = useState('');
+  const [ownerLine, setOwnerLine] = useState('');
+  const [ownerFacebook, setOwnerFacebook] = useState('');
   const [ownerOther, setOwnerOther] = useState('');
   const [ownerMode, setOwnerMode] = useState<'pick' | 'create'>(
     listContacts ? 'pick' : 'create',
@@ -429,17 +486,18 @@ export const MobileCreateListingWizardBody: React.FC<
   useEffect(() => {
     if (!initialData) return;
     setDescription(initialData.listingDescription ?? '');
-    setAvailableFrom(initialData.availableFromDate ?? '');
-    setNearbyOther(initialData.nearbyOther ?? '');
+    setPromoTitle(initialData.promoTitle ?? '');
+    setAvailableFrom(clampMoveInDate(initialData.availableFromDate ?? todayIsoDate()));
+    setPromoStale(Boolean(initialData.promoCopyStale));
     setNearbyPlaces(initialData.nearbyPlaces ?? []);
     setCustomFacilities((initialData.customFacilities ?? []).join('\n'));
     setFacilities(initialData.facilities);
-    setDocuments(initialData.documents);
     const p = initialData.property;
     setPropertyName(p.name); setAddress(p.address); setDistrict(p.district); setProvince(p.province);
     setSubdistrict(p.subdistrict ?? ''); setPostalCode(p.postalCode ?? ''); setPropertyTypeId(p.propertyTypeId);
     setLatitude(initialData.latitude ?? p.latitude ?? null); setLongitude(initialData.longitude ?? p.longitude ?? null);
     setListingTitle(initialData.listingTitle); setListingSourceCode(initialData.listingSourceCode);
+
     setRoomId(initialData.roomId ?? ''); setRoomTypeId(initialData.roomTypeId ?? null);
     const values = Object.fromEntries(initialData.layout.map((item) => [item.code, item.value]));
     setBedroom(values.bedroom ?? ''); setBathroom(values.bathroom ?? ''); setSizeSqm(values.room_size ?? '');
@@ -461,7 +519,14 @@ export const MobileCreateListingWizardBody: React.FC<
       sizeSqm: (values.room_size ?? '').trim(),
       coverUri: initialData.medias[0]?.mediaUrl ?? null,
     });
-    const seeded: { id?: number; name: string; phone: string; roomCount?: number }[] =
+    const seeded: {
+      id?: number;
+      name: string;
+      phone: string;
+      lineId?: string;
+      facebook?: string;
+      roomCount?: number;
+    }[] =
       initialData.selectedContacts?.length
         ? initialData.selectedContacts
         : initialData.contactId || initialData.contact
@@ -476,6 +541,8 @@ export const MobileCreateListingWizardBody: React.FC<
                   initialData.contact?.phone ??
                   initialData.selectedContacts?.[0]?.phone ??
                   '',
+                lineId: initialData.contact?.lineId,
+                facebook: initialData.contact?.facebook,
               },
             ].filter((c) => c.name || c.phone || c.id)
           : [];
@@ -485,15 +552,50 @@ export const MobileCreateListingWizardBody: React.FC<
         id: c.id,
         name: c.name,
         phone: c.phone,
+        lineId: c.lineId,
+        facebook: c.facebook,
         roomCount: c.roomCount,
       })),
     );
     setOwnerMode(seeded.length ? 'pick' : listContacts ? 'pick' : 'create');
     setOwnerName(initialData.contact?.name ?? '');
     setOwnerPhone(initialData.contact?.phone ?? '');
+    setOwnerLine(initialData.contact?.lineId ?? '');
+    setOwnerFacebook(initialData.contact?.facebook ?? '');
     setOwnerOther(initialData.contact?.note ?? '');
     skipPlacesSearch.current = true;
   }, [initialData, listContacts]);
+
+  const promoInitRef = useRef(false);
+  useEffect(() => {
+    if (!initialData || promoInitRef.current) return;
+    if (!(initialData.promoTitle?.trim() || initialData.listingDescription?.trim())) return;
+    promoInitRef.current = true;
+    setPromoFingerprint(
+      JSON.stringify({
+        propertyName: (initialData.property?.name ?? '').trim(),
+        address: (initialData.property?.address ?? '').trim(),
+        district: (initialData.property?.district ?? '').trim(),
+        province: (initialData.property?.province ?? '').trim(),
+        bedroom: (initialData.layout?.find((l) => l.code === 'bedroom')?.value ?? '').trim(),
+        bathroom: (initialData.layout?.find((l) => l.code === 'bathroom')?.value ?? '').trim(),
+        sizeSqm: (initialData.layout?.find((l) => l.code === 'room_size')?.value ?? '').trim(),
+        roomTypeId: initialData.roomTypeId ?? null,
+        floor: (initialData.layout?.find((l) => l.code === 'floor')?.value ?? '').trim(),
+        building: (initialData.layout?.find((l) => l.code === 'building')?.value ?? '').trim(),
+        facilities: (initialData.facilities ?? []).map((f) => f.code).sort(),
+        customFacilities: (initialData.customFacilities ?? []).join('\n'),
+        nearby: (initialData.nearbyPlaces ?? []).map((p) => ({ id: p.placeId ?? p.name, name: p.name })),
+        prices: (initialData.prices ?? []).map((p) => ({
+          id: p.contractTypeId,
+          rent: String(p.price ?? ''),
+          advance: p.advanceRentMonths,
+          deposit: p.depositMonths,
+        })),
+        availableFrom: initialData.availableFromDate ?? '',
+      }),
+    );
+  }, [initialData]);
 
   useEffect(() => {
     if (latitude == null || longitude == null) return;
@@ -518,6 +620,7 @@ export const MobileCreateListingWizardBody: React.FC<
     if (step === 1) return cr.propertySectionHint;
     if (step === 2) return cr.layoutSectionHint;
     if (step === 5) return cr.pricingSectionHint;
+    if (step === 7) return cr.detailsHint;
     if (step === 8) return cr.roomContactSectionHint;
     return null;
   }, [
@@ -525,6 +628,7 @@ export const MobileCreateListingWizardBody: React.FC<
     cr.propertySectionHint,
     cr.layoutSectionHint,
     cr.pricingSectionHint,
+    cr.detailsHint,
     cr.roomContactSectionHint,
   ]);
 
@@ -1012,12 +1116,16 @@ export const MobileCreateListingWizardBody: React.FC<
       id: item.id,
       name: item.name,
       phone: item.phone,
+      lineId: item.lineId ?? undefined,
+      facebook: item.facebook ?? undefined,
       roomCount: item.roomCount,
     });
     setOwnerMode('pick');
     setOwnerQuery('');
     setDraftOwnerName('');
     setDraftOwnerPhone('');
+    setDraftOwnerLine('');
+    setDraftOwnerFacebook('');
     setContactSheet(null);
     setContactSheetError('');
   };
@@ -1055,10 +1163,19 @@ export const MobileCreateListingWizardBody: React.FC<
       setContactSheetError(cr.ownerFoundExisting);
       return;
     }
-    addRoomContact({ key, name, phone, roomCount: 0 });
+    addRoomContact({
+      key,
+      name,
+      phone,
+      lineId: draftOwnerLine.trim() || undefined,
+      facebook: draftOwnerFacebook.trim() || undefined,
+      roomCount: 0,
+    });
     setOwnerMode('pick');
     setDraftOwnerName('');
     setDraftOwnerPhone('');
+    setDraftOwnerLine('');
+    setDraftOwnerFacebook('');
     setContactSheet(null);
     setContactSheetError('');
   };
@@ -1155,6 +1272,15 @@ export const MobileCreateListingWizardBody: React.FC<
       if (!isFilledCount(bedroom)) nextErrors.bedroom = cr.required;
       if (!isFilledCount(bathroom)) nextErrors.bathroom = cr.required;
       if (sizeSqm.trim() && (!Number.isFinite(Number(sizeSqm)) || Number(sizeSqm) <= 0)) nextErrors.sizeSqm = cr.required;
+      if (
+        !availableFrom ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(availableFrom) ||
+        availableFrom < todayIsoDate()
+      ) {
+        nextErrors.availableFrom = availableFrom && availableFrom < todayIsoDate()
+          ? cr.moveInDatePastError
+          : cr.invalidDate;
+      }
     }
 
     if (current === 5) {
@@ -1184,9 +1310,7 @@ export const MobileCreateListingWizardBody: React.FC<
     }
 
     if (current === 7) {
-      if (availableFrom && (!/^\d{4}-\d{2}-\d{2}$/.test(availableFrom) || !Number.isFinite(Date.parse(availableFrom)) || new Date(availableFrom).toISOString().slice(0, 10) !== availableFrom)) nextErrors.availableFrom = cr.invalidDate;
-      if (documents.some((d) => { try { const url = new URL(d.mediaUrl); return url.protocol !== 'https:' || !url.hostname || d.mediaUrl.length > 500; } catch { return true; } })) nextErrors.documents = cr.invalidDocumentUrl;
-
+      if (!promoTitle.trim()) nextErrors.promoTitle = cr.required;
     }
     if (current === 3) {
       const custom = customFacilities.split('\n').map((v) => v.trim()).filter(Boolean);
@@ -1194,7 +1318,9 @@ export const MobileCreateListingWizardBody: React.FC<
     }
     if (current === 4) {
       const customCount = nearbyPlaces.filter(isCustomPlace).length;
-      if (nearbyPlaces.some((p) => !p.name.trim()) || customCount > 5 || nearbyPlaces.length - customCount > 24) nextErrors.nearbyPlaces = cr.invalidNearby;
+      if (customCount > 5) nextErrors.nearbyPlaces = cr.invalidNearby;
+      if (nearbyPlaces.filter((p) => !isCustomPlace(p)).length > 24) nextErrors.nearbyPlaces = cr.invalidNearby;
+      if (nearbyPlaces.some((p) => !p.name.trim())) nextErrors.nearbyPlaces = cr.invalidNearby;
       if (nearbyPlaces.length && (latitude == null || longitude == null)) nextErrors.nearbyPlaces = cr.nearbyMissingCoords;
     }
     return nextErrors;
@@ -1282,40 +1408,110 @@ export const MobileCreateListingWizardBody: React.FC<
     return () => sub.remove();
   }, [handleWizardBack]);
 
+  const buildPromoFingerprint = () =>
+    JSON.stringify({
+      propertyName: propertyName.trim(),
+      address: address.trim(),
+      district: district.trim(),
+      province: province.trim(),
+      bedroom: bedroom.trim(),
+      bathroom: bathroom.trim(),
+      sizeSqm: sizeSqm.trim(),
+      roomTypeId,
+      floor: floor.trim(),
+      building: building.trim(),
+      facilities: facilities.map((f) => f.code).sort(),
+      customFacilities: customFacilities.trim(),
+      nearby: nearbyPlaces.map((p) => ({ id: p.placeId ?? p.name, name: p.name })),
+      prices: selectedContractTypeIds.map((id) => ({
+        id,
+        rent: rentsByTypeId[String(id)] ?? '',
+        advance: leaseTerms(id).advanceRentMonths,
+        deposit: leaseTerms(id).depositMonths,
+      })),
+      availableFrom,
+    });
+
   const finishSection = () => {
     const invalid = validateStep(step);
     if (invalid) {
       setRequiredPrompt(requiredMessage(invalid));
       return;
     }
-    setHubSnapshot((prev) => {
-      const next = { ...prev };
-      if (step === 1) {
-        next.propertyName = propertyName.trim();
+    const applyDone = () => {
+      if (step === 7) {
+        const titleFit = softFitText(promoTitle, PROMO_TITLE_MAX);
+        const descFit = softFitText(description, PROMO_DESC_MAX);
+        if (titleFit.truncated || descFit.truncated) {
+          setPromoTitle(titleFit.text);
+          setDescription(descFit.text);
+        }
+        setPromoFingerprint(buildPromoFingerprint());
+        setPromoStale(false);
       }
-      if (step === 2) {
-        next.listingTitle = listingTitle.trim();
-        next.bedroom = bedroom.trim();
-        next.sizeSqm = sizeSqm.trim();
-      }
-      if (step === 6) {
-        next.coverUri = photos[0]?.uri ?? null;
-      }
-      // Title/property may also change from other sections — keep cover in sync when photos change via Done only.
-      return next;
-    });
-    setHubSaveHighlight((prev) => prev.filter((id) => id !== step));
-    backToOverview();
+      setHubSnapshot((prev) => {
+        const next = { ...prev };
+        if (step === 1) {
+          next.propertyName = propertyName.trim();
+        }
+        if (step === 2) {
+          next.listingTitle = listingTitle.trim();
+          next.bedroom = bedroom.trim();
+          next.sizeSqm = sizeSqm.trim();
+        }
+        if (step === 6) {
+          next.coverUri = photos[0]?.uri ?? null;
+        }
+        if (step === 7) {
+          // Hub preview keeps agent listingTitle; promo is edit-only.
+        }
+        return next;
+      });
+      setHubSaveHighlight((prev) => prev.filter((id) => id !== step));
+      backToOverview();
+    };
+
+    const hasPromo = promoTitle.trim().length > 0 || description.trim().length > 0;
+    const fingerprint = buildPromoFingerprint();
+    const sourceChanged =
+      step !== 7 &&
+      hasPromo &&
+      promoFingerprint != null &&
+      fingerprint !== promoFingerprint;
+
+    if (sourceChanged) {
+      Alert.alert(cr.promoStaleAlertTitle, cr.promoStaleAlertBody, [
+        {
+          text: cr.promoStaleKeep,
+          style: 'cancel',
+          onPress: () => {
+            setPromoStale(true);
+            applyDone();
+          },
+        },
+        {
+          text: cr.promoStaleEdit,
+          onPress: () => {
+            setPromoStale(true);
+            setHubSaveHighlight((prev) => prev.filter((id) => id !== step));
+            openSection(7);
+          },
+        },
+      ]);
+      return;
+    }
+
+    applyDone();
   };
 
   const sectionHasData = (current: number): boolean => {
     if (current === 1) return propertyName.trim().length > 0;
     if (current === 2) return listingTitle.trim().length > 0 || isFilledCount(bedroom);
     if (current === 3) return facilities.length > 0 || customFacilities.trim().length > 0;
-    if (current === 4) return nearbyPlaces.length > 0 || nearbyOther.trim().length > 0;
+    if (current === 4) return nearbyPlaces.length > 0;
     if (current === 5) return selectedContractTypeIds.length > 0;
     if (current === 6) return photoCount > 0;
-    if (current === 7) return description.trim().length > 0;
+    if (current === 7) return promoTitle.trim().length > 0 || description.trim().length > 0;
     if (current === 8) {
       if (roomContacts.length > 0) return true;
       return ownerName.trim().length > 0 && ownerPhone.trim().length > 0;
@@ -1355,6 +1551,11 @@ export const MobileCreateListingWizardBody: React.FC<
     if (current === 6) {
       return interpolate(cr.photosOptionalStatus, { count: photoCount });
     }
+    if (current === 7) {
+      if (promoStale) return cr.promoStaleBadge;
+      if (promoTitle.trim()) return promoTitle.trim();
+      return ov.sectionHints.details;
+    }
     if (current === 8) {
       if (roomContacts.length) {
         return roomContacts.map((c) => c.name).join(' · ');
@@ -1389,7 +1590,7 @@ export const MobileCreateListingWizardBody: React.FC<
       { step: 6, icon: 'camera', label: cr.steps.photos, optional: true },
       { step: 3, icon: 'sparkle', label: cr.steps.facilities },
       { step: 4, icon: 'map-pin', label: cr.steps.nearby },
-      { step: 7, icon: 'note', label: cr.detailsTitle },
+      { step: 7, icon: 'note', label: cr.detailsTitle, optional: true },
     ];
     return hubSteps.map((stepId) => {
       const def = defs.find((d) => d.step === stepId)!;
@@ -1482,7 +1683,12 @@ export const MobileCreateListingWizardBody: React.FC<
       .filter((id): id is number => id != null);
     const newContacts = roomContacts
       .filter((c) => c.id == null)
-      .map((c) => ({ name: c.name.trim(), phone: c.phone.trim() }));
+      .map((c) => ({
+        name: c.name.trim(),
+        phone: c.phone.trim(),
+        lineId: c.lineId?.trim() || undefined,
+        facebook: c.facebook?.trim() || undefined,
+      }));
     const contactPayload =
       roomContacts.length > 0
         ? {
@@ -1494,6 +1700,8 @@ export const MobileCreateListingWizardBody: React.FC<
               id: c.id,
               name: c.name,
               phone: c.phone,
+              lineId: c.lineId,
+              facebook: c.facebook,
               roomCount: c.roomCount,
             })),
           }
@@ -1504,6 +1712,8 @@ export const MobileCreateListingWizardBody: React.FC<
             contact: {
               name: ownerName.trim(),
               phone: ownerPhone.trim(),
+              lineId: ownerLine.trim() || undefined,
+              facebook: ownerFacebook.trim() || undefined,
               note: ownerOther.trim() || undefined,
             },
             selectedContacts: undefined,
@@ -1525,6 +1735,7 @@ export const MobileCreateListingWizardBody: React.FC<
       },
       ...contactPayload,
       listingTitle: listingTitle.trim(),
+      promoTitle: promoTitle.trim() || undefined,
       listingSourceCode: listingSourceCode as ListingSourceCode,
       roomTypeId: roomTypeId ?? undefined,
       roomId: roomId.trim() || undefined,
@@ -1540,13 +1751,15 @@ export const MobileCreateListingWizardBody: React.FC<
       depositMonths: depositMonths ?? SUGGESTED_DEPOSIT_MONTHS,
       layout,
       listingDescription: description.trim(),
-      availableFromDate: availableFrom || undefined,
-      nearbyOther: nearbyOther.trim(),
-      nearbyPlaces: latitude != null && longitude != null ? relocateNearby(nearbyPlaces, latitude, longitude) : nearbyPlaces,
+      availableFromDate: clampMoveInDate(availableFrom || todayIsoDate()),
+      nearbyPlaces: latitude != null && longitude != null
+        ? relocateNearby(nearbyPlaces, latitude, longitude)
+        : nearbyPlaces,
       customFacilities: [...new Set(customFacilities.split('\n').map((v) => v.trim()).filter(Boolean))],
       facilities,
       medias,
-      documents: documents.map((d, index) => ({ ...d, mediaUrl: d.mediaUrl.trim(), sortOrder: index })),
+      documents: [],
+      promoCopyStale: promoStale,
       isScoutRoom: true,
       latitude: latitude ?? undefined,
       longitude: longitude ?? undefined,
@@ -2285,6 +2498,19 @@ export const MobileCreateListingWizardBody: React.FC<
                   />
                 </>
               ) : null}
+              <MoveInDateField
+                label={cr.moveInDate}
+                value={availableFrom}
+                onChange={(iso) => {
+                  setAvailableFrom(clampMoveInDate(iso));
+                  clearFieldError('availableFrom');
+                }}
+                accentColor={accent}
+                locale={locale}
+                error={errors.availableFrom}
+                placeholder={cr.moveInDatePlaceholder}
+                closeLabel={t.common.cancel}
+              />
               </View>
             </>
           )}
@@ -2693,22 +2919,168 @@ export const MobileCreateListingWizardBody: React.FC<
             {!!errors.customFacilities && <Text style={styles.errorText}>{errors.customFacilities}</Text>}
           </>}
           {step === 4 && <>
-            <RoomNearbyEditor latitude={latitude} longitude={longitude} value={nearbyPlaces} onChange={(value) => { setNearbyPlaces(value); clearFieldError('nearbyPlaces'); }} search={searchNearby} apiKey={mapsApiKey} color={accent} error={errors.nearbyPlaces} />
-            <MobileInput label={cr.nearbyNotes} placeholder={cr.nearbyPlaceholder} value={nearbyOther} onChangeText={setNearbyOther} multiline maxLength={500} style={{ height: 100, textAlignVertical: 'top' }} />
+            <RoomNearbyEditor latitude={latitude} longitude={longitude} value={nearbyPlaces} onChange={(value) => { setNearbyPlaces(value); clearFieldError('nearbyPlaces'); }} search={searchNearby} apiKey={mapsApiKey} color={accent} error={errors.nearbyPlaces} propertyName={propertyName} address={address} />
           </>}
           {step === 7 && <>
-            <Text style={styles.hint}>{cr.detailsHint}</Text>
-            <MobileInput label={cr.listingDescription} value={description} onChangeText={setDescription} multiline maxLength={10000} style={{ height: 150, textAlignVertical: 'top' }} />
-            <MobileInput label={cr.availableFrom} placeholder="YYYY-MM-DD" value={availableFrom} onChangeText={setAvailableFrom} maxLength={10} error={errors.availableFrom} />
-            <Text style={styles.fieldLabel}>{cr.steps.documents}</Text>
-            <Text style={styles.hint}>{cr.documentLinksHint}</Text>
-            {documents.map((document, index) => <View key={index} style={styles.ownerCard}>
-              <View style={styles.typeRow}>{(['id_passport', 'bookbank', 'ownership', 'other'] as const).map((kind) => <Pressable key={kind} accessibilityRole="radio" accessibilityState={{ checked: document.kind === kind }} onPress={() => setDocuments((current) => current.map((d, i) => i === index ? { ...d, kind } : d))} style={[styles.typeChip, document.kind === kind && { backgroundColor: accent, borderColor: accent }]}><Text style={[styles.typeChipText, document.kind === kind && styles.typeChipTextSelected]}>{cr.documentKinds[kind]}</Text></Pressable>)}</View>
-              <MobileInput label={cr.documentUrl} placeholder="https://" autoCapitalize="none" value={document.mediaUrl} maxLength={500} onChangeText={(mediaUrl) => setDocuments((current) => current.map((d, i) => i === index ? { ...d, mediaUrl } : d))} />
-              <MobileButton variant="outline" onPress={() => setDocuments((current) => current.filter((_, i) => i !== index))}>{cr.removeDocument}</MobileButton>
-            </View>)}
-            {!!errors.documents && <Text style={styles.errorText}>{errors.documents}</Text>}
-            <MobileButton variant="outline" disabled={documents.length >= 20} onPress={() => setDocuments((current) => [...current, { kind: 'other', mediaUrl: '', sortOrder: current.length }])}>{cr.addDocumentLink}</MobileButton>
+            {promoStale ? (
+              <View style={styles.promoStaleBanner}>
+                <MobileIcon name="warning" size={18} color={tokens.colors.warning} />
+                <Text style={styles.promoStaleText}>{cr.promoStaleBadge}</Text>
+              </View>
+            ) : null}
+            {generateListingPromo ? (
+              <View style={styles.promoAssistCard}>
+                <View style={styles.promoAssistCopy}>
+                  <View style={styles.promoAssistHeading}>
+                    <MobileIcon name="sparkle" size={20} color={tokens.colors.brand[600]} />
+                    <Text style={styles.promoAssistTitle}>{cr.promoAssistTitle}</Text>
+                  </View>
+                  <Text style={styles.promoAssistHint}>{cr.promoAssistHint}</Text>
+                </View>
+                <MobileAiQuotaAction
+                  label={cr.promoDraftAction}
+                  remaining={promoRemaining}
+                  limit={MOCK_AI_PROMO_LIMIT}
+                  showQuota={false}
+                  loading={generatingPromo}
+                  disabled={generatingPromo || promoAiPhase !== 'closed'}
+                  style={styles.promoAssistBtn}
+                  onPress={async () => {
+                    if (generatingPromo || promoAiPhase !== 'closed' || !generateListingPromo) return;
+                    if (promoRemaining <= 0) {
+                      Alert.alert(cr.promoQuotaExhausted);
+                      return;
+                    }
+                    const abort = new AbortController();
+                    promoAbortRef.current = abort;
+                    setPromoDraft(null);
+                    setPromoAiPhase('generating');
+                    setGeneratingPromo(true);
+                    try {
+                      const facilityLabels = facilities.map((f) => t.masters.facilities[f.code] ?? f.code);
+                      const result = await generateListingPromo({
+                        locale,
+                        signal: abort.signal,
+                        listing: {
+                          propertyName: propertyName.trim(),
+                          address: address.trim(),
+                          district: district.trim(),
+                          province: province.trim(),
+                          subdistrict: subdistrict.trim(),
+                          roomId: roomId.trim() || undefined,
+                          floor: floor.trim() || undefined,
+                          building: building.trim() || undefined,
+                          bedroom: bedroom.trim() || undefined,
+                          bathroom: bathroom.trim() || undefined,
+                          sizeSqm: sizeSqm.trim() || undefined,
+                          roomTypeCode: selectedRoomType?.code,
+                          facilityLabels,
+                          customFacilities: customFacilities.split('\n').map((v) => v.trim()).filter(Boolean),
+                          nearbyPlaces: nearbyPlaces.map((p) => ({
+                            name: p.name,
+                            distanceMeters: p.distanceMeters,
+                            type: p.type,
+                          })),
+                          prices: selectedContractTypeIds.map((id) => {
+                            const opt = contractTypes.find((c) => c.id === id);
+                            return {
+                              contractTypeCode: opt?.code,
+                              termMonths: opt?.termMonths,
+                              price: Number(rentsByTypeId[String(id)]) || undefined,
+                              advanceRentMonths: leaseTerms(id).advanceRentMonths,
+                              depositMonths: leaseTerms(id).depositMonths,
+                            };
+                          }),
+                          availableFromDate: availableFrom || undefined,
+                        },
+                      });
+                      if (abort.signal.aborted || promoAbortRef.current !== abort) return;
+                      setPromoDraft({
+                        listingTitle: result.listingTitle.trim(),
+                        listingDescription: result.listingDescription.trim(),
+                      });
+                      setPromoAiPhase('ready');
+                      setPromoRemaining((n) => Math.max(0, n - 1));
+                    } catch (err) {
+                      if (abort.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+                        return;
+                      }
+                      if (promoAbortRef.current !== abort) return;
+                      setPromoAiPhase('closed');
+                      setPromoDraft(null);
+                      const message = err instanceof Error ? err.message : String(err);
+                      Alert.alert(cr.generatePromoError, message);
+                    } finally {
+                      if (promoAbortRef.current === abort) {
+                        promoAbortRef.current = null;
+                        setGeneratingPromo(false);
+                      }
+                    }
+                  }}
+                />
+              </View>
+            ) : null}
+            <View style={styles.promoFields}>
+              <View style={styles.promoFieldBlock}>
+                <View style={styles.promoLabelRow}>
+                  <Text style={styles.promoFieldLabel}>
+                    {cr.promoListingTitle}
+                    <Text style={styles.promoRequired}> *</Text>
+                  </Text>
+                  <Text
+                    style={[
+                      styles.promoCounter,
+                      promoTitle.length > PROMO_TITLE_MAX ? styles.promoCounterOver : null,
+                    ]}
+                  >
+                    {promoTitle.length}/{PROMO_TITLE_MAX}
+                  </Text>
+                </View>
+                <MobileInput
+                  placeholder={cr.promoTitlePlaceholder}
+                  value={promoTitle}
+                  editable={!generatingPromo}
+                  onChangeText={(v) => {
+                    setPromoTitle(v);
+                    clearFieldError('promoTitle');
+                  }}
+                  error={errors.promoTitle}
+                  helperText={cr.promoListingTitleHint}
+                />
+              </View>
+              <View style={styles.promoFieldBlock}>
+                <View style={styles.promoLabelRow}>
+                  <Text style={styles.promoFieldLabel}>{cr.listingDescription}</Text>
+                  <Text
+                    style={[
+                      styles.promoCounter,
+                      description.length > PROMO_DESC_MAX ? styles.promoCounterOver : null,
+                    ]}
+                  >
+                    {description.length}/{PROMO_DESC_MAX}
+                  </Text>
+                </View>
+                <MobileInput
+                  value={description}
+                  placeholder={cr.promoDescriptionPlaceholder}
+                  editable={!generatingPromo}
+                  onChangeText={setDescription}
+                  multiline
+                  style={{ minHeight: 140, textAlignVertical: 'top' }}
+                />
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setPromoPreviewOpen(true)}
+                hitSlop={8}
+                style={styles.promoPreviewLink}
+              >
+                <MobileIcon name="note" size={16} color={tokens.colors.accent} />
+                <Text style={styles.promoPreviewLinkText}>{cr.promoPreviewListing}</Text>
+                <MobileIcon name="chevron-right" size={16} color={tokens.colors.accent} />
+              </Pressable>
+            </View>
           </>}
           {step === 8 && (
             <>
@@ -2786,6 +3158,20 @@ export const MobileCreateListingWizardBody: React.FC<
                       clearFieldError('ownerPhone');
                     }}
                     error={errors.ownerPhone}
+                  />
+                  <MobileInput
+                    label={cr.contactLine}
+                    placeholder={cr.contactLinePlaceholder}
+                    value={ownerLine}
+                    onChangeText={setOwnerLine}
+                    autoCapitalize="none"
+                  />
+                  <MobileInput
+                    label={cr.contactFacebook}
+                    placeholder={cr.contactFacebookPlaceholder}
+                    value={ownerFacebook}
+                    onChangeText={setOwnerFacebook}
+                    autoCapitalize="none"
                   />
                 </>
               )}
@@ -3072,6 +3458,20 @@ export const MobileCreateListingWizardBody: React.FC<
                 }
                 helperText={cr.ownerPhoneMatchHint}
               />
+              <MobileInput
+                label={cr.contactLine}
+                placeholder={cr.contactLinePlaceholder}
+                value={draftOwnerLine}
+                onChangeText={setDraftOwnerLine}
+                autoCapitalize="none"
+              />
+              <MobileInput
+                label={cr.contactFacebook}
+                placeholder={cr.contactFacebookPlaceholder}
+                value={draftOwnerFacebook}
+                onChangeText={setDraftOwnerFacebook}
+                autoCapitalize="none"
+              />
               {matchedOwnerByPhone ? (
                 <View style={styles.ownerMatchBox}>
                   <Text style={styles.ownerCardName}>{cr.ownerFoundExisting}</Text>
@@ -3177,6 +3577,152 @@ export const MobileCreateListingWizardBody: React.FC<
             />
           </>
         )}
+      </MobileBottomSheet>
+
+      <Modal
+        visible={promoPreviewOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPromoPreviewOpen(false)}
+      >
+        <Pressable style={styles.promoModalBackdrop} onPress={() => setPromoPreviewOpen(false)}>
+          <Pressable style={styles.promoModalCard} onPress={() => {}}>
+            <View style={styles.promoModalHeader}>
+              <Text style={styles.promoModalTitle}>{cr.promoListingPreview}</Text>
+              <Pressable onPress={() => setPromoPreviewOpen(false)} hitSlop={10}>
+                <MobileIcon name="close" size={20} color={tokens.colors.textHeading} />
+              </Pressable>
+            </View>
+            <ScrollView
+              style={styles.promoModalScroll}
+              contentContainerStyle={styles.promoModalScrollContent}
+              showsVerticalScrollIndicator
+            >
+              {photos[0]?.uri ? (
+                <Image
+                  source={{ uri: photos[0].uri, cache: 'reload' }}
+                  style={styles.promoModalCover}
+                />
+              ) : null}
+              <Text style={styles.promoModalListingTitle}>
+                {promoTitle.trim() || cr.promoPreviewEmpty}
+              </Text>
+              <Text style={styles.promoModalListingDesc}>
+                {description.trim() || cr.promoPreviewEmptyDesc}
+              </Text>
+            </ScrollView>
+            <MobileButton onPress={() => setPromoPreviewOpen(false)}>
+              {cr.promoPreviewBack}
+            </MobileButton>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <MobileBottomSheet
+        visible={promoAiPhase !== 'closed'}
+        onClose={() => {
+          if (promoAiPhase === 'generating') {
+            promoAbortRef.current?.abort();
+            promoAbortRef.current = null;
+            setGeneratingPromo(false);
+          }
+          setPromoAiPhase('closed');
+          setPromoDraft(null);
+        }}
+        closeOnBackdropPress={promoAiPhase !== 'generating'}
+      >
+        <View style={styles.promoDraftSheet}>
+          <Text style={styles.promoDraftSheetChrome}>{cr.promoDraftReviewTitle}</Text>
+          <View style={styles.promoHatchWrap}>
+            <MobileNestykHatchLoader
+              mode={promoAiPhase === 'ready' ? 'success' : 'idle'}
+              size={96}
+              accessibilityLabel={
+                promoAiPhase === 'ready' ? cr.promoDraftReadyTitle : cr.promoDraftHatchingTitle
+              }
+            />
+          </View>
+          <Text style={styles.promoDraftSheetTitle}>
+            {promoAiPhase === 'ready' ? cr.promoDraftReadyTitle : cr.promoDraftHatchingTitle}
+          </Text>
+          <Text style={styles.promoDraftSheetHint}>
+            {promoAiPhase === 'ready' ? cr.promoDraftReadyHint : cr.promoDraftHatchingHint}
+          </Text>
+
+          {promoAiPhase === 'generating' ? (
+            <>
+              <View style={styles.promoSkeletonBlock}>
+                <View style={styles.promoSkeletonLabel} />
+                <View style={[styles.promoSkeletonLine, { width: '88%' }]} />
+              </View>
+              <View style={styles.promoSkeletonBlock}>
+                <View style={styles.promoSkeletonLabel} />
+                <View style={[styles.promoSkeletonLine, { width: '100%' }]} />
+                <View style={[styles.promoSkeletonLine, { width: '94%' }]} />
+                <View style={[styles.promoSkeletonLine, { width: '72%' }]} />
+              </View>
+              <MobileButton
+                variant="outline"
+                onPress={() => {
+                  promoAbortRef.current?.abort();
+                  promoAbortRef.current = null;
+                  setGeneratingPromo(false);
+                  setPromoAiPhase('closed');
+                  setPromoDraft(null);
+                }}
+              >
+                {cr.promoDraftCancel}
+              </MobileButton>
+            </>
+          ) : (
+            <>
+              {promoDraft &&
+              (promoDraft.listingTitle.length > PROMO_TITLE_MAX ||
+                promoDraft.listingDescription.length > PROMO_DESC_MAX) ? (
+                <Text style={styles.promoDraftWarn}>{cr.promoDraftOverLimit}</Text>
+              ) : null}
+              <ScrollView
+                style={styles.promoDraftScroll}
+                contentContainerStyle={{ gap: 12, paddingBottom: 8 }}
+                showsVerticalScrollIndicator
+              >
+                <Text style={styles.promoDraftLabel}>{cr.promoListingTitle}</Text>
+                <Text style={styles.promoDraftBody}>
+                  {promoDraft?.listingTitle || '—'}
+                </Text>
+                <Text style={styles.promoDraftLabel}>{cr.listingDescription}</Text>
+                <Text style={styles.promoDraftBody}>
+                  {promoDraft?.listingDescription || '—'}
+                </Text>
+              </ScrollView>
+              <MobileButton
+                onPress={() => {
+                  if (!promoDraft) return;
+                  const titleFit = softFitText(promoDraft.listingTitle, PROMO_TITLE_MAX);
+                  const descFit = softFitText(promoDraft.listingDescription, PROMO_DESC_MAX);
+                  setPromoTitle(titleFit.text);
+                  setDescription(descFit.text);
+                  setPromoFingerprint(buildPromoFingerprint());
+                  setPromoStale(false);
+                  clearFieldError('promoTitle');
+                  setPromoAiPhase('closed');
+                  setPromoDraft(null);
+                }}
+              >
+                {cr.promoDraftUse}
+              </MobileButton>
+              <MobileButton
+                variant="outline"
+                onPress={() => {
+                  setPromoAiPhase('closed');
+                  setPromoDraft(null);
+                }}
+              >
+                {cr.promoDraftKeep}
+              </MobileButton>
+            </>
+          )}
+        </View>
       </MobileBottomSheet>
 
       <Modal
@@ -3840,6 +4386,231 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     fontWeight: '700',
+  },
+  promoAssistCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  promoAssistCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  promoAssistHeading: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  promoAssistTitle: {
+    flexShrink: 1,
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: tokens.colors.textHeading,
+    marginLeft: 4,
+  },
+  promoAssistHint: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+  },
+  promoAssistBtn: {
+    flexShrink: 0,
+    minWidth: 112,
+  },
+  promoFields: {
+    gap: 16,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+  },
+  promoFieldBlock: { gap: 6 },
+  promoLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  promoFieldLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 23,
+    fontWeight: '600',
+    color: tokens.colors.textHeading,
+  },
+  promoRequired: {
+    color: tokens.colors.error,
+    fontWeight: '700',
+  },
+  promoCounter: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+  },
+  promoCounterOver: {
+    color: tokens.colors.error,
+    fontWeight: '700',
+  },
+  promoPreviewLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+  },
+  promoPreviewLinkText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+    color: tokens.colors.accent,
+  },
+  promoModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  promoModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    gap: 12,
+    maxHeight: '85%',
+  },
+  promoModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  promoModalTitle: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: tokens.colors.textHeading,
+  },
+  promoModalScroll: {
+    flexGrow: 0,
+    maxHeight: 420,
+  },
+  promoModalScrollContent: {
+    gap: 12,
+    paddingBottom: 4,
+  },
+  promoModalCover: {
+    width: '100%',
+    height: 160,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+  },
+  promoModalListingTitle: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 17,
+    lineHeight: 26,
+    fontWeight: '700',
+    color: tokens.colors.textHeading,
+  },
+  promoModalListingDesc: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
+  },
+  promoDraftSheet: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  promoDraftSheetChrome: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: tokens.colors.textHeading,
+    textAlign: 'center',
+  },
+  promoHatchWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  promoDraftSheetTitle: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 17,
+    lineHeight: 26,
+    fontWeight: '700',
+    color: tokens.colors.textHeading,
+    textAlign: 'center',
+  },
+  promoDraftSheetHint: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  promoSkeletonBlock: {
+    gap: 8,
+    marginBottom: 4,
+  },
+  promoSkeletonLabel: {
+    width: 72,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#E5E7EB',
+  },
+  promoSkeletonLine: {
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#EEF2F7',
+  },
+  promoDraftWarn: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    color: tokens.colors.warning,
+  },
+  promoDraftScroll: {
+    maxHeight: 280,
+  },
+  promoDraftLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: tokens.colors.textSecondary,
+  },
+  promoDraftBody: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 15,
+    lineHeight: 23,
+    color: tokens.colors.textHeading,
+  },
+  promoStaleBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  promoStaleText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 20,
+    color: tokens.colors.textHeading,
   },
   hint: {
     fontFamily: tokens.typography.native.body,

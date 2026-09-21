@@ -16,6 +16,7 @@
     "test:agent-tenants": "node --test test/agent-tenants.test.cjs test/agent-contracts.test.cjs test/agent-contract-documents.test.cjs test/agent-contract-sign.test.cjs test/agreement-attachments.test.cjs test/agreement-sign-invites.test.cjs test/financial-documents.test.cjs"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",

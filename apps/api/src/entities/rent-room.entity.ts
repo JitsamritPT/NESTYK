@@ -29,6 +29,9 @@ export class RentRoomEntity extends SerialTimestampEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   listing_title: string | null;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  promo_title: string | null;
+
   @Column({ type: 'text', nullable: true })
   listing_description: string | null;
 

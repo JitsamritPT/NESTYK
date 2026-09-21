@@ -1,5 +1,12 @@
 import type { NearbyPlace } from '@nestyk/types';
-import { NEARBY_TYPES, validCoordinates, distanceMeters } from './nearby-places';
+import {
+  NEARBY_TYPES,
+  validCoordinates,
+  distanceMeters,
+  formatTransitPlaceName,
+  mergeNearbyPlaces,
+  isMinorTransitPlace,
+} from './nearby-places';
 import {
   BadGatewayException,
   BadRequestException,
@@ -68,6 +75,22 @@ type GoogleErrorBody = {
 
 const AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
 const TEXT_SEARCH_URL = 'https://places.googleapis.com/v1/places:searchText';
+const NEARBY_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
+
+type LegacyNearbyResult = {
+  place_id?: string;
+  name?: string;
+  vicinity?: string;
+  business_status?: string;
+  user_ratings_total?: number;
+  geometry?: { location?: { lat?: number; lng?: number } };
+};
+
+type LegacyNearbyResponse = {
+  status?: string;
+  error_message?: string;
+  results?: LegacyNearbyResult[];
+};
 
 function componentAll(components: GoogleAddressComponent[], type: string): string {
   const match = components.find((item) => item.types?.includes(type));
@@ -200,24 +223,49 @@ export class AgentPlacesService {
 
   async nearby(latitude: number, longitude: number, language: string): Promise<{ places: NearbyPlace[] }> {
     if (!validCoordinates(latitude, longitude)) throw new BadRequestException('Valid latitude and longitude required');
+    const lang = (language || 'th').trim() || 'th';
     const results = await Promise.all(NEARBY_TYPES.map(async ({ type, radius, limit }) => {
-      const data = await this.googlePost<{ places?: Array<{
-        id?: string; displayName?: { text?: string }; location?: { latitude?: number; longitude?: number };
-        formattedAddress?: string; userRatingCount?: number;
-      }> }>('https://places.googleapis.com/v1/places:searchNearby', {
-        includedTypes: [type], maxResultCount: 20, rankPreference: 'DISTANCE', languageCode: language,
-        locationRestriction: { circle: { center: { latitude, longitude }, radius } },
-      }, 'places.id,places.displayName,places.location,places.formattedAddress' + (type === 'park' ? ',places.userRatingCount' : ''));
-      return (data.places ?? []).filter((p) => p.id && p.displayName?.text && validCoordinates(p.location?.latitude, p.location?.longitude) && (type !== 'park' || (p.userRatingCount ?? 0) >= 120))
-        .map((p): NearbyPlace => ({ placeId: p.id!, name: p.displayName!.text!, type,
-          latitude: p.location!.latitude!, longitude: p.location!.longitude!,
-          distanceMeters: distanceMeters(latitude, longitude, p.location!.latitude!, p.location!.longitude!),
-          vicinity: p.formattedAddress,
-        })).filter((p) => p.distanceMeters <= radius).sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, limit);
+      const params = new URLSearchParams({
+        location: `${latitude},${longitude}`,
+        radius: String(radius),
+        type,
+        language: lang,
+        key: this.apiKey(),
+      });
+      const data = await this.googleLegacyNearby(`${NEARBY_SEARCH_URL}?${params}`);
+
+      return (data.results ?? [])
+        .filter((p) => {
+          const placeId = p.place_id?.trim();
+          const name = p.name?.trim();
+          const lat = p.geometry?.location?.lat;
+          const lng = p.geometry?.location?.lng;
+          if (!placeId || !name || !validCoordinates(lat, lng)) return false;
+          if (p.business_status === 'CLOSED_PERMANENTLY') return false;
+          if (type === 'park' && (p.user_ratings_total ?? 0) < 120) return false;
+          if (isMinorTransitPlace(name, p.vicinity)) return false;
+          return true;
+        })
+        .map((p): NearbyPlace => {
+          const lat = p.geometry!.location!.lat!;
+          const lng = p.geometry!.location!.lng!;
+          const rawName = p.name!.trim();
+          const vicinity = p.vicinity?.trim() || undefined;
+          return {
+            placeId: p.place_id!.trim(),
+            name: formatTransitPlaceName(rawName, type, vicinity),
+            type,
+            latitude: lat,
+            longitude: lng,
+            distanceMeters: distanceMeters(latitude, longitude, lat, lng),
+            vicinity,
+          };
+        })
+        .filter((p) => p.distanceMeters <= radius)
+        .sort((a, b) => a.distanceMeters - b.distanceMeters)
+        .slice(0, limit);
     }));
-    const seen = new Set<string>();
-    return { places: results.flat().filter((p) => { if (seen.has(p.placeId)) return false; seen.add(p.placeId); return true; })
-      .sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 24) };
+    return { places: mergeNearbyPlaces(results.flat()) };
   }
 
   async autocomplete(query: string, language: string): Promise<{ suggestions: PlaceSuggestion[] }> {
@@ -348,6 +396,23 @@ export class AgentPlacesService {
       throw new ServiceUnavailableException('GOOGLE_MAPS_API_KEY is not configured');
     }
     return key;
+  }
+
+  private async googleLegacyNearby(url: string): Promise<LegacyNearbyResponse> {
+    const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    const payload = (await response.json().catch(() => ({}))) as LegacyNearbyResponse;
+    if (!response.ok) {
+      const message = payload.error_message?.trim() || 'Google Places nearby search failed';
+      this.logger.warn(`Google Places Legacy nearby ${response.status}: ${message}`);
+      throw new BadGatewayException(message);
+    }
+    const status = payload.status || '';
+    if (status === 'OK' || status === 'ZERO_RESULTS') {
+      return payload;
+    }
+    const message = payload.error_message?.trim() || `Google Places nearby search failed (${status || 'UNKNOWN'})`;
+    this.logger.warn(`Google Places Legacy nearby status ${status}: ${message}`);
+    throw new BadGatewayException(message);
   }
 
   private async googlePost<T>(url: string, body: unknown, fieldMask: string): Promise<T> {

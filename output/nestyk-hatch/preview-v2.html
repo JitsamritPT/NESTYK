@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="th">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NESTYK Hatch v2</title>
+<style>
+  body {
+    font: 16px system-ui, sans-serif;
+    background: #f7f8fa;
+    color: #182e4d;
+    margin: 0;
+    padding: 32px;
+  }
+  main {
+    max-width: 920px;
+    margin: auto;
+  }
+  h1 {
+    font-size: 24px;
+    margin: 0 0 8px;
+  }
+  .lead {
+    line-height: 1.7;
+    color: #64748b;
+    margin: 0 0 24px;
+  }
+  .stage {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 24px;
+    padding: 28px;
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .stage img {
+    width: 100%;
+    max-width: 280px;
+    height: auto;
+    display: block;
+    margin: 0 auto 12px;
+  }
+  .label {
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .meta {
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0 0 16px;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+  }
+  button {
+    padding: 12px 18px;
+    background: #f8b615;
+    border: 0;
+    border-radius: 12px;
+    font: inherit;
+    font-weight: 600;
+    color: #211e1e;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: #fff;
+    border: 1.5px solid #f8b615;
+  }
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .note {
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .card {
+    flex: 1;
+    min-width: 240px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 20px;
+    padding: 20px;
+    text-align: center;
+  }
+  .card img {
+    width: 100%;
+    max-width: 200px;
+  }
+</style>
+<main>
+  <h1>NESTYK · Hatch v2</h1>
+  <p class="lead">
+    แอนิเมชันต้นแบบ — Idle วน 5.6s · Success ฟักครั้งเดียวแล้วค้าง + ประกายวน · ไฟล์เดิมยังเก็บไว้
+  </p>
+
+  <section class="stage">
+    <div class="label" id="stateLabel">Idle · กำลังรอ</div>
+    <p class="meta" id="stateMeta">ไข่เต็มใบ → ร้าว → แอบมอง → ปิด → เริ่มใหม่</p>
+    <img id="anim" src="nestyk-egg-idle-v2.svg" width="280" height="280" alt="NESTYK hatch animation" />
+    <div class="row">
+      <button type="button" id="btnIdle">เริ่มรอ (Idle)</button>
+      <button type="button" id="btnSuccess" class="secondary">จำลองสำเร็จ</button>
+      <button type="button" id="btnReplay" class="secondary">เล่นใหม่</button>
+    </div>
+    <p class="note" style="margin-top: 16px">
+      ทดลองกด «จำลองสำเร็จ» ตอนต้น / กลาง / ท้ายลูป Idle เพื่อตรวจการเปลี่ยนสถานะ
+    </p>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Idle แยกไฟล์</h2>
+      <img src="nestyk-egg-idle-v2.svg" alt="Idle loop" />
+      <p class="meta">5.6s infinite</p>
+    </section>
+    <section class="card">
+      <h2>Success แยกไฟล์</h2>
+      <img src="nestyk-egg-hatch-v2.svg" alt="Success hatch" />
+      <p class="meta">ฟักครั้งเดียว · ประกาย infinite</p>
+    </section>
+  </div>
+
+  <p class="note">
+    Reduce Motion = ภาพนิ่ง · v1 ยังอยู่ที่ nestyk-egg-idle.svg / nestyk-egg-hatch.svg / preview.html
+  </p>
+</main>
+<script>
+  const anim = document.getElementById('anim');
+  const label = document.getElementById('stateLabel');
+  const meta = document.getElementById('stateMeta');
+  let mode = 'idle';
+
+  function bust(src) {
+    return src + '?t=' + Date.now();
+  }
+
+  function setIdle() {
+    mode = 'idle';
+    label.textContent = 'Idle · กำลังรอ';
+    meta.textContent = 'ไข่เต็มใบ → ร้าว → แอบมอง → ปิด → เริ่มใหม่';
+    anim.src = bust('nestyk-egg-idle-v2.svg');
+    anim.alt = 'Idle loop';
+  }
+
+  function setSuccess() {
+    mode = 'success';
+    label.textContent = 'Success · สร้างเสร็จ';
+    meta.textContent = 'ฟักครั้งเดียว แล้วค้างเป็นนกเต็มตัว · ประกายกระพริบต่อเนื่อง';
+    anim.src = bust('nestyk-egg-hatch-v2.svg');
+    anim.alt = 'Success hatch';
+  }
+
+  function replay() {
+    if (mode === 'success') setSuccess();
+    else setIdle();
+  }
+
+  document.getElementById('btnIdle').addEventListener('click', setIdle);
+  document.getElementById('btnSuccess').addEventListener('click', setSuccess);
+  document.getElementById('btnReplay').addEventListener('click', replay);
+</script>
+</html>

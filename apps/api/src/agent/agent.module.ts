@@ -10,6 +10,7 @@ import { LeadEntity } from '../entities/lead.entity';
 import { AgentLeadsService } from './leads/agent-leads.service';
 import { AgentLeadsController } from './leads/agent-leads.controller';
 import { RoomPhotoStorageService } from './rooms/room-photo-storage.service';
+import { ListingPromoService } from './rooms/listing-promo.service';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
@@ -38,10 +39,12 @@ import { AgentListingsController } from './listings/agent-listings.controller';
 import { AgentListingsService } from './listings/agent-listings.service';
 import { AgentPlacesController } from './places/agent-places.controller';
 import { AgentPlacesService } from './places/agent-places.service';
+import { GeminiModule } from '../gemini/gemini.module';
 
 @Module({
   imports: [
     AuthModule,
+    GeminiModule,
     TypeOrmModule.forFeature([
       LeadEntity,
       PropertyEntity,
@@ -66,7 +69,7 @@ import { AgentPlacesService } from './places/agent-places.service';
     ]),
   ],
   controllers: [AgreementAttachmentsController, AgentTenantsController, AgentContractsController, PublicContractSignController, AgentLeadsController, AgentRoomsController, AgentListingsController, AgentPlacesController],
-  providers: [AgreementAttachmentsService, AgentTenantsService, AgentContractsService, ContractDocumentStorageService, AgentLeadsService, RoomPhotoStorageService, AgentRoomsService, AgentListingsService, AgentPlacesService],
+  providers: [AgreementAttachmentsService, AgentTenantsService, AgentContractsService, ContractDocumentStorageService, AgentLeadsService, RoomPhotoStorageService, ListingPromoService, AgentRoomsService, AgentListingsService, AgentPlacesService],
   exports: [AgentRoomsService, AgentListingsService, AgentPlacesService],
 })
 export class AgentModule {}
