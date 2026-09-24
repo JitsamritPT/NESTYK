@@ -17,7 +17,7 @@ test('validates required identity/contact fields and optional email without acce
   assert.equal(validateTenant({ ...valid, email: '', note: undefined }).email, '');
 });
 function fixture(options = {}) {
-  const saved = []; const lead = { id: 1, name: 'Original lead', phone: '0899999999', status: 'viewed', tenant_id: null, ...options.lead };
+  const saved = []; const lead = { id: 1, name: 'Original lead', phone: '0899999999', status: 'inprogress', tenant_id: null, ...options.lead };
   const manager = {
     findOne: async (_, query) => { assert.equal(query.where.created_by_user_id, 7); assert.equal(query.lock.mode, 'pessimistic_write'); return options.foreignLead ? null : lead; },
     findOneBy: async (entity, query) => { if (entity === TenantEntity) return options.existingTenant ? { id: 8 } : null; assert.equal(query.created_by_user_id, 7); return options.foreignRoom ? null : { id: 2 }; },
@@ -39,7 +39,7 @@ test('rejects duplicate promotion, lost leads, and another agent’s records wit
   }
 });
 test('failed Lead update rolls back tenant creation', async () => {
-  const f = fixture({ failLeadSave: true }); await assert.rejects(() => f.service.create(7, valid), /save failed/); assert.equal(f.saved.length, 0); assert.equal(f.lead.tenant_id, null); assert.equal(f.lead.status, 'viewed');
+  const f = fixture({ failLeadSave: true }); await assert.rejects(() => f.service.create(7, valid), /save failed/); assert.equal(f.saved.length, 0); assert.equal(f.lead.tenant_id, null); assert.equal(f.lead.status, 'inprogress');
 });
 test('lists tenants without contracts and groups contracts by tenant id, never name', async () => {
   const calls = []; const qb = {}; for (const k of ['leftJoinAndSelect', 'where', 'andWhere', 'orderBy']) qb[k] = (...args) => { calls.push([k, ...args]); return qb; };

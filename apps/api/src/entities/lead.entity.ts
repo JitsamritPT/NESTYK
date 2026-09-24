@@ -8,7 +8,7 @@ import { TenantEntity } from './tenant.entity';
 
 export type LeadContactChannel = { channel: string; value: string };
 
-export type LeadStatus = 'new' | 'inprogress' | 'viewed' | 'lost' | 'booked';
+export type LeadStatus = 'new' | 'inprogress' | 'lost' | 'booked';
 
 @Entity({ name: 'leads' })
 export class LeadEntity extends SerialTimestampEntity {

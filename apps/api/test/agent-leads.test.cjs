@@ -1,9 +1,9 @@
 const { test }=require('node:test');const assert=require('node:assert/strict');const ts=require('typescript');require('reflect-metadata');
 require.extensions['.ts']=(module,filename)=>module._compile(ts.transpileModule(require('node:fs').readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true,emitDecoratorMetadata:true,esModuleInterop:true},fileName:filename}).outputText,filename);
-const {AgentLeadsService,validateLead}=require('../src/agent/leads/agent-leads.service.ts');const {AgentLeadsController}=require('../src/agent/leads/agent-leads.controller.ts');const {AuthService}=require('../src/auth/auth.service.ts');const {Module}=require('@nestjs/common');const {NestFactory}=require('@nestjs/core');
+const {AgentLeadsService,validateLead,normalizeLeadSort}=require('../src/agent/leads/agent-leads.service.ts');const {AgentLeadsController}=require('../src/agent/leads/agent-leads.controller.ts');const {AuthService}=require('../src/auth/auth.service.ts');const {Module}=require('@nestjs/common');const {NestFactory}=require('@nestjs/core');
 test('lead validation requires name/phone and preserves unknown versus false',()=>{
  const value=validateLead({province:'กรุงเทพมหานคร',name:'  A  ',phone:' 123 ',hasPets:false});assert.equal(value.name,'A');assert.equal(value.hasPets,false);assert.equal(value.usesCar,null);
- for(const patch of [{province:'กรุงเทพมหานคร',name:''},{phone:5},{budgetMin:-1},{budgetMax:Infinity},{budgetMin:200,budgetMax:100},{budgetMax:0},{occupantCount:0},{leaseDurationMonths:1.5},{visaTypeId:0},{hasPets:'false'},{nationality:[]},{budgetMax:1.111}])assert.throws(()=>validateLead({province:'กรุงเทพมหานคร',name:'A',phone:'123',...patch}));
+ for(const patch of [{province:'กรุงเทพมหานคร',name:''},{phone:5},{budgetMin:-1},{budgetMax:Infinity},{budgetMin:200,budgetMax:100},{budgetMax:0},{occupantCount:0},{leaseDurationMonths:1.5},{visaTypeId:0},{hasPets:'false'},{nationality:[]},{budgetMax:1.111},{notes:'x'.repeat(501)},{notes:5}])assert.throws(()=>validateLead({province:'กรุงเทพมหานคร',name:'A',phone:'123',...patch}));
  assert.equal(validateLead({province:'กรุงเทพมหานคร',name:'A',phone:'123',status:'booked'}).status,undefined);
 });
 test('lead HTTP API saves profile, rejects invalid catalogs and scopes reads to current agent',async(t)=>{
@@ -26,13 +26,18 @@ test('lead HTTP API saves profile, rejects invalid catalogs and scopes reads to 
  const provinceOnly=await post({province:'เชียงใหม่',name:'Province only',phone:'123'});assert.equal(provinceOnly.status,201);assert.deepEqual((await provinceOnly.json()).locations,[]);saved.length=0;
  const visas=await fetch(base+'/api/v1/agent/leads/visa-types',{headers:headers(7)});assert.equal(visas.status,200);assert.equal((await visas.json())[0].code,'tourist');
  assert.equal((await fetch(base+'/api/v1/agent/leads/visa-types',{headers:headers(8)})).status,403);
- const input={locationName:'BTS Asok',locationPlaceId:'test-place',latitude:13.737,longitude:100.56,radiusKm:3,locations:['วัฒนา','คลองเตย'],province:'กรุงเทพมหานคร',name:'Test lead',phone:'TEST',nationality:'Test',budgetMin:10000,budgetMax:15000,preferredLocation:'Test location',moveInPlan:'Next month',hasPets:false,occupation:'Test occupation',visaTypeId:1,leaseDurationMonths:12,usesCar:true,occupantCount:2,isSmoker:false,desiredRoomTypeId:1};
+ const input={locationName:'BTS Asok',locationPlaceId:'test-place',latitude:13.737,longitude:100.56,radiusKm:3,locations:['วัฒนา','คลองเตย'],province:'กรุงเทพมหานคร',name:'Test lead',phone:'TEST',nationality:'Test',budgetMin:10000,budgetMax:15000,preferredLocation:'Test location',moveInPlan:'Next month',hasPets:false,occupation:'Test occupation',visaTypeId:1,leaseDurationMonths:12,usesCar:true,occupantCount:2,isSmoker:false,desiredRoomTypeId:1,notes:'Call after 6pm'};
  const response=await post({...input,created_by_user_id:9,status:'booked'});assert.equal(response.status,201);const lead=await response.json();for(const [key,value]of Object.entries(input))assert.deepEqual(lead[key],value,key);assert.equal(lead.visaTypeCode,'tourist');assert.equal(lead.status,'new');assert.equal(saved[0].created_by_user_id,7);assert.equal(saved[0].rent_room_id,null);
  assert.equal((await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(9)})).status,404);
- const firstView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});assert.equal(firstView.status,200);const viewed=await firstView.json();assert.equal(viewed.status,'viewed');assert.equal(saved[0].status,'viewed');assert.ok(saved[0].viewed_at);
- const secondView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});assert.equal((await secondView.json()).status,'viewed');
- saved[0].status='booked';saved[0].viewed_at=new Date('2020-01-01');
- const bookedView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});const booked=await bookedView.json();assert.equal(booked.status,'booked');assert.equal(new Date(saved[0].viewed_at).toISOString(),'2020-01-01T00:00:00.000Z');
+ const firstView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});assert.equal(firstView.status,200);const opened=await firstView.json();assert.equal(opened.status,'new');assert.equal(saved[0].status,'new');
+ const markProgress=await fetch(base+'/api/v1/agent/leads/'+lead.id+'/mark-inprogress',{method:'POST',headers:headers(7),body:'{}'});assert.equal(markProgress.status,201);const inProgress=await markProgress.json();assert.equal(inProgress.status,'inprogress');assert.equal(saved[0].status,'inprogress');
+ const markLostBad=await fetch(base+'/api/v1/agent/leads/'+lead.id+'/mark-lost',{method:'POST',headers:headers(7),body:JSON.stringify({lostReason:'  '})});assert.equal(markLostBad.status,400);
+ const markLost=await fetch(base+'/api/v1/agent/leads/'+lead.id+'/mark-lost',{method:'POST',headers:headers(7),body:JSON.stringify({lostReason:'Chose another place'})});assert.equal(markLost.status,201);const lost=await markLost.json();assert.equal(lost.status,'lost');assert.equal(lost.lostReason,'Chose another place');
+ const reopen=await fetch(base+'/api/v1/agent/leads/'+lead.id+'/mark-inprogress',{method:'POST',headers:headers(7),body:'{}'});assert.equal(reopen.status,201);assert.equal((await reopen.json()).status,'inprogress');assert.equal(saved[0].lost_reason,null);
+ saved[0].status='booked';saved[0].lost_reason=null;
+ const bookedView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});assert.equal((await bookedView.json()).status,'booked');
+ assert.equal((await fetch(base+'/api/v1/agent/leads/'+lead.id+'/mark-lost',{method:'POST',headers:headers(7),body:JSON.stringify({lostReason:'Nope'})})).status,409);
+ assert.equal((await fetch(base+'/api/v1/agent/leads/'+lead.id+'/mark-inprogress',{method:'POST',headers:headers(7),body:'{}'})).status,409);
 });
 
 test('province and location validation rejects malformed inputs and canonicalizes province aliases', () => {
@@ -55,12 +60,32 @@ test('area filters are scoped by agent and province before pagination', async ()
  assert.ok(calls.some(([method,sql,args])=>method==='andWhere' && sql.includes('cardinality') && args.locations.length===2));
  assert.ok(calls.findIndex(([method])=>method==='andWhere') < calls.findIndex(([method])=>method==='skip'));
  assert.ok(calls.some(([method,n])=>method==='skip' && n===20));
+ assert.ok(calls.some(([method,col,dir])=>method==='orderBy' && col==='lead.created_at' && dir==='DESC'));
  calls.length=0;
  await service.list(7, {province:'Bangkok',locations:'["วัฒนา"]'});
  assert.ok(calls.some(([method,sql])=>method==='andWhere' && sql.includes('&&') && !sql.includes('cardinality')));
  await assert.rejects(()=>service.list(7,{locations:'["วัฒนา"]'}));
  await assert.rejects(()=>service.list(7,{province:'invalid'}));
  await assert.rejects(()=>service.list(7,{province:'Bangkok',locations:'{}'}));
+});
+
+test('lead list sort accepts known keys and rejects invalid values', async () => {
+ assert.equal(normalizeLeadSort(), 'created_desc');
+ assert.equal(normalizeLeadSort('budget_asc'), 'budget_asc');
+ assert.throws(() => normalizeLeadSort('nope'));
+ const calls = [];
+ const qb = {};
+ for (const method of ['leftJoinAndSelect','where','andWhere','addSelect','orderBy','addOrderBy','skip','take']) qb[method] = (...args) => {calls.push([method, ...args]); return qb;};
+ qb.getManyAndCount = async () => [[], 0];
+ const service = new AgentLeadsService({createQueryBuilder:()=>qb}, {}, {}, {});
+ await service.list(7, {sort:'status_asc'});
+ assert.ok(calls.some(([method,sql,alias])=>method==='addSelect' && String(sql).includes('CASE lead.status') && alias==='sort_status_rank'));
+ assert.ok(calls.some(([method,col,dir])=>method==='orderBy' && col==='sort_status_rank' && dir==='ASC'));
+ calls.length=0;
+ await service.list(7, {sort:'budget_desc'});
+ assert.ok(calls.some(([method,sql,alias])=>method==='addSelect' && String(sql).includes('COALESCE') && alias==='sort_budget'));
+ assert.ok(calls.some(([method,col,dir,nulls])=>method==='orderBy' && col==='sort_budget' && dir==='DESC' && nulls==='NULLS LAST'));
+ await assert.rejects(()=>service.list(7,{sort:'price_asc'}));
 });
 
 test('location catalog normalizes property provinces and deduplicates districts', async () => {
@@ -92,7 +117,8 @@ test('editing lead updates allowed fields, preserves booking links, and rejects 
     update: async (where, patch) => { assert.deepEqual(where, {id: 41, created_by_user_id: 7}); assert.equal(patch.status, undefined); assert.equal(patch.tenant_id, undefined); assert.equal(patch.created_by_user_id, undefined); Object.assign(row, patch); writes++; },
   };
   const service = new AgentLeadsService(repository, {}, {}, {});
-  const updated = await service.update(7, 41, {name: 'After', budgetMin: 0, status: 'new', tenant_id: null, created_by_user_id: 99});
+  const updated = await service.update(7, 41, {name: 'After', budgetMin: 0, notes: '  Prefers LINE  ', status: 'new', tenant_id: null, created_by_user_id: 99});
+  assert.equal(updated.notes, 'Prefers LINE'); assert.equal(row.notes, 'Prefers LINE');
   assert.equal(updated.name, 'After'); assert.equal(updated.phone, '0812345678'); assert.equal(updated.hasPets, false); assert.equal(updated.budgetMin, 0);
   assert.equal(row.status, 'booked'); assert.equal(row.tenant_id, 12); assert.equal(row.rent_room_id, 15);
   await assert.rejects(() => service.update(8, 41, {name:'Other'}), e => e.getStatus() === 404);
@@ -102,7 +128,7 @@ test('editing lead updates allowed fields, preserves booking links, and rejects 
 });
 
 test('editing can explicitly clear map coordinates and nullable preferences', async () => {
-  const row = {id: 1, created_by_user_id: 7, name:'Lead',phone:'0812345678',status:'viewed',province:'กรุงเทพมหานคร',locations:['วัฒนา'],location_name:'Asok',location_place_id:'pin',latitude:13.7,longitude:100.5,radius_km:3,has_pets:true,created_at:new Date()};
+  const row = {id: 1, created_by_user_id: 7, name:'Lead',phone:'0812345678',status:'inprogress',province:'กรุงเทพมหานคร',locations:['วัฒนา'],location_name:'Asok',location_place_id:'pin',latitude:13.7,longitude:100.5,radius_km:3,has_pets:true,created_at:new Date()};
   const service = new AgentLeadsService({findOne:async()=>({...row}),update:async(_,patch)=>Object.assign(row,patch)}, {}, {}, {});
   await service.update(7,1,{province:null,locations:[],locationName:null,locationPlaceId:null,latitude:null,longitude:null,radiusKm:null,hasPets:null});
   assert.equal(row.latitude,null); assert.equal(row.location_name,null); assert.deepEqual(row.locations,[]); assert.equal(row.has_pets,null);

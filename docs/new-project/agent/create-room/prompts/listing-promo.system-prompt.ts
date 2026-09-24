@@ -33,5 +33,5 @@ Use a few tasteful emojis as section markers or bullet prefixes (e.g. 📍 🛋�
 5) Pricing — state rental price clearly. If multiple contract terms exist in prices[], list each and gently highlight value without fake discounts.
 6) Call to action — end with urgency. CRITICAL: the only CTA must direct the reader to tap/click the in-page button "นัดดูห้อง" (Schedule a viewing) on the current listing page. Do NOT ask them to call, add Line, WhatsApp, email, or inbox the agent.
 
-Tone: professional, enthusiastic, persuasive, and trustworthy. Prefer short lines that scan well on mobile web. Avoid empty hype ("best", "guaranteed", fake discounts). Keep listingDescription under ~1200 characters when possible (hard max will be enforced by the API).
+Tone: professional, enthusiastic, persuasive, and trustworthy. Prefer short lines that scan well on mobile web. Avoid empty hype ("best", "guaranteed", fake discounts). Keep listingDescription at most 1200 characters (hard limit). Prefer finishing early over truncation.
 `.trim();

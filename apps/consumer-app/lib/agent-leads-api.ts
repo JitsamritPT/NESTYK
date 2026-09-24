@@ -1,6 +1,8 @@
-import type { AgentLead, AgentLeadsPage, CreateLeadInput, LeadFilters, LeadLocationCatalog } from '@nestyk/types';
+import type { AgentLead, AgentLeadsPage, AgentLeadsSort, CreateLeadInput, LeadFilters, LeadLocationCatalog } from '@nestyk/types';
 import { apiGet, apiPost, apiRequest } from './api';
 import { ensureAgentSession } from './agent-session';
+
+export type { AgentLeadsSort };
 
 export async function listAgentLeads(q: string, page: number, filters: LeadFilters = {}): Promise<AgentLeadsPage> {
   await ensureAgentSession();
@@ -8,6 +10,7 @@ export async function listAgentLeads(q: string, page: number, filters: LeadFilte
   if (filters.province) params.set('province', filters.province);
   if (filters.locations?.length) params.set('locations', JSON.stringify(filters.locations));
   if (filters.includeUnspecified) params.set('includeUnspecified', 'true');
+  if (filters.sort) params.set('sort', filters.sort);
   return apiGet(`/agent/leads?${params}`);
 }
 
@@ -34,4 +37,14 @@ export async function fetchLeadLocations(): Promise<LeadLocationCatalog> {
 export async function updateAgentLead(id: number, body: CreateLeadInput): Promise<AgentLead> {
   await ensureAgentSession();
   return apiRequest(`/agent/leads/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function markAgentLeadInProgress(id: number): Promise<AgentLead> {
+  await ensureAgentSession();
+  return apiPost(`/agent/leads/${id}/mark-inprogress`, {});
+}
+
+export async function markAgentLeadLost(id: number, lostReason: string): Promise<AgentLead> {
+  await ensureAgentSession();
+  return apiPost(`/agent/leads/${id}/mark-lost`, { lostReason });
 }

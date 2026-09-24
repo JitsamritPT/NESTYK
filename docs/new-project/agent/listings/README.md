@@ -26,6 +26,7 @@ Agent ดูและจัดการห้อง scout ที่ตัวเ�
 | [flow.md](./flow.md) | list UX, detail, visibility, ลิงก์ leads |
 | [api.md](./api.md) | `GET/PATCH /agent/listings` |
 | [database.md](./database.md) | query, card fields — ไม่มีตารางใหม่ |
+| [share-links.md](./share-links.md) | แผน implement ลิงก์แชร์ห้องแบบหมดอายุ 7 วัน (ยังไม่เปิดใช้งานจริง) |
 
 ---
 

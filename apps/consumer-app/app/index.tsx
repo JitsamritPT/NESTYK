@@ -1,8 +1,10 @@
 import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
+import { CreateLeadForm } from '../components/CreateLeadForm';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Alert, BackHandler } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { useLocale } from '@nestyk/i18n';
@@ -72,6 +74,8 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
       return t.mobile.screens.createListing;
     case 'listingLead':
       return t.agent.leads.title;
+    case 'createLead':
+      return t.agent.leads.create;
     case 'clients':
       return t.mobile.screens.clients;
     case 'more':
@@ -109,8 +113,7 @@ export default function AppHomeScreen() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
   const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
-  /** Dashboard deep-link: open create-lead form once. */
-  const [leadsOpenCreate, setLeadsOpenCreate] = useState(false);
+  const [createLeadBusy, setCreateLeadBusy] = useState(false);
   const [leadsWorkFilter, setLeadsWorkFilter] = useState<'lead_follow_up' | null>(null);
   const [clientsWorkFilter, setClientsWorkFilter] = useState<
     'overdue_payment' | 'awaiting_signature' | 'renewal' | 'lead_follow_up' | null
@@ -121,7 +124,6 @@ export default function AppHomeScreen() {
   const pendingRefresh = useRef<number | null>(null);
   const [leadsReloadToken, setLeadsReloadToken] = useState(0);
   const [roomsReloadToken, setRoomsReloadToken] = useState(0);
-  const [leadsSearchOpen, setLeadsSearchOpen] = useState(false);
   const [clientsSearchOpen, setClientsSearchOpen] = useState(false);
   /** Where header/hardware back should return from secondary screens (e.g. create listing). */
   const [secondaryReturnTab, setSecondaryReturnTab] = useState<MobileAppTab | null>(null);
@@ -182,7 +184,6 @@ export default function AppHomeScreen() {
       setDrawerOpen(true);
       return;
     }
-    setLeadsOpenCreate(false);
     if (tab !== 'listingLead') setLeadsWorkFilter(null);
     if (tab !== 'clients') setClientsWorkFilter(null);
     setSecondaryReturnTab(null);
@@ -196,15 +197,30 @@ export default function AppHomeScreen() {
     setActiveTab('createListing');
   }, [activeTab]);
 
+  const openCreateLead = useCallback(() => {
+    if (activeTab !== 'createLead') {
+      setSecondaryReturnTab(activeTab);
+    }
+    setLeadsWorkFilter(null);
+    setActiveTab('createLead');
+  }, [activeTab]);
+
   const goBackFromSecondary = useCallback(() => {
-    const fallback: MobileAppTab = activeRole === 'owner' ? 'listings' : 'listingRoom';
+    const fallback: MobileAppTab =
+      activeTab === 'createLead'
+        ? 'listingLead'
+        : activeRole === 'owner'
+          ? 'listings'
+          : 'listingRoom';
     const target =
-      secondaryReturnTab && secondaryReturnTab !== 'createListing'
+      secondaryReturnTab &&
+      secondaryReturnTab !== 'createListing' &&
+      secondaryReturnTab !== 'createLead'
         ? secondaryReturnTab
         : fallback;
     setSecondaryReturnTab(null);
     setActiveTab(target);
-  }, [activeRole, secondaryReturnTab]);
+  }, [activeRole, activeTab, secondaryReturnTab]);
 
   useEffect(() => {
     if (activeTab !== 'createListing') {
@@ -225,6 +241,23 @@ export default function AppHomeScreen() {
     if (createListingBackRef.current?.()) return;
     goBackFromSecondary();
   }, [goBackFromSecondary]);
+
+  const handleCreateLeadBack = useCallback(() => {
+    if (createLeadBusy) return;
+    goBackFromSecondary();
+  }, [createLeadBusy, goBackFromSecondary]);
+
+  useEffect(() => {
+    if (activeTab !== 'createLead') {
+      setCreateLeadBusy(false);
+      return;
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleCreateLeadBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [activeTab, handleCreateLeadBack]);
 
   const handleRoleChange = (role: UserRole) => {
     if (roleRequiresAuth(role) && !isAuthenticated) {
@@ -290,10 +323,10 @@ export default function AppHomeScreen() {
     'calendar',
     'services',
     'createListing',
+    'createLead',
   ];
 
   useEffect(() => {
-    setLeadsSearchOpen(false);
     setClientsSearchOpen(false);
   }, [activeTab]);
 
@@ -315,44 +348,61 @@ export default function AppHomeScreen() {
     }
 
     if (agentSectionTabs.includes(activeTab)) {
-      const isSecondary = activeTab === 'createListing';
+      const isCreateLead = activeTab === 'createLead';
+      const isSecondary = activeTab === 'createListing' || isCreateLead;
       const showSearch =
         !isSecondary &&
-        (activeTab === 'listingLead' || activeTab === 'clients');
-      const searchActive =
-        (activeTab === 'listingLead' && leadsSearchOpen) ||
-        (activeTab === 'clients' && clientsSearchOpen);
+        activeTab === 'clients';
+      const searchActive = activeTab === 'clients' && clientsSearchOpen;
 
       return (
         <MobileSectionHeader
           title={
-            isSecondary
-              ? createListingHeaderTitle || t.agent.listings.addRoom
-              : getScreenTitle(activeTab, t)
+            isCreateLead
+              ? t.agent.leads.create
+              : isSecondary
+                ? createListingHeaderTitle || t.agent.listings.addRoom
+                : getScreenTitle(activeTab, t)
           }
           workspaceLabel={isSecondary ? undefined : workspace}
           accentColor={accent}
           leading={isSecondary ? 'back' : 'menu'}
           onMenuPress={openMenu}
-          onBackPress={isSecondary ? handleCreateListingBack : undefined}
-          onAddPress={
-            !isSecondary && activeTab === 'listingRoom' ? openCreateListing : undefined
+          onBackPress={
+            isCreateLead
+              ? handleCreateLeadBack
+              : isSecondary
+                ? handleCreateListingBack
+                : undefined
           }
-          addVariant={activeTab === 'listingRoom' ? 'room' : undefined}
+          backDisabled={isCreateLead && createLeadBusy}
+          onAddPress={
+            !isSecondary && activeTab === 'listingRoom'
+              ? openCreateListing
+              : !isSecondary && activeTab === 'listingLead'
+                ? openCreateLead
+                : undefined
+          }
+          addVariant={
+            activeTab === 'listingRoom'
+              ? 'room'
+              : activeTab === 'listingLead'
+                ? 'lead'
+                : undefined
+          }
           addAccessibilityLabel={
-            activeTab === 'listingRoom' ? t.agent.listings.addRoom : undefined
+            activeTab === 'listingRoom'
+              ? t.agent.listings.addRoom
+              : activeTab === 'listingLead'
+                ? t.agent.leads.create
+                : undefined
           }
           searchActive={searchActive}
-          searchAccessibilityLabel={
-            activeTab === 'listingLead'
-              ? t.agent.leads.searchFilters
-              : t.agent.dashboard.clientsTitle
-          }
+          searchAccessibilityLabel={t.agent.dashboard.clientsTitle}
           onSearchPress={
             showSearch
               ? () => {
-                  if (activeTab === 'listingLead') setLeadsSearchOpen((v) => !v);
-                  else setClientsSearchOpen((v) => !v);
+                  setClientsSearchOpen((v) => !v);
                 }
               : undefined
           }
@@ -375,15 +425,17 @@ export default function AppHomeScreen() {
     (link: AgentDashboardDeepLink) => {
       if (link.type === 'tab') {
         if (link.tab === 'listingLead') {
-          setLeadsOpenCreate(link.filter?.kind === 'lead_create');
+          if (link.filter?.kind === 'lead_create') {
+            setClientsWorkFilter(null);
+            openCreateLead();
+            return;
+          }
           setLeadsWorkFilter(link.filter?.kind === 'work' && link.filter.work === 'lead_follow_up' ? 'lead_follow_up' : null);
           setClientsWorkFilter(null);
         } else if (link.tab === 'clients') {
           setClientsWorkFilter(link.filter?.kind === 'work' ? link.filter.work : null);
-          setLeadsOpenCreate(false);
           setLeadsWorkFilter(null);
         } else {
-          setLeadsOpenCreate(false);
           setLeadsWorkFilter(null);
           setClientsWorkFilter(null);
         }
@@ -395,9 +447,7 @@ export default function AppHomeScreen() {
           openCreateListing();
           return;
         case 'newLead':
-          setLeadsOpenCreate(true);
-          setLeadsWorkFilter(null);
-          setActiveTab('listingLead');
+          openCreateLead();
           return;
         case 'viewCalendar':
         case 'viewAppointment':
@@ -432,7 +482,7 @@ export default function AppHomeScreen() {
           return;
       }
     },
-    [t, openCreateListing],
+    [t, openCreateListing, openCreateLead],
   );
 
   const agentDashboardSnapshot = useMemo(() => {
@@ -660,13 +710,9 @@ export default function AppHomeScreen() {
       return (
         <View style={styles.bodyContainer}>
           <AgentLeadsScreen
-            initialCreate={leadsOpenCreate}
             workFilter={leadsWorkFilter}
-            onCreateConsumed={() => setLeadsOpenCreate(false)}
             reloadToken={leadsReloadToken}
             onReloadSettled={finishPageRefresh}
-            searchOpen={leadsSearchOpen}
-            onSearchOpenChange={setLeadsSearchOpen}
           />
         </View>
       );
@@ -825,6 +871,24 @@ export default function AppHomeScreen() {
       );
     }
 
+    if (activeTab === 'createLead') {
+      return (
+        <Animated.View
+          entering={FadeIn.duration(150)}
+          style={[styles.wizardBody, styles.fullBleedBody]}
+        >
+          <CreateLeadForm
+            onBusy={setCreateLeadBusy}
+            onSaved={() => {
+              Alert.alert(t.agent.leads.saved);
+              setSecondaryReturnTab(null);
+              setActiveTab('listingLead');
+            }}
+          />
+        </Animated.View>
+      );
+    }
+
     if (activeTab === 'createListing') {
       return (
         <View style={[styles.bodyContainer, styles.wizardBody]}>
@@ -908,7 +972,9 @@ export default function AppHomeScreen() {
   };
 
   const isWizardTab =
-    activeTab === 'createListing' || (activeTab === 'listings' && activeRole === 'owner');
+    activeTab === 'createListing' ||
+    activeTab === 'createLead' ||
+    (activeTab === 'listings' && activeRole === 'owner');
 
   return (
     <>
@@ -936,7 +1002,7 @@ export default function AppHomeScreen() {
           )
         }
         bottomBar={
-          activeTab === 'createListing' ? null : <MobileBottomTabBar
+          activeTab === 'createListing' || activeTab === 'createLead' ? null : <MobileBottomTabBar
             activeRole={activeRole}
             activeTab={activeTab}
             onTabPress={handleTabPress}
@@ -1004,6 +1070,8 @@ export default function AppHomeScreen() {
 const styles = StyleSheet.create({
   bodyContainer: { gap: 16 },
   wizardBody: { flex: 1, minHeight: 0, gap: 0 },
+  // CreateLeadForm owns its padding and edge-to-edge footer; cancel MobileModePage body padding.
+  fullBleedBody: { margin: -16 },
   card: {},
   sectionHeader: {
     fontFamily: tokens.typography.native.headingTh,

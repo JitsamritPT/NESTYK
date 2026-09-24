@@ -79,7 +79,7 @@ subset ของ scout rooms ตาม `visibility`
 
 ### `stats.activeLeads`
 
-`status IN ('inprogress', 'viewed')`
+`status = 'inprogress'`
 
 ### `stats.pendingContracts`
 

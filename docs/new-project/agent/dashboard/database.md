@@ -39,7 +39,7 @@ WHERE is_scout_room = TRUE
 ```sql
 SELECT
   COUNT(*) FILTER (WHERE status = 'new') AS new_leads,
-  COUNT(*) FILTER (WHERE status IN ('inprogress', 'viewed')) AS active_leads
+  COUNT(*) FILTER (WHERE status = 'inprogress') AS active_leads
 FROM leads
 WHERE created_by_user_id = :agent_user_id;
 ```

@@ -11,12 +11,14 @@ export function AgentRoomEditor({
   onBusy,
   backHandlerRef,
   onHeaderTitleChange,
+  onCancelEdit,
 }: {
   room: AgentRoomDetail;
   onSaved: (result?: { promoCopyStale?: boolean }) => void;
   onBusy: (busy: boolean) => void;
   backHandlerRef?: React.MutableRefObject<(() => boolean) | null>;
   onHeaderTitleChange?: (title: string) => void;
+  onCancelEdit?: () => void;
 }) {
   const { t, locale } = useLocale();
   const initialData = useMemo<CreateRoomWizardSubmitData>(() => ({
@@ -69,6 +71,7 @@ export function AgentRoomEditor({
       title={t.agent.listings.editRoom}
       submitLabel={t.agent.listings.saveChanges}
       backHandlerRef={backHandlerRef}
+      onAbandonUnsaved={onCancelEdit}
       onHeaderTitleChange={onHeaderTitleChange}
       onSubmittingChange={onBusy}
       pickPhotos={pickRoomPhotos}

@@ -37,6 +37,12 @@ import { AgentRoomsController } from './rooms/agent-rooms.controller';
 import { AgentRoomsService } from './rooms/agent-rooms.service';
 import { AgentListingsController } from './listings/agent-listings.controller';
 import { AgentListingsService } from './listings/agent-listings.service';
+import {
+  AgentRoomShareLinksController,
+  PublicRoomShareController,
+} from './listings/room-share-links.controller';
+import { RoomShareLinksService } from './listings/room-share-links.service';
+import { RoomShareLinkEntity } from '../entities/room-share-link.entity';
 import { AgentPlacesController } from './places/agent-places.controller';
 import { AgentPlacesService } from './places/agent-places.service';
 import { GeminiModule } from '../gemini/gemini.module';
@@ -66,10 +72,11 @@ import { GeminiModule } from '../gemini/gemini.module';
       RoomLayoutValueEntity,
       RoomFacilityEntity,
       RentRoomDocumentEntity,
+      RoomShareLinkEntity,
     ]),
   ],
-  controllers: [AgreementAttachmentsController, AgentTenantsController, AgentContractsController, PublicContractSignController, AgentLeadsController, AgentRoomsController, AgentListingsController, AgentPlacesController],
-  providers: [AgreementAttachmentsService, AgentTenantsService, AgentContractsService, ContractDocumentStorageService, AgentLeadsService, RoomPhotoStorageService, ListingPromoService, AgentRoomsService, AgentListingsService, AgentPlacesService],
-  exports: [AgentRoomsService, AgentListingsService, AgentPlacesService],
+  controllers: [AgreementAttachmentsController, AgentTenantsController, AgentContractsController, PublicContractSignController, AgentLeadsController, AgentRoomsController, AgentRoomShareLinksController, PublicRoomShareController, AgentListingsController, AgentPlacesController],
+  providers: [AgreementAttachmentsService, AgentTenantsService, AgentContractsService, ContractDocumentStorageService, AgentLeadsService, RoomPhotoStorageService, ListingPromoService, AgentRoomsService, AgentListingsService, RoomShareLinksService, AgentPlacesService],
+  exports: [AgentRoomsService, AgentListingsService, AgentPlacesService, RoomShareLinksService],
 })
 export class AgentModule {}

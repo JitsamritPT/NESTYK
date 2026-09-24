@@ -24,7 +24,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { hatchHead, hatchSuccess } from '../assets/hatchAssets';
 
-/** Idle narrative loop (~6.2s) — rock → crack → small peek → close. */
+/** Idle narrative loop — matches nestyk-egg-idle-v2.svg (6.2s). */
 export const NESTYK_IDLE_LOOP_MS = 6200;
 /** Success hatch settle before spark loop. */
 export const NESTYK_HATCH_DURATION_MS = 2000;
@@ -43,54 +43,27 @@ function stopAll(vals: SharedValue<number>[]) {
   vals.forEach((v) => cancelAnimation(v));
 }
 
-function SoftEgg({ size }: { size: number }) {
+function eggFillDefs(prefix: string) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 320 320">
-      <Defs>
-        <LinearGradient id="nestykEggFill" x1="0.2" y1="0" x2="0.78" y2="1">
-          <Stop offset="0" stopColor="#FFFDF7" />
-          <Stop offset="0.48" stopColor="#FFF8E8" />
-          <Stop offset="1" stopColor="#DDC9A3" />
-        </LinearGradient>
-        <RadialGradient id="nestykEggLight" cx="31%" cy="22%" r="70%">
-          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.9} />
-          <Stop offset="0.58" stopColor="#FFFFFF" stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
-      <Path
-        d="M160 49C119 49 83 121 83 187 83 235 112 259 160 259S237 235 237 187C237 121 201 49 160 49Z"
-        fill="url(#nestykEggFill)"
-      />
-      <Path
-        d="M160 49C119 49 83 121 83 187 83 235 112 259 160 259S237 235 237 187C237 121 201 49 160 49Z"
-        fill="url(#nestykEggLight)"
-      />
-      <Path
-        d="M105 120Q121 79 151 67"
-        fill="none"
-        stroke="#FFFFFF"
-        strokeWidth={10}
-        strokeLinecap="round"
-        opacity={0.55}
-      />
-    </Svg>
+    <Defs>
+      <LinearGradient id={`${prefix}Fill`} x1="0.2" y1="0" x2="0.78" y2="1">
+        <Stop offset="0" stopColor="#FFFDF7" />
+        <Stop offset="0.48" stopColor="#FFF8E8" />
+        <Stop offset="1" stopColor="#DDC9A3" />
+      </LinearGradient>
+      <RadialGradient id={`${prefix}Light`} cx="31%" cy="22%" r="70%">
+        <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.9} />
+        <Stop offset="0.58" stopColor="#FFFFFF" stopOpacity={0} />
+      </RadialGradient>
+    </Defs>
   );
 }
 
+/** Lower shell — stays put while the cap lifts. */
 function EggBase({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 320 320">
-      <Defs>
-        <LinearGradient id="nestykBaseFill" x1="0.2" y1="0" x2="0.78" y2="1">
-          <Stop offset="0" stopColor="#FFFDF7" />
-          <Stop offset="0.48" stopColor="#FFF8E8" />
-          <Stop offset="1" stopColor="#DDC9A3" />
-        </LinearGradient>
-        <RadialGradient id="nestykBaseLight" cx="31%" cy="22%" r="70%">
-          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.9} />
-          <Stop offset="0.58" stopColor="#FFFFFF" stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
+      {eggFillDefs('nestykBase')}
       <Path
         d="M82 185 107 200 133 180 160 200 187 180 214 200 238 185C238 233 209 259 160 259S82 233 82 185Z"
         fill="url(#nestykBaseFill)"
@@ -112,20 +85,11 @@ function EggBase({ size }: { size: number }) {
   );
 }
 
+/** Upper shell — lifts slightly so the head peeks from behind. */
 function EggCap({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 320 320">
-      <Defs>
-        <LinearGradient id="nestykCapFill" x1="0.2" y1="0" x2="0.78" y2="1">
-          <Stop offset="0" stopColor="#FFFDF7" />
-          <Stop offset="0.48" stopColor="#FFF8E8" />
-          <Stop offset="1" stopColor="#DDC9A3" />
-        </LinearGradient>
-        <RadialGradient id="nestykCapLight" cx="31%" cy="22%" r="70%">
-          <Stop offset="0" stopColor="#FFFFFF" stopOpacity={0.9} />
-          <Stop offset="0.58" stopColor="#FFFFFF" stopOpacity={0} />
-        </RadialGradient>
-      </Defs>
+      {eggFillDefs('nestykCap')}
       <Path
         d="M82 185C82 120 118 49 160 49S238 120 238 185L214 200 187 180 160 200 133 180 107 200Z"
         fill="url(#nestykCapFill)"
@@ -147,8 +111,9 @@ function EggCap({ size }: { size: number }) {
 }
 
 /**
- * Honey & Cream 2.5D hatch loader — PNG mascot + soft egg (no flat black-stroke bird).
- * Idle loops 6.2s with a small peek; Success plays once then holds with spark twinkle.
+ * Honey & Cream 2.5D hatch loader.
+ * Idle 6.2s: rock → crack → cap lifts → head peeks → hide → close.
+ * Success: continue from open state (no full-egg snap) → success PNG + sparks.
  */
 export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = ({
   mode = 'idle',
@@ -161,16 +126,17 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const onSuccessRef = useRef(onSuccessComplete);
   onSuccessRef.current = onSuccessComplete;
+  const unit = size / 320;
 
-  const eggOpacity = useSharedValue(1);
   const eggRotate = useSharedValue(0);
+  const shellOpacity = useSharedValue(1);
   const crackOpacity = useSharedValue(0);
   const capY = useSharedValue(0);
   const capRotate = useSharedValue(0);
-  const peekOpacity = useSharedValue(0);
-  const peekY = useSharedValue(12);
-  const peekScale = useSharedValue(0.96);
-  const peekRotate = useSharedValue(0);
+  const headOpacity = useSharedValue(0);
+  const headY = useSharedValue(18);
+  const headScale = useSharedValue(0.98);
+  const headRotate = useSharedValue(0);
   const successOpacity = useSharedValue(0);
   const successY = useSharedValue(24);
   const successScale = useSharedValue(0.9);
@@ -181,15 +147,15 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
 
   const allValsRef = useRef<SharedValue<number>[]>([]);
   allValsRef.current = [
-    eggOpacity,
     eggRotate,
+    shellOpacity,
     crackOpacity,
     capY,
     capRotate,
-    peekOpacity,
-    peekY,
-    peekScale,
-    peekRotate,
+    headOpacity,
+    headY,
+    headScale,
+    headRotate,
     successOpacity,
     successY,
     successScale,
@@ -230,6 +196,7 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
     let successTimer: ReturnType<typeof setTimeout> | undefined;
     const ease = Easing.inOut(Easing.sin);
     const soft = Easing.bezier(0.28, 0.72, 0.28, 1);
+    const capEase = Easing.bezier(0.38, 0.05, 0.2, 1);
 
     if (!appActive) {
       return () => stopAll(vals);
@@ -239,9 +206,9 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
       eggRotate.value = 0;
       capY.value = 0;
       capRotate.value = 0;
-      peekY.value = 0;
-      peekScale.value = 1;
-      peekRotate.value = 0;
+      headY.value = 0;
+      headScale.value = 1;
+      headRotate.value = 0;
       successY.value = 0;
       successScale.value = 1;
       shadowScale.value = 1;
@@ -249,16 +216,16 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
       sparkB.value = 0;
       sparkC.value = 0;
       if (mode === 'success') {
-        eggOpacity.value = 0;
+        shellOpacity.value = 0;
         crackOpacity.value = 0;
-        peekOpacity.value = 0;
+        headOpacity.value = 0;
         successOpacity.value = 1;
         sparkA.value = 0.75;
         onSuccessRef.current?.();
       } else {
-        eggOpacity.value = 1;
+        shellOpacity.value = 1;
         crackOpacity.value = 0;
-        peekOpacity.value = 0;
+        headOpacity.value = 0;
         successOpacity.value = 0;
       }
       return () => stopAll(vals);
@@ -272,18 +239,18 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
       sparkB.value = 0;
       sparkC.value = 0;
 
-      eggOpacity.value = 1;
+      shellOpacity.value = 1;
       eggRotate.value = 0;
       crackOpacity.value = 0;
       capY.value = 0;
       capRotate.value = 0;
-      peekOpacity.value = 0;
-      peekY.value = 18;
-      peekScale.value = 0.98;
-      peekRotate.value = 0;
+      headOpacity.value = 0;
+      headY.value = 18;
+      headScale.value = 0.98;
+      headRotate.value = 0;
       shadowScale.value = 1;
 
-      // One continuous 6.2s story: rock → crack → cap lifts → tiny peek → close.
+      // 6.2s story from nestyk-egg-idle-v2.svg
       eggRotate.value = withRepeat(
         withSequence(
           withTiming(0, { duration: 868 }),
@@ -296,8 +263,6 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
         -1,
         false,
       );
-
-      eggOpacity.value = 1;
 
       crackOpacity.value = withRepeat(
         withSequence(
@@ -314,8 +279,8 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
       capY.value = withRepeat(
         withSequence(
           withTiming(0, { duration: 1922 }),
-          withTiming(-22, { duration: 620, easing: soft }),
-          withTiming(-29, { duration: 434, easing: soft }),
+          withTiming(-22, { duration: 620, easing: capEase }),
+          withTiming(-29, { duration: 434, easing: capEase }),
           withTiming(-29, { duration: 930 }),
           withTiming(-20, { duration: 434, easing: soft }),
           withTiming(0, { duration: 558, easing: soft }),
@@ -328,8 +293,8 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
       capRotate.value = withRepeat(
         withSequence(
           withTiming(0, { duration: 1922 }),
-          withTiming(-1, { duration: 620, easing: soft }),
-          withTiming(-2, { duration: 434, easing: soft }),
+          withTiming(-1, { duration: 620, easing: capEase }),
+          withTiming(-2, { duration: 434, easing: capEase }),
           withTiming(-2, { duration: 930 }),
           withTiming(-0.7, { duration: 434, easing: soft }),
           withTiming(0, { duration: 558, easing: soft }),
@@ -339,21 +304,22 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
         false,
       );
 
-      peekOpacity.value = withRepeat(
+      // Head peeks after crack; hides (opacity→0, y↓) before cap fully closes
+      headOpacity.value = withRepeat(
         withSequence(
           withTiming(0, { duration: 2108 }),
           withTiming(0.35, { duration: 434, easing: soft }),
           withTiming(1, { duration: 434, easing: soft }),
           withTiming(1, { duration: 930 }),
-          withTiming(0.7, { duration: 434, easing: soft }),
+          withTiming(0.7, { duration: 310, easing: soft }),
           withTiming(0, { duration: 310, easing: soft }),
-          withTiming(0, { duration: 1550 }),
+          withTiming(0, { duration: 1674 }),
         ),
         -1,
         false,
       );
 
-      peekY.value = withRepeat(
+      headY.value = withRepeat(
         withSequence(
           withTiming(18, { duration: 2108 }),
           withTiming(10, { duration: 434, easing: soft }),
@@ -361,28 +327,27 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
           withTiming(-1, { duration: 310, easing: ease }),
           withTiming(0, { duration: 310, easing: ease }),
           withTiming(0, { duration: 310 }),
-          withTiming(9, { duration: 434, easing: soft }),
+          withTiming(9, { duration: 310, easing: soft }),
           withTiming(18, { duration: 310, easing: soft }),
-          withTiming(18, { duration: 1550 }),
+          withTiming(18, { duration: 1674 }),
         ),
         -1,
         false,
       );
 
-      peekScale.value = withRepeat(
+      headScale.value = withRepeat(
         withSequence(
           withTiming(0.98, { duration: 2108 }),
           withTiming(1, { duration: 868, easing: soft }),
           withTiming(1, { duration: 930 }),
-          withTiming(0.99, { duration: 744, easing: soft }),
-          withTiming(0.98, { duration: 1550 }),
+          withTiming(0.99, { duration: 620, easing: soft }),
+          withTiming(0.98, { duration: 1674 }),
         ),
         -1,
         false,
       );
 
-      // Gentle head tilt (life) — no separate blink layers in PNG
-      peekRotate.value = withRepeat(
+      headRotate.value = withRepeat(
         withSequence(
           withTiming(0, { duration: 2976 }),
           withTiming(0.7, { duration: 310, easing: ease }),
@@ -409,45 +374,50 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
       return () => stopAll(vals);
     }
 
-    // Success — cancel idle, hatch once, hold + sparks
-    peekOpacity.value = withTiming(0, { duration: 160 });
-    crackOpacity.value = withTiming(0.65, { duration: 400 });
-    eggOpacity.value = withSequence(
-      withTiming(1, { duration: 400 }),
-      withTiming(0, { duration: 500, easing: ease }),
-    );
-    eggRotate.value = withTiming(0, { duration: 200 });
+    // Success — continue from current open state; never snap shellOpacity back to a full sealed egg.
+    const hatchEase = Easing.bezier(0.18, 0.8, 0.28, 1);
+
+    eggRotate.value = withTiming(0, { duration: 220, easing: ease });
+    headOpacity.value = withTiming(0, { duration: 180, easing: soft });
+    headY.value = withTiming(14, { duration: 220, easing: soft });
+    headScale.value = withTiming(0.98, { duration: 180 });
+    headRotate.value = withTiming(0, { duration: 180 });
+
+    crackOpacity.value = withTiming(0.55, { duration: 200 });
+    // Keep cap open (or lift a touch more) while shells fade — no closed-egg beat.
+    capY.value = withTiming(-32, { duration: 420, easing: soft });
+    capRotate.value = withTiming(-2.5, { duration: 420, easing: soft });
+    shellOpacity.value = withDelay(280, withTiming(0, { duration: 420, easing: ease }));
+    crackOpacity.value = withDelay(280, withTiming(0, { duration: 360, easing: ease }));
 
     successOpacity.value = 0;
-    successY.value = 28;
-    successScale.value = 0.88;
+    successY.value = 22;
+    successScale.value = 0.9;
     sparkA.value = 0;
     sparkB.value = 0;
     sparkC.value = 0;
 
-    const hatchEase = Easing.bezier(0.18, 0.8, 0.28, 1);
-
-    successOpacity.value = withDelay(520, withTiming(1, { duration: 280 }));
+    successOpacity.value = withDelay(360, withTiming(1, { duration: 280 }));
     successY.value = withDelay(
-      520,
+      360,
       withSequence(
-        withTiming(-4, { duration: 620, easing: hatchEase }),
-        withTiming(0, { duration: 280, easing: ease }),
+        withTiming(-4, { duration: 560, easing: hatchEase }),
+        withTiming(0, { duration: 240, easing: ease }),
       ),
     );
     successScale.value = withDelay(
-      520,
+      360,
       withSequence(
-        withTiming(1.03, { duration: 620, easing: hatchEase }),
-        withTiming(1, { duration: 280, easing: ease }),
+        withTiming(1.03, { duration: 560, easing: hatchEase }),
+        withTiming(1, { duration: 240, easing: ease }),
       ),
     );
     shadowScale.value = withDelay(
-      520,
+      360,
       withSequence(
-        withTiming(0.85, { duration: 400, easing: ease }),
-        withTiming(1.08, { duration: 280, easing: ease }),
-        withTiming(1, { duration: 220, easing: ease }),
+        withTiming(0.88, { duration: 320, easing: ease }),
+        withTiming(1.06, { duration: 240, easing: ease }),
+        withTiming(1, { duration: 200, easing: ease }),
       ),
     );
 
@@ -464,9 +434,9 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
         ),
       );
     };
-    twinkle(sparkA, 1800);
-    twinkle(sparkB, 2300);
-    twinkle(sparkC, 2800);
+    twinkle(sparkA, 1600);
+    twinkle(sparkB, 2100);
+    twinkle(sparkC, 2600);
 
     successTimer = setTimeout(() => onSuccessRef.current?.(), NESTYK_HATCH_DURATION_MS);
 
@@ -477,14 +447,14 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, reduceMotion, appActive]);
 
-  const eggStyle = useAnimatedStyle(() => ({
-    opacity: eggOpacity.value,
+  const rockStyle = useAnimatedStyle(() => ({
+    opacity: shellOpacity.value,
     transform: [{ rotate: `${eggRotate.value}deg` }],
   }));
 
   const capStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: capY.value * (size / 320) },
+      { translateY: capY.value * unit },
       { rotate: `${capRotate.value}deg` },
     ],
   }));
@@ -493,21 +463,18 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
     opacity: crackOpacity.value,
   }));
 
-  const peekStyle = useAnimatedStyle(() => ({
-    opacity: peekOpacity.value,
+  const headStyle = useAnimatedStyle(() => ({
+    opacity: headOpacity.value * shellOpacity.value,
     transform: [
-      { translateY: peekY.value * (size / 320) },
-      { scale: peekScale.value },
-      { rotate: `${peekRotate.value}deg` },
+      { translateY: headY.value * unit },
+      { scale: headScale.value },
+      { rotate: `${headRotate.value}deg` },
     ],
   }));
 
   const successStyle = useAnimatedStyle(() => ({
     opacity: successOpacity.value,
-    transform: [
-      { translateY: successY.value },
-      { scale: successScale.value },
-    ],
+    transform: [{ translateY: successY.value }, { scale: successScale.value }],
   }));
 
   const shadowStyle = useAnimatedStyle(() => ({
@@ -552,58 +519,41 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
         </Svg>
       </Animated.View>
 
-      {mode === 'idle' ? (
-        <Animated.View style={[styles.layer, eggStyle]} pointerEvents="none">
-          <Animated.View style={[styles.layer, peekStyle]}>
-            <Image
-              source={hatchHead as ImageSourcePropType}
-              style={{
-                position: 'absolute',
-                left: size * 0.106,
-                top: size * 0.253,
-                width: headWidth,
-                height: headHeight,
-              }}
-              resizeMode="stretch"
-              accessibilityIgnoresInvertColors
+      <Animated.View style={[styles.layer, rockStyle]} pointerEvents="none">
+        {/* Head behind shells — clipped by root overflow so it cannot spill. */}
+        <Animated.View style={[styles.layer, headStyle]}>
+          <Image
+            source={hatchHead as ImageSourcePropType}
+            style={{
+              position: 'absolute',
+              left: size * 0.106,
+              top: size * 0.253,
+              width: headWidth,
+              height: headHeight,
+            }}
+            resizeMode="stretch"
+            accessibilityIgnoresInvertColors
+          />
+        </Animated.View>
+        <View style={styles.layer}>
+          <EggBase size={size} />
+        </View>
+        <Animated.View style={[styles.layer, capStyle]}>
+          <EggCap size={size} />
+        </Animated.View>
+        <Animated.View style={[styles.layer, crackStyle]}>
+          <Svg width={size} height={size} viewBox="0 0 320 320">
+            <Path
+              d="M86 185 108 199 133 180 160 199 187 180 213 199 235 185"
+              fill="none"
+              stroke="#9D7B56"
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
-          </Animated.View>
-          <View style={styles.layer}>
-            <EggBase size={size} />
-          </View>
-          <Animated.View style={[styles.layer, capStyle]}>
-            <EggCap size={size} />
-          </Animated.View>
-          <Animated.View style={[styles.layer, crackStyle]}>
-            <Svg width={size} height={size} viewBox="0 0 320 320">
-              <Path
-                d="M88 186 111 201 135 181 160 201 186 181 212 201 233 186"
-                fill="none"
-                stroke="#9D7B56"
-                strokeWidth={3}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </Animated.View>
+          </Svg>
         </Animated.View>
-      ) : (
-        <Animated.View style={[styles.layer, eggStyle]} pointerEvents="none">
-          <SoftEgg size={size} />
-          <Animated.View style={[styles.layer, crackStyle]}>
-            <Svg width={size} height={size} viewBox="0 0 320 320">
-              <Path
-                d="M88 186 111 201 135 181 160 201 186 181 212 201 233 186"
-                fill="none"
-                stroke="#9D7B56"
-                strokeWidth={3}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
-          </Animated.View>
-        </Animated.View>
-      )}
+      </Animated.View>
 
       {mode === 'success' ? (
         <Animated.View style={[styles.layer, successStyle]} pointerEvents="none">
@@ -620,19 +570,11 @@ export const MobileNestykHatchLoader: React.FC<MobileNestykHatchLoaderProps> = (
         <>
           <Animated.View
             pointerEvents="none"
-            style={[
-              styles.spark,
-              { top: size * 0.14, right: size * 0.16 },
-              sparkAStyle,
-            ]}
+            style={[styles.spark, { top: size * 0.14, right: size * 0.16 }, sparkAStyle]}
           />
           <Animated.View
             pointerEvents="none"
-            style={[
-              styles.spark,
-              { top: size * 0.36, left: size * 0.12 },
-              sparkBStyle,
-            ]}
+            style={[styles.spark, { top: size * 0.36, left: size * 0.12 }, sparkBStyle]}
           />
           <Animated.View
             pointerEvents="none"

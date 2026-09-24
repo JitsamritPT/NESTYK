@@ -17,18 +17,17 @@ Agent บันทึกทุกคนที่สนใจห้องเป�
 
 ## 2. Status pipeline
 
-| Status | ความหมาย |
-|--------|----------|
-| `new` | ติดต่อใหม่ / ยังไม่นัด |
-| `inprogress` | กำลังนัด / ติดตาม |
-| `viewed` | ดูห้องแล้ว |
-| `lost` | ไม่เช่า / เลือกที่อื่น |
-| `booked` | เลือกเช่า — พร้อม/กำลังทำสัญญา |
+| Status | ความหมาย | ใครตั้ง |
+|--------|----------|---------|
+| `new` | ใหม่ — เพิ่งสร้าง | อัตโนมัติตอนสร้าง |
+| `inprogress` | กำลังดูแล | Agent เลือกเอง |
+| `lost` | ไม่ไปต่อ | Agent เลือก + เหตุผล |
+| `booked` | จองแล้ว — พร้อม/กำลังทำสัญญา | อัตโนมัติเมื่อ promote เป็น tenant |
 
 ```
-new → inprogress → viewed ──→ booked ──→ (สร้าง tenant + สัญญา)
-                    │              │
-                    └────→ lost    └── lead ยังอยู่ · status = booked
+new → inprogress ──→ booked ──→ (สร้าง tenant + สัญญา)
+         │              │
+         └────→ lost    └── lead ยังอยู่ · status = booked
 ```
 
 ---
@@ -38,7 +37,7 @@ new → inprogress → viewed ──→ booked ──→ (สร้าง tenant
 **กฎ:** แถว lead **ไม่ลบ** — อัปเดตเป็น `booked` และผูก tenant
 
 ```
-Lead (viewed)
+Lead (inprogress)
     │ Agent กดทำสัญญา / จอง
     ▼
 Lead.status = booked
@@ -58,7 +57,7 @@ POST /agent/contracts (roomTenancyId / จาก tenant)
 | `leads` | ✅ | `status = booked`, `tenant_id` ชี้ tenant |
 | `tenants` | ✅ | แถวใหม่ — ลูกบ้นตามสัญญา |
 
-Lead อีก 9 คน → คงเป็น `viewed` / `lost` — **ไม่มี** แถวใน `tenants`
+Lead อีก 9 คน → คงเป็น `inprogress` / `lost` — **ไม่มี** แถวใน `tenants`
 
 ---
 

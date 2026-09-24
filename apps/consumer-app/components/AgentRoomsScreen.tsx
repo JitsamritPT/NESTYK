@@ -27,6 +27,8 @@ import {
   MobileBottomSheet,
   MobileBrandLoader,
   MobileIcon,
+  MobileListSearchRow,
+  MobileListToolbar,
   type AppIconName,
   SelectionCheck,
   SelectionChip,
@@ -35,7 +37,13 @@ import {
   useMobileTheme,
 } from '@nestyk/ui/native';
 import { useLocale } from '@nestyk/i18n';
-import { fetchMyAgentListings, fetchAgentRoom } from '../lib/agent-listings-api';
+import {
+  fetchMyAgentListings,
+  fetchAgentRoom,
+  createRoomShareLink,
+  listRoomShareLinks,
+  revokeRoomShareLink,
+} from '../lib/agent-listings-api';
 
 type VisibilityFilter = '' | 'private' | 'published';
 type StatusFilter = '' | 'available' | 'rented' | 'pending_verification' | 'needs_edit';
@@ -285,6 +293,7 @@ export function AgentRoomsScreen({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
+  const [sharePreviewing, setSharePreviewing] = useState(false);
   const [room, setRoom] = useState<AgentRoomDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
@@ -297,6 +306,10 @@ export function AgentRoomsScreen({
 
   const handleEditRoomBack = useCallback(() => {
     if (saving) return;
+    if (sharePreviewing) {
+      setSharePreviewing(false);
+      return;
+    }
     if (editing) {
       if (editRoomBackRef.current?.()) return;
       setEditing(false);
@@ -304,7 +317,11 @@ export function AgentRoomsScreen({
       return;
     }
     setSelected(null);
-  }, [saving, editing]);
+  }, [saving, editing, sharePreviewing]);
+
+  useEffect(() => {
+    if (selected === null) setSharePreviewing(false);
+  }, [selected]);
 
   useEffect(() => {
     if (!editing) setEditHeaderTitle('');
@@ -609,63 +626,26 @@ export function AgentRoomsScreen({
 
   return (
     <View style={styles.root}>
-      <View style={styles.searchRow}>
-        <View
-          style={[
-            styles.searchField,
-            { backgroundColor: theme.surface, borderColor: theme.border },
-          ]}
-        >
-          <MobileIcon name="search" size={18} color={theme.textSecondary} />
-          <TextInput
-            ref={searchRef}
-            value={query}
-            onChangeText={(value) => {
-              setQuery(value);
-              setPage(1);
-            }}
-            placeholder={copy.searchRooms}
-            placeholderTextColor={theme.textSecondary}
-            style={[styles.searchInput, { color: theme.textHeading }]}
-            returnKeyType="search"
-            onBlur={() => {
-              if (!query.trim()) onSearchOpenChange?.(false);
-            }}
-          />
-          {query.trim() ? (
-            <Pressable
-              onPress={() => {
-                setQuery('');
-                setPage(1);
-              }}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel={copy.filterClear}
-            >
-              <MobileIcon name="close" size={16} color={theme.textSecondary} />
-            </Pressable>
-          ) : null}
-        </View>
-        <Pressable
-          onPress={openFilter}
-          accessibilityRole="button"
-          accessibilityLabel={copy.filterRooms}
-          style={({ pressed }) => [
-            styles.filterBtn,
-            { backgroundColor: theme.surface, borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
-          ]}
-          {...(Platform.OS === 'android'
-            ? { android_ripple: { color: 'rgba(0,0,0,0.08)' } }
-            : {})}
-        >
-          <MobileIcon name="funnel" size={20} color={tokens.colors.primary} />
-          {filterBadge > 0 ? (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{filterBadge}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-      </View>
+      <MobileListSearchRow
+        value={query}
+        onChangeText={(value) => {
+          setQuery(value);
+          setPage(1);
+        }}
+        placeholder={copy.searchRooms}
+        onClear={() => {
+          setQuery('');
+          setPage(1);
+        }}
+        onFilterPress={openFilter}
+        filterBadgeCount={filterBadge}
+        filterAccessibilityLabel={copy.filterRooms}
+        clearAccessibilityLabel={copy.filterClear}
+        inputRef={searchRef}
+        onBlur={() => {
+          if (!query.trim()) onSearchOpenChange?.(false);
+        }}
+      />
 
       {activeChips.length > 0 ? (
         <View style={styles.activeChipsRow}>
@@ -687,11 +667,7 @@ export function AgentRoomsScreen({
         </View>
       ) : null}
 
-      <View style={styles.toolbar}>
-        <Text style={[styles.toolbarCount, { color: theme.textSecondary }]}>
-          {copy.results.replace('{count}', String(total))}
-        </Text>
-        <View style={styles.toolbarActions}>
+      <MobileListToolbar countLabel={copy.results.replace('{count}', String(total))}>
           <Pressable
             onPress={() => setSortOpen(true)}
             accessibilityRole="button"
@@ -733,8 +709,7 @@ export function AgentRoomsScreen({
               );
             })}
           </View>
-        </View>
-      </View>
+      </MobileListToolbar>
 
       {error && items.length > 0 ? (
         <View style={{ gap: 8 }} accessibilityLiveRegion="polite">
@@ -1113,28 +1088,69 @@ export function AgentRoomsScreen({
           <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
             <View
               style={{
-                paddingHorizontal: 16,
-                paddingTop: 4,
-                paddingBottom: 8,
+                paddingHorizontal: sharePreviewing ? 0 : 16,
+                paddingTop: sharePreviewing ? 0 : 4,
+                paddingBottom: sharePreviewing ? 0 : 8,
                 flexShrink: 0,
                 zIndex: 1,
-                backgroundColor: theme.surface,
-                borderBottomWidth: 1,
+                backgroundColor: sharePreviewing ? '#0F172A' : theme.surface,
+                borderBottomWidth: sharePreviewing ? 0 : 1,
                 borderBottomColor: theme.border,
               }}
             >
-              <MobileSectionHeader
-                title={editing ? editHeaderTitle || copy.editRoom : copy.details}
-                leading="back"
-                backDisabled={saving}
-                onBackPress={handleEditRoomBack}
-                onActionPress={
-                  room && !editing ? () => setEditing(true) : undefined
-                }
-                actionLabel={room && !editing ? copy.edit : undefined}
-                actionVariant="icon"
-                actionIcon="note"
-              />
+              {sharePreviewing ? (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    minHeight: 56,
+                    paddingHorizontal: 16,
+                    paddingTop: 4,
+                    paddingBottom: 8,
+                  }}
+                >
+                  <MobileIcon name="globe" size={16} color="#FFFFFF" />
+                  <Text
+                    style={{
+                      flex: 1,
+                      fontFamily: tokens.typography.native.body,
+                      fontSize: 15,
+                      lineHeight: 22,
+                      color: '#FFFFFF',
+                      fontWeight: '600',
+                    }}
+                  >
+                    {t.agent.roomDetail.previewBanner}
+                  </Text>
+                  <Pressable onPress={() => setSharePreviewing(false)} hitSlop={8}>
+                    <Text
+                      style={{
+                        fontFamily: tokens.typography.native.body,
+                        fontSize: 14,
+                        lineHeight: 21,
+                        color: tokens.colors.brand[500],
+                        fontWeight: '700',
+                      }}
+                    >
+                      {t.agent.roomDetail.closePreview}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <MobileSectionHeader
+                  title={editing ? editHeaderTitle || copy.editRoom : copy.details}
+                  leading="back"
+                  backDisabled={saving}
+                  onBackPress={handleEditRoomBack}
+                  onActionPress={
+                    room && !editing ? () => setEditing(true) : undefined
+                  }
+                  actionLabel={room && !editing ? copy.edit : undefined}
+                  actionVariant="icon"
+                  actionIcon="note"
+                />
+              )}
             </View>
             {!modalReady ? (
               <ActivityIndicator />
@@ -1153,6 +1169,10 @@ export function AgentRoomsScreen({
                     backHandlerRef={editRoomBackRef}
                     onHeaderTitleChange={setEditHeaderTitle}
                     onBusy={setSaving}
+                    onCancelEdit={() => {
+                      setEditing(false);
+                      setEditHeaderTitle('');
+                    }}
                     onSaved={(result) => {
                       setEditing(false);
                       setEditHeaderTitle('');
@@ -1169,6 +1189,15 @@ export function AgentRoomsScreen({
                   mapsApiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
                   key={`${room.id}-${detailRefresh}`}
                   room={room}
+                  onEdit={() => setEditing(true)}
+                  previewing={sharePreviewing}
+                  onPreviewChange={setSharePreviewing}
+                  hidePreviewBanner
+                  shareLinkApi={{
+                    create: createRoomShareLink,
+                    list: listRoomShareLinks,
+                    revoke: revokeRoomShareLink,
+                  }}
                 />
               )
             ) : (

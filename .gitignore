@@ -67,6 +67,13 @@ apps/api/dist/
 !.env.example
 !.env.api.example
 
+# GCP / Vertex AI service-account private keys (never commit)
+secrets/
+**/gcp-*-sa.json
+nestyk-*-*.json
+nestiq-*-*.json
+*-service-account*.json
+
 # --- Logs & Runtime Reports ---
 logs/
 *.log

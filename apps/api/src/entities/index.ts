@@ -2,7 +2,9 @@ import { MasterDocumentTypeEntity, AgreementDocumentRequirementEntity, Agreement
 import { AgreementTemplateEntity } from "./agreement-template.entity";
 export * from "./agreement-template.entity";
 export * from "./agreement-sign-invite.entity";
+export * from "./room-share-link.entity";
 import { AgreementSignInviteEntity } from "./agreement-sign-invite.entity";
+import { RoomShareLinkEntity } from "./room-share-link.entity";
 import { MasterAgreementTypeEntity } from './master-agreement-type.entity';
 export * from './base.entity';
 export * from './user.entity';
@@ -64,6 +66,7 @@ export const ALL_ENTITIES = [
   MasterDocumentTypeEntity, AgreementDocumentRequirementEntity, AgreementDocumentEntity,
   AgreementTemplateEntity,
   AgreementSignInviteEntity,
+  RoomShareLinkEntity,
   MasterAgreementTypeEntity,
   UserEntity,
   MasterRoleEntity,

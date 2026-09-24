@@ -1,4 +1,5 @@
 import type { NearbyPlace } from "@nestyk/types";
+import type { AppIconName } from "@nestyk/ui/native";
 export type { NearbyPlace } from "@nestyk/types";
 export const nearbyCategories = [
   "transit",
@@ -16,6 +17,14 @@ export const categoryColors: Record<NearbyCategory, string> = {
   shopping: '#D97706',
   recreation: '#15803D',
   other: '#64748B',
+};
+export const nearbyCategoryIcons: Record<NearbyCategory, AppIconName> = {
+  transit: 'train',
+  education: 'graduation-cap',
+  health: 'hospital',
+  shopping: 'package',
+  recreation: 'tree',
+  other: 'map-pin',
 };
 export function nearbyCategory(type: string): NearbyCategory {
   if (

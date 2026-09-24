@@ -355,8 +355,8 @@ BEGIN
       2,
       12,
       NULL,
-      'viewed',
-      '[DEMO_SEED] Already viewed Ari 1BR',
+      'inprogress',
+      '[DEMO_SEED] Already following Ari 1BR',
       v_agent_id
     ),
     (

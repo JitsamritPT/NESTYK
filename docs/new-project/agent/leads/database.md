@@ -12,8 +12,8 @@
 | `budget_min` | decimal(12,2) NULL | งบต่ำสุด บาท/เดือน |
 | `budget_max` | decimal(12,2) NULL | งบสูงสุด บาท/เดือน |
 | `other_contacts` | jsonb default [] | ช่องทางอื่นหลายช่องทาง เช่น `[ {"channel":"line","value":"@example"} ]` |
-| **`status`** | varchar(20) | `new` \| `inprogress` \| `viewed` \| `lost` \| `booked` |
-| `viewed_at` | timestamptz NULL | |
+| **`status`** | varchar(20) | `new` \| `inprogress` \| `lost` \| `booked` |
+| `viewed_at` | timestamptz NULL | legacy (ไม่ bump อัตโนมัติตอนเปิด detail) |
 | `lost_reason` | varchar(500) NULL | |
 | `notes` | text NULL | |
 | **`tenant_id`** | int → tenants NULL | เมื่อ booked |

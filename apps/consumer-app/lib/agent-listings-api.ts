@@ -124,6 +124,8 @@ export async function createAgentScoutRoom(
 
 export async function generateListingPromo(input: {
   locale: string;
+  /** Listing copy language — defaults to locale when omitted. */
+  outputLocale?: string;
   listing: Record<string, unknown>;
   signal?: AbortSignal;
 }): Promise<{ listingTitle: string; listingDescription: string }> {
@@ -133,12 +135,17 @@ export async function generateListingPromo(input: {
   input.signal?.addEventListener('abort', onExternalAbort);
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
+    const outputLocale = input.outputLocale || input.locale;
     const result = await apiRequest<{
       listingTitle?: string;
       listingDescription?: string;
     }>('/agent/rooms/generate-listing-promo', {
       method: 'POST',
-      body: JSON.stringify({ locale: input.locale, listing: input.listing }),
+      body: JSON.stringify({
+        locale: input.locale,
+        outputLocale,
+        listing: input.listing,
+      }),
       signal: controller.signal,
     });
     const listingTitle = result?.listingTitle?.trim() ?? '';
@@ -177,4 +184,58 @@ export async function updateAgentRoom(id: number, data: CreateRoomWizardSubmitDa
 export async function fetchAgentFacilities(): Promise<import('@nestyk/types').FacilityOption[]> {
   await ensureAgentSession();
   return apiGet('/agent/rooms/facilities');
+}
+
+export type RoomShareSections = {
+  photos: boolean;
+  price: boolean;
+  facilities: boolean;
+  location: boolean;
+  contact: boolean;
+};
+
+export type RoomShareLinkCreated = {
+  id: number;
+  url: string;
+  expiresAt: string;
+  shareSections: RoomShareSections;
+  contactId: number | null;
+  status: 'active';
+};
+
+export type RoomShareLinkMeta = {
+  id: number;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  shareSections: RoomShareSections;
+  contactId: number | null;
+  status: 'active' | 'expired' | 'revoked';
+};
+
+export async function createRoomShareLink(
+  roomId: number,
+  body: {
+    expiresInDays?: number;
+    shareSections?: RoomShareSections;
+    contactId?: number | null;
+  },
+): Promise<RoomShareLinkCreated> {
+  await ensureAgentSession();
+  return apiRequest(`/agent/listings/${roomId}/share-links`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listRoomShareLinks(roomId: number): Promise<{ items: RoomShareLinkMeta[] }> {
+  await ensureAgentSession();
+  return apiGet(`/agent/listings/${roomId}/share-links`);
+}
+
+export async function revokeRoomShareLink(roomId: number, linkId: number) {
+  await ensureAgentSession();
+  return apiRequest(`/agent/listings/${roomId}/share-links/${linkId}`, {
+    method: 'DELETE',
+  });
 }

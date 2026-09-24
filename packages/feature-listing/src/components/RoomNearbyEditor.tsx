@@ -21,6 +21,7 @@ import {
   nearbyCategories,
   nearbyCategory,
   categoryColors,
+  nearbyCategoryIcons,
   createCustomPlace,
   distanceMeters,
   formatTransitPlaceName,
@@ -42,14 +43,7 @@ const PENDING_CUSTOM = '__pending_custom__';
 
 const CATALOG_CATEGORIES = nearbyCategories.filter((c) => c !== 'other');
 
-const CATEGORY_ICONS: Record<NearbyCategory, AppIconName> = {
-  transit: 'train',
-  education: 'note',
-  health: 'heart',
-  shopping: 'package',
-  recreation: 'tree',
-  other: 'map-pin',
-};
+const CATEGORY_ICONS = nearbyCategoryIcons;
 
 function interpolate(template: string, vars: Record<string, string | number>) {
   return Object.entries(vars).reduce(

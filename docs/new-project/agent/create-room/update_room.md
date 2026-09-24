@@ -10,9 +10,9 @@ update
     - ถ้าไม่แก้ ให้มีขึ้น ตกใจ เตือนที่คำประกาศ และ ตอนดูข้อมูลห้อง
     - ตัด ฟีเจอร์ เอกสารออก 
     - ข้อมูล promt ดึงจากไฟล์ใน โฟลเดอร์ promt
-    - generate ผ่าน Google Gemini ที่ API (`POST /agent/rooms/generate-listing-promo`)
+    - generate ผ่าน Vertex AI Gemini ที่ API (`POST /agent/rooms/generate-listing-promo`)
     - runtime prompt: `apps/api/src/agent/rooms/prompts/listing-promo.system-prompt.ts`
-    - ตั้ง `GOOGLE_API_KEY` ใน `.env.api`
+    - ตั้ง `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `GOOGLE_APPLICATION_CREDENTIALS` ใน `.env.api`
 
 ีudpate 09/17 
 -  ใส่ชื่อรายการกลับคืนมา โดยที่ ชื่อรายการนี้ ไว้ใส่ข้อมูล ชื่อรายการไว้สำหรับ agent

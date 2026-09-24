@@ -10,7 +10,7 @@
 
 ## 1. ก่อนสัญญา — Leads
 
-10 คนมาดูห้อง → [leads](../leads/flow.md) 10 แถว (`new` … `viewed`)
+10 คนมาดูห้อง → [leads](../leads/flow.md) 10 แถว (`new` … `inprogress`)
 
 Agent เลือก 1 คน → **`POST /agent/leads/:id/book`**
 
@@ -40,7 +40,7 @@ POST /agent/contracts  →  draft
 room_tenancies.status = active
 ```
 
-Lead อีก 9 คน → `lost` หรือคง `viewed` — ไม่มี tenant
+Lead อีก 9 คน → `lost` หรือคง `inprogress` — ไม่มี tenant
 
 ---
 

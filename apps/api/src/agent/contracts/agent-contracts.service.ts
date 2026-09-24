@@ -19,7 +19,13 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { createHash, randomBytes } from "crypto";
+import {
+  createShareLinkToken,
+  hashShareLinkToken,
+  isPlausibleShareLinkToken,
+  isShareLinkExpired,
+  shareLinkExpiresAt,
+} from "../../common/share-link-token";
 import { DataSource, EntityManager, IsNull } from "typeorm";
 import {
   MOCK_RESERVATION_VERSION,
@@ -721,20 +727,17 @@ export class AgentContractsService {
       "http://localhost:3000"
     ).replace(/\/$/, "");
   }
-  private hashInviteToken(token: string) {
-    return createHash("sha256").update(token).digest("hex");
-  }
   private async loadInvite(token: string) {
-    if (!token || token.length < 20 || token.length > 128)
+    if (!isPlausibleShareLinkToken(token))
       throw new NotFoundException("ไม่พบลิงก์ลงนาม");
     const invite = await this.db
       .getRepository(AgreementSignInviteEntity)
-      .findOne({ where: { token_hash: this.hashInviteToken(token) } });
+      .findOne({ where: { token_hash: hashShareLinkToken(token) } });
     if (!invite || invite.revoked_at)
       throw new NotFoundException("ไม่พบลิงก์ลงนาม");
     if (invite.used_at)
       throw new BadRequestException("ลิงก์นี้ใช้ลงนามแล้ว");
-    if (invite.expires_at.getTime() < Date.now())
+    if (isShareLinkExpired(invite.expires_at))
       throw new BadRequestException("ลิงก์ลงนามหมดอายุแล้ว");
     const c = await this.db
       .getRepository(LeaseContractEntity)
@@ -768,8 +771,8 @@ export class AgentContractsService {
     if (c[SIGN_COLUMNS[shareParty].at])
       throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
     if (this.attachments) await this.attachments.assertReady(c);
-    const token = randomBytes(32).toString("base64url");
-    const expiresAt = new Date(Date.now() + SIGN_INVITE_TTL_MS);
+    const token = createShareLinkToken();
+    const expiresAt = shareLinkExpiresAt(SIGN_INVITE_TTL_MS);
     await this.db.transaction(async (manager) => {
       await manager
         .createQueryBuilder()
@@ -784,7 +787,7 @@ export class AgentContractsService {
         manager.getRepository(AgreementSignInviteEntity).create({
           agreement_id: c.id,
           party: shareParty,
-          token_hash: this.hashInviteToken(token),
+          token_hash: hashShareLinkToken(token),
           expires_at: expiresAt,
           used_at: null,
           revoked_at: null,
@@ -873,7 +876,7 @@ export class AgentContractsService {
         });
         if (!locked || locked.revoked_at || locked.used_at)
           throw new ConflictException("ลิงก์นี้ใช้ไม่ได้แล้ว");
-        if (locked.expires_at.getTime() < Date.now())
+        if (isShareLinkExpired(locked.expires_at))
           throw new BadRequestException("ลิงก์ลงนามหมดอายุแล้ว");
         const current = await manager.findOneBy(LeaseContractEntity, {
           id: c.id,

@@ -4,24 +4,25 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import {
-  GoogleGenerativeAI,
-  type GenerateContentResult,
-} from '@google/generative-ai';
+import { existsSync } from 'fs';
+import { isAbsolute, resolve } from 'path';
+import { GoogleGenAI } from '@google/genai';
 
-/** Primary default — override with GEMINI_MODEL. Prefer stable IDs in production. */
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+/** Vertex default — override with GEMINI_MODEL. */
+const DEFAULT_MODEL = 'gemini-2.0-flash-001';
 /**
- * Stable fallbacks only (avoid `*-latest` aliases — shared load + churn).
+ * Fallbacks when primary is overloaded.
  * Override via GEMINI_FALLBACK_MODELS=model-a,model-b
  */
-const DEFAULT_FALLBACK_MODELS = ['gemini-2.0-flash'] as const;
+const DEFAULT_FALLBACK_MODELS = ['gemini-2.0-flash-001', 'gemini-2.5-flash'] as const;
 const MAX_ATTEMPTS = 3;
 
 /** Circuit opens after this many overload failures in the window. */
-const CIRCUIT_FAILURE_THRESHOLD = 4;
-const CIRCUIT_WINDOW_MS = 90_000;
-const CIRCUIT_COOLDOWN_MS = 180_000;
+const CIRCUIT_FAILURE_THRESHOLD = 5;
+/** Sliding window for counting failures. */
+const CIRCUIT_WINDOW_MS = 120_000;
+/** Default cooldown once open (override with GEMINI_CIRCUIT_COOLDOWN_MS). */
+const CIRCUIT_COOLDOWN_MS_DEFAULT = 45_000;
 
 /** Public marker for clients — do not localize on the API. */
 export const GEMINI_OVERLOAD_CODE = 'AI_OVERLOAD';
@@ -36,9 +37,13 @@ export type GeminiGenerateOptions = {
 };
 
 function isRetryableOverload(message: string): boolean {
-  return /high demand|resource.?exhausted|429|503|unavailable|try again|fetch failed|ECONNRESET|ETIMEDOUT|AI_OVERLOAD/i.test(
+  return /high demand|resource.?exhausted|429|503|unavailable|try again|fetch failed|ECONNRESET|ETIMEDOUT|AI_OVERLOAD|quota|rate.?limit/i.test(
     message,
   );
+}
+
+function isQuotaExceeded(message: string): boolean {
+  return /exceeded your current quota|quota|billing details|rate.?limit/i.test(message);
 }
 
 function backoffMs(attempt: number): number {
@@ -48,6 +53,52 @@ function backoffMs(attempt: number): number {
   return base + jitter;
 }
 
+function circuitCooldownMs(): number {
+  const raw = process.env.GEMINI_CIRCUIT_COOLDOWN_MS?.trim();
+  if (raw && /^\d+$/.test(raw)) return Math.max(5_000, Number(raw));
+  // Local/dev: shorter lockout so a stuck circuit does not block drafts for minutes.
+  if (process.env.NODE_ENV !== 'production') return 30_000;
+  return CIRCUIT_COOLDOWN_MS_DEFAULT;
+}
+
+function circuitDisabled(): boolean {
+  return /^(1|true|yes)$/i.test(String(process.env.GEMINI_CIRCUIT_DISABLED ?? '').trim());
+}
+
+function trimEnv(value: string | undefined): string {
+  return (value || '').trim().replace(/^['"]|['"]$/g, '').trim();
+}
+
+/** Monorepo roots for resolving relative credential paths. */
+function monorepoRoots(): string[] {
+  return [
+    resolve(__dirname, '../../../../'), // apps/api/src/gemini → root
+    resolve(__dirname, '../../../'), // apps/api/dist/gemini → root
+    resolve(process.cwd(), '../../'), // cwd apps/api
+    process.cwd(),
+  ];
+}
+
+/**
+ * Resolve GOOGLE_APPLICATION_CREDENTIALS / VERTEX_CREDENTIALS to an absolute
+ * existing path (relative paths are tried against monorepo root).
+ */
+export function resolveVertexCredentialsPath(): string | null {
+  const raw = trimEnv(
+    process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.VERTEX_CREDENTIALS,
+  );
+  if (!raw) return null;
+
+  if (isAbsolute(raw) && existsSync(raw)) return raw;
+  if (!isAbsolute(raw) && existsSync(raw)) return resolve(raw);
+
+  for (const root of monorepoRoots()) {
+    const candidate = resolve(root, raw);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 @Injectable()
 export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
@@ -55,24 +106,49 @@ export class GeminiService {
   /** Timestamps of recent overload/transient failures (process-local). */
   private failureTimestamps: number[] = [];
   private circuitOpenUntil = 0;
+  private client: GoogleGenAI | null = null;
 
-  private apiKey(): string {
-    const key = (process.env.GOOGLE_API_KEY || '')
-      .trim()
-      .replace(/^['"]|['"]$/g, '')
-      .trim();
-    if (!key) {
+  private vertexProject(): string {
+    const project = trimEnv(
+      process.env.VERTEX_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
+    );
+    if (!project) {
       throw new ServiceUnavailableException(
-        'Google AI is not configured — set GOOGLE_API_KEY in .env.api and restart the API',
+        'Vertex AI is not configured — set VERTEX_PROJECT_ID in .env.api and restart the API',
       );
     }
-    return key;
+    return project;
+  }
+
+  private vertexLocation(): string {
+    return trimEnv(process.env.VERTEX_LOCATION) || 'us-central1';
+  }
+
+  private getClient(): GoogleGenAI {
+    if (this.client) return this.client;
+
+    const credentialsPath = resolveVertexCredentialsPath();
+    if (!credentialsPath) {
+      throw new ServiceUnavailableException(
+        'Vertex AI credentials missing — set GOOGLE_APPLICATION_CREDENTIALS (or VERTEX_CREDENTIALS) to a service-account JSON path and restart the API',
+      );
+    }
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+
+    const project = this.vertexProject();
+    const location = this.vertexLocation();
+    this.logger.log(`Vertex AI client: project=${project} location=${location}`);
+    this.client = new GoogleGenAI({
+      vertexai: true,
+      project,
+      location,
+      googleAuthOptions: { keyFile: credentialsPath },
+    });
+    return this.client;
   }
 
   defaultModel(): string {
-    return (
-      process.env.GEMINI_MODEL?.trim().replace(/^['"]|['"]$/g, '') || DEFAULT_MODEL
-    );
+    return trimEnv(process.env.GEMINI_MODEL) || DEFAULT_MODEL;
   }
 
   private fallbackModels(): string[] {
@@ -93,6 +169,7 @@ export class GeminiService {
   }
 
   private assertCircuitClosed() {
+    if (circuitDisabled()) return;
     const now = Date.now();
     if (now < this.circuitOpenUntil) {
       const waitSec = Math.ceil((this.circuitOpenUntil - now) / 1000);
@@ -104,27 +181,29 @@ export class GeminiService {
   }
 
   private recordFailure(message: string) {
+    if (circuitDisabled()) return;
     if (!isRetryableOverload(message)) return;
     const now = Date.now();
     this.pruneFailures(now);
     this.failureTimestamps.push(now);
     if (this.failureTimestamps.length >= CIRCUIT_FAILURE_THRESHOLD) {
-      this.circuitOpenUntil = now + CIRCUIT_COOLDOWN_MS;
+      const cooldown = circuitCooldownMs();
+      this.circuitOpenUntil = now + cooldown;
       this.failureTimestamps = [];
       this.logger.warn(
-        `Gemini circuit OPEN for ${CIRCUIT_COOLDOWN_MS / 1000}s after repeated overloads`,
+        `Gemini circuit OPEN for ${cooldown / 1000}s after repeated overloads`,
       );
     }
   }
 
   private recordSuccess() {
     this.failureTimestamps = [];
-    // Keep circuitOpenUntil if still in cooldown — only time clears it.
+    this.circuitOpenUntil = 0;
   }
 
   /**
-   * GoogleGenerativeAI → getGenerativeModel → generateContent
-   * Exponential backoff + jitter, stable model fallbacks, process-local circuit breaker.
+   * Vertex AI (Google Gen AI SDK) → models.generateContent
+   * Exponential backoff + jitter, model fallbacks, process-local circuit breaker.
    */
   async generateContent(options: GeminiGenerateOptions): Promise<string> {
     this.assertCircuitClosed();
@@ -149,7 +228,7 @@ export class GeminiService {
           const retryable = isRetryableOverload(message);
           if (retryable) sawOverload = true;
           this.logger.warn(
-            `Gemini ${model} attempt ${attempt}/${MAX_ATTEMPTS} failed: ${message.slice(0, 220)}`,
+            `Vertex ${model} attempt ${attempt}/${MAX_ATTEMPTS} failed: ${message.slice(0, 220)}`,
           );
           this.recordFailure(message);
           // Circuit may have just opened — stop hammering.
@@ -165,54 +244,57 @@ export class GeminiService {
     }
 
     if (sawOverload) {
+      const lastMsg =
+        lastError instanceof Error ? lastError.message : String(lastError ?? '');
+      if (isQuotaExceeded(lastMsg)) {
+        throw new ServiceUnavailableException(
+          `${GEMINI_OVERLOAD_CODE}: Vertex AI quota exceeded. Set GEMINI_MOCK=true for local drafts, or check GCP billing/quotas.`,
+        );
+      }
       throw new ServiceUnavailableException(
         `${GEMINI_OVERLOAD_CODE}: AI is busy. Please try again shortly.`,
       );
     }
 
     const message =
-      lastError instanceof Error ? lastError.message : 'Gemini request failed';
+      lastError instanceof Error ? lastError.message : 'Vertex AI request failed';
     throw new BadGatewayException(message);
-  }
-
-  private extractText(result: GenerateContentResult): string {
-    try {
-      const direct = result.response.text()?.trim();
-      if (direct) return direct;
-    } catch {
-      // Some blocked/empty responses throw from text() — fall through.
-    }
-    const parts = result.response.candidates?.[0]?.content?.parts ?? [];
-    const joined = parts
-      .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : ''))
-      .join('')
-      .trim();
-    if (joined) return joined;
-    throw new Error('Gemini returned an empty response');
   }
 
   private async callModel(
     model: string,
     options: GeminiGenerateOptions,
   ): Promise<string> {
-    const client = new GoogleGenerativeAI(this.apiKey());
-    const generativeModel = client.getGenerativeModel({
-      model,
-      systemInstruction: options.systemInstruction,
-      generationConfig: {
-        temperature: options.temperature ?? 0.7,
-        ...(options.json ? { responseMimeType: 'application/json' } : {}),
-      },
-    });
-
-    let result: GenerateContentResult;
+    const ai = this.getClient();
     try {
-      result = await generativeModel.generateContent(options.prompt);
+      const response = await ai.models.generateContent({
+        model,
+        contents: options.prompt,
+        config: {
+          temperature: options.temperature ?? 0.7,
+          ...(options.systemInstruction
+            ? { systemInstruction: options.systemInstruction }
+            : {}),
+          ...(options.json ? { responseMimeType: 'application/json' } : {}),
+        },
+      });
+      const text = (response.text ?? '').trim();
+      if (text) return text;
+
+      const parts = response.candidates?.[0]?.content?.parts ?? [];
+      const joined = parts
+        .map((part) =>
+          part && typeof part === 'object' && 'text' in part && typeof part.text === 'string'
+            ? part.text
+            : '',
+        )
+        .join('')
+        .trim();
+      if (joined) return joined;
+      throw new Error('Vertex AI returned an empty response');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(message);
     }
-
-    return this.extractText(result);
   }
 }

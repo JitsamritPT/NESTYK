@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS leads (
   ),
   CONSTRAINT chk_leads_other_contacts_array CHECK (jsonb_typeof(other_contacts) = 'array'),
   CONSTRAINT chk_leads_status CHECK (
-    status IN ('new', 'inprogress', 'viewed', 'lost', 'booked')
+    status IN ('new', 'inprogress', 'lost', 'booked')
   )
 );
 

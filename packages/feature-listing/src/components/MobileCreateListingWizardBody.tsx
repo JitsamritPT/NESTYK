@@ -8,6 +8,12 @@ import { WizardSheetFooter } from './WizardSheetFooter';
 import { ContactListRow } from './ContactListRow';
 import { SelectedContactCard } from './SelectedContactCard';
 import { relocateNearby, isCustomPlace } from '../nearby';
+import {
+  detectPromoOutputLocale,
+  normalizePromoLocale,
+  PROMO_OUTPUT_LOCALE_OPTIONS,
+  type PromoOutputLocale,
+} from '../promo-locale';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -23,6 +29,7 @@ import {
   BackHandler,
   Image,
   TextInput,
+  Platform,
   type LayoutChangeEvent,
 } from 'react-native';
 import { useLocale } from '@nestyk/i18n';
@@ -69,7 +76,7 @@ const SUGGESTED_ADVANCE_MONTHS = 1;
 const SUGGESTED_DEPOSIT_MONTHS = 2;
 const MAX_ROOM_CONTACTS = 2;
 const PROMO_TITLE_MAX = 100;
-const PROMO_DESC_MAX = 500;
+const PROMO_DESC_MAX = 1200;
 
 /** Fit text to max length without cutting mid-word when possible. */
 function softFitText(value: string, max: number): { text: string; truncated: boolean } {
@@ -225,6 +232,8 @@ export interface MobileCreateListingWizardBodyProps {
    * Returns true when the wizard consumed the back (section → hub → source).
    */
   backHandlerRef?: React.MutableRefObject<(() => boolean) | null>;
+  /** Edit mode: called after user confirms discarding unsaved changes. */
+  onAbandonUnsaved?: () => void;
   /**
    * Sync shell header title: section names on drill-in, "Add room" on hub/source.
    */
@@ -246,6 +255,7 @@ export interface MobileCreateListingWizardBodyProps {
   mapsApiKey?: string;
   generateListingPromo?: (input: {
     locale: string;
+    outputLocale?: string;
     listing: Record<string, unknown>;
     signal?: AbortSignal;
   }) => Promise<{ listingTitle: string; listingDescription: string }>;
@@ -304,6 +314,7 @@ export const MobileCreateListingWizardBody: React.FC<
   submitLabel,
   onSubmittingChange,
   backHandlerRef,
+  onAbandonUnsaved,
   onHeaderTitleChange,
   pickPhotos,
   uploadPhoto,
@@ -346,6 +357,10 @@ export const MobileCreateListingWizardBody: React.FC<
     listingTitle: string;
     listingDescription: string;
   } | null>(null);
+  const [promoOutputLocale, setPromoOutputLocale] = useState<PromoOutputLocale>(() =>
+    normalizePromoLocale(locale),
+  );
+  const [promoLocaleTouched, setPromoLocaleTouched] = useState(false);
   const promoAbortRef = useRef<AbortController | null>(null);
   const loadFacilities = async () => {
     if (!listFacilities) return;
@@ -355,6 +370,39 @@ export const MobileCreateListingWizardBody: React.FC<
     finally { setFacilitiesLoading(false); }
   };
   useEffect(() => { if (initialData) void loadFacilities(); }, [listFacilities, !!initialData]);
+
+  useEffect(() => {
+    if (step !== 7 || promoLocaleTouched) return;
+    const facilityLabels = facilities.map((f) => t.masters.facilities[f.code] ?? f.code);
+    setPromoOutputLocale(
+      detectPromoOutputLocale(
+        [
+          propertyName,
+          address,
+          district,
+          promoTitle,
+          description,
+          customFacilities,
+          ...facilityLabels,
+          ...nearbyPlaces.map((p) => p.name),
+        ],
+        locale,
+      ),
+    );
+  }, [
+    step,
+    promoLocaleTouched,
+    propertyName,
+    address,
+    district,
+    promoTitle,
+    description,
+    customFacilities,
+    facilities,
+    nearbyPlaces,
+    locale,
+    t.masters.facilities,
+  ]);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [propertyName, setPropertyName] = useState('');
@@ -466,15 +514,18 @@ export const MobileCreateListingWizardBody: React.FC<
     propertyName: string;
     bedroom: string;
     sizeSqm: string;
+    roomId: string;
     coverUri: string | null;
   }>({
     listingTitle: '',
     propertyName: '',
     bedroom: '',
     sizeSqm: '',
+    roomId: '',
     coverUri: null,
   });
   const submitLock = useRef(false);
+  const hubDirtyRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [ownerName, setOwnerName] = useState('');
@@ -528,6 +579,7 @@ export const MobileCreateListingWizardBody: React.FC<
       propertyName: (p.name ?? '').trim(),
       bedroom: (values.bedroom ?? '').trim(),
       sizeSqm: (values.room_size ?? '').trim(),
+      roomId: (initialData.roomId ?? '').trim(),
       coverUri: initialData.medias[0]?.mediaUrl ?? null,
     });
     const seeded: {
@@ -1389,6 +1441,17 @@ export const MobileCreateListingWizardBody: React.FC<
       setEditView('overview');
       return true;
     }
+    if (listingSourceCode && editView === 'overview' && initialData && hubDirtyRef.current) {
+      Alert.alert(cr.setupUnsavedLeaveTitle, cr.setupUnsavedLeaveBody, [
+        { text: cr.setupUnsavedLeaveStay, style: 'cancel' },
+        {
+          text: cr.setupUnsavedLeaveDiscard,
+          style: 'destructive',
+          onPress: () => onAbandonUnsaved?.(),
+        },
+      ]);
+      return true;
+    }
     return false;
   }, [
     requiredPrompt,
@@ -1398,6 +1461,11 @@ export const MobileCreateListingWizardBody: React.FC<
     contactSheet,
     leaseSheet,
     layoutSheet,
+    cr.setupUnsavedLeaveTitle,
+    cr.setupUnsavedLeaveBody,
+    cr.setupUnsavedLeaveStay,
+    cr.setupUnsavedLeaveDiscard,
+    onAbandonUnsaved,
   ]);
 
   useEffect(() => {
@@ -1464,6 +1532,7 @@ export const MobileCreateListingWizardBody: React.FC<
       const facilityLabels = facilities.map((f) => t.masters.facilities[f.code] ?? f.code);
       const result = await generateListingPromo({
         locale,
+        outputLocale: promoOutputLocale,
         signal: abort.signal,
         listing: {
           propertyName: propertyName.trim(),
@@ -1539,6 +1608,7 @@ export const MobileCreateListingWizardBody: React.FC<
     leaseTerms,
     locale,
     nearbyPlaces,
+    promoOutputLocale,
     propertyName,
     province,
     rentsByTypeId,
@@ -1576,6 +1646,7 @@ export const MobileCreateListingWizardBody: React.FC<
           next.listingTitle = listingTitle.trim();
           next.bedroom = bedroom.trim();
           next.sizeSqm = sizeSqm.trim();
+          next.roomId = roomId.trim();
         }
         if (step === 6) {
           next.coverUri = photos[0]?.uri ?? null;
@@ -1598,27 +1669,8 @@ export const MobileCreateListingWizardBody: React.FC<
       fingerprint !== promoFingerprint;
 
     if (sourceChanged) {
-      Alert.alert(cr.promoStaleAlertTitle, cr.promoStaleAlertBody, [
-        {
-          text: cr.promoStaleKeep,
-          style: 'cancel',
-          onPress: () => {
-            setPromoStale(true);
-            applyDone();
-          },
-        },
-        {
-          text: cr.promoStaleEdit,
-          onPress: () => {
-            setPromoStale(true);
-            setHubSaveHighlight((prev) => prev.filter((id) => id !== step));
-            openSection(7);
-          },
-        },
-      ]);
-      return;
+      setPromoStale(true);
     }
-
     applyDone();
   };
 
@@ -1658,6 +1710,15 @@ export const MobileCreateListingWizardBody: React.FC<
       ].filter(Boolean);
       return bits.length ? bits.join(' · ') : ov.sectionHints.layout;
     }
+    if (current === 3) {
+      const count = facilities.length + (customFacilities.trim() ? customFacilities.split(/[\n,]/).filter((s) => s.trim()).length : 0);
+      return count > 0 ? interpolate(cr.setupFacilitiesCount, { count }) : ov.sectionHints.facilities;
+    }
+    if (current === 4) {
+      return nearbyPlaces.length > 0
+        ? interpolate(cr.setupNearbyCount, { count: nearbyPlaces.length })
+        : ov.sectionHints.nearby;
+    }
     if (current === 5) {
       if (!selectedContractTypeIds.length) return ov.sectionHints.pricing;
       const prices = selectedContractTypeIds.map((id) => Number(rentsByTypeId[String(id)])).filter((price) => price > 0);
@@ -1672,14 +1733,23 @@ export const MobileCreateListingWizardBody: React.FC<
     if (current === 7) {
       if (promoStale) return cr.promoStaleBadge;
       if (promoTitle.trim()) return promoTitle.trim();
+      if (description.trim()) return description.trim().slice(0, 48);
       return ov.sectionHints.details;
     }
     if (current === 8) {
+      const role =
+        listingSourceCode === 'owner'
+          ? cr.sourceOwnerShort
+          : listingSourceCode === 'co_agent'
+            ? cr.sourceCoAgentShort
+            : '';
       if (roomContacts.length) {
-        return roomContacts.map((c) => c.name).join(' · ');
+        const names = roomContacts.map((c) => c.name).join(' · ');
+        return role ? `${names} · ${role}` : names;
       }
       if (ownerName.trim()) {
-        return `${ownerName.trim()}${ownerPhone.trim() ? ` · ${ownerPhone.trim()}` : ''}`;
+        const base = `${ownerName.trim()}${ownerPhone.trim() ? ` · ${ownerPhone.trim()}` : ''}`;
+        return role ? `${base} · ${role}` : base;
       }
       return ov.sectionHints.contact;
     }
@@ -1700,15 +1770,16 @@ export const MobileCreateListingWizardBody: React.FC<
       icon: 'buildings' | 'bed' | 'camera' | 'coins' | 'sparkle' | 'map-pin' | 'note' | 'user';
       label: string;
       optional?: boolean;
+      group: 'room' | 'listing';
     }> = [
-      { step: 1, icon: 'buildings', label: cr.steps.property },
-      { step: 2, icon: 'bed', label: cr.steps.layout },
-      { step: 5, icon: 'coins', label: cr.steps.pricing },
-      { step: 8, icon: 'user', label: cr.steps.ownerVisibility },
-      { step: 6, icon: 'camera', label: cr.steps.photos, optional: true },
-      { step: 3, icon: 'sparkle', label: cr.steps.facilities },
-      { step: 4, icon: 'map-pin', label: cr.steps.nearby },
-      { step: 7, icon: 'note', label: cr.detailsTitle, optional: true },
+      { step: 1, icon: 'buildings', label: cr.steps.property, group: 'room' },
+      { step: 2, icon: 'bed', label: cr.steps.layout, group: 'room' },
+      { step: 5, icon: 'coins', label: cr.steps.pricing, group: 'room' },
+      { step: 8, icon: 'user', label: cr.sourceSection, group: 'room' },
+      { step: 6, icon: 'camera', label: cr.steps.photos, optional: true, group: 'listing' },
+      { step: 3, icon: 'sparkle', label: cr.steps.facilities, group: 'listing' },
+      { step: 4, icon: 'map-pin', label: cr.steps.nearby, group: 'listing' },
+      { step: 7, icon: 'note', label: cr.detailsTitle, optional: true, group: 'listing' },
     ];
     return hubSteps.map((stepId) => {
       const def = defs.find((d) => d.step === stepId)!;
@@ -1744,17 +1815,31 @@ export const MobileCreateListingWizardBody: React.FC<
         };
       }
       if (!sectionHasData(def.step)) {
+        let emptyLabel = ov.notAdded;
+        if (def.optional) {
+          if (def.step === 6) {
+            emptyLabel = interpolate(cr.photosOptionalStatus, { count: 0 });
+          } else if (def.step === 7) {
+            emptyLabel = ov.sectionHints.details;
+          }
+        }
         return {
           ...def,
           hint,
           status: 'empty' as const,
-          statusLabel: isSaveHighlight
-            ? cr.setupSaveIncomplete
-            : def.optional
-              ? interpolate(cr.photosOptionalStatus, { count: 0 })
-              : ov.notAdded,
+          statusLabel: isSaveHighlight ? cr.setupSaveIncomplete : emptyLabel,
           detail: ov.notAdded,
           highlightError: isSaveHighlight,
+        };
+      }
+      if (def.step === 7 && promoStale) {
+        return {
+          ...def,
+          hint,
+          status: 'stale' as const,
+          statusLabel: cr.promoStaleBadge,
+          detail: cr.promoStaleBadge,
+          highlightError: false,
         };
       }
       return {
@@ -1767,11 +1852,164 @@ export const MobileCreateListingWizardBody: React.FC<
       };
     });
   })();
-  const incompleteSectionCount = editSections.filter((s) => s.status === 'incomplete').length;
+  const emptyOrIncomplete = editSections.filter((s) => s.status !== 'complete');
+  const overallCompleteCount = editSections.filter((s) => s.status === 'complete').length;
+  const overallTotal = editSections.length;
+  const overallProgress = overallTotal > 0 ? overallCompleteCount / overallTotal : 0;
   const requiredCompleteCount = requiredHubSteps.filter((stepId) => {
     const section = editSections.find((s) => s.step === stepId);
     return section?.status === 'complete';
   }).length;
+  const saveReady = requiredCompleteCount >= requiredHubSteps.length;
+  /** After required: prefer listing description, then facilities/nearby, then photos (Create: photos only). */
+  const optionalNextOrder = initialData ? [7, 3, 4, 6] : [6];
+  const nextHubSection = (() => {
+    const byStep = (stepId: number) => editSections.find((s) => s.step === stepId);
+    const pick = (stepId: number) => {
+      const section = byStep(stepId);
+      if (!section || section.status === 'complete') return null;
+      const actionLabel =
+        section.status === 'empty'
+          ? interpolate(cr.setupNextAdd, { section: section.label })
+          : interpolate(cr.setupNextComplete, { section: section.label });
+      return {
+        step: section.step,
+        label: actionLabel,
+        reason: section.statusLabel || section.hint,
+      };
+    };
+    for (const stepId of hubSaveHighlight) {
+      const next = pick(stepId);
+      if (next) return next;
+    }
+    for (const stepId of requiredHubSteps) {
+      const next = pick(stepId);
+      if (next) return next;
+    }
+    if (saveReady) {
+      for (const stepId of optionalNextOrder) {
+        const next = pick(stepId);
+        if (next) return next;
+      }
+      for (const section of emptyOrIncomplete) {
+        const next = pick(section.step);
+        if (next) return next;
+      }
+    }
+    return null;
+  })();
+  const hubEncouragement =
+    hubSaveHighlight.length > 0
+      ? cr.setupSaveMissingBanner
+      : nextHubSection
+        ? interpolate(cr.setupEncourageNext, {
+            section: editSections.find((s) => s.step === nextHubSection.step)?.label ?? nextHubSection.label,
+          })
+        : overallCompleteCount >= overallTotal && overallTotal > 0
+          ? cr.setupAllComplete
+          : saveReady
+            ? cr.setupReadyToSave
+            : overallProgress >= 0.5
+              ? cr.setupAlmostThere
+              : cr.setupKeepGoing;
+  const hubDirty = (() => {
+    if (!initialData) return false;
+    const p = initialData.property;
+    const layoutMap = Object.fromEntries(
+      (initialData.layout ?? []).map((item) => [item.code, String(item.value ?? '').trim()]),
+    );
+    const initPhotos = (initialData.medias ?? [])
+      .map((m) => m.mediaUrl)
+      .join('|');
+    const curPhotos = photos.map((ph) => ph.mediaUrl ?? ph.uri).join('|');
+    const initFacilities = (initialData.facilities ?? [])
+      .map((f) => f.code)
+      .sort()
+      .join('|');
+    const curFacilities = facilities
+      .map((f) => f.code)
+      .sort()
+      .join('|');
+    const initNearby = (initialData.nearbyPlaces ?? [])
+      .map((n) => `${n.placeId ?? ''}:${n.name}`)
+      .sort()
+      .join('|');
+    const curNearby = nearbyPlaces
+      .map((n) => `${n.placeId ?? ''}:${n.name}`)
+      .sort()
+      .join('|');
+    const initPrices = (initialData.prices ?? [])
+      .map(
+        (price) =>
+          `${price.contractTypeId}:${price.price}:${price.advanceRentMonths ?? ''}:${price.depositMonths ?? ''}`,
+      )
+      .sort()
+      .join('|');
+    const curPrices = selectedContractTypeIds
+      .map((id) => {
+        const terms = termsByTypeId[String(id)];
+        return `${id}:${rentsByTypeId[String(id)] ?? ''}:${terms?.advanceRentMonths ?? ''}:${terms?.depositMonths ?? ''}`;
+      })
+      .sort()
+      .join('|');
+    const initContactKey = (
+      initialData.selectedContacts?.length
+        ? initialData.selectedContacts
+        : initialData.contactId
+          ? [{ id: initialData.contactId }]
+          : []
+    )
+      .map((c) => String(c.id ?? ''))
+      .sort()
+      .join('|');
+    const curContactKey = roomContacts
+      .map((c) => (c.id != null ? String(c.id) : `new:${c.phone}`))
+      .sort()
+      .join('|');
+    const customJoined = (initialData.customFacilities ?? []).join('\n');
+    const numOrEmpty = (v: number | null | undefined) =>
+      v == null || Number.isNaN(Number(v)) ? '' : String(Number(v));
+
+    return (
+      propertyName.trim() !== (p?.name ?? '').trim() ||
+      address.trim() !== (p?.address ?? '').trim() ||
+      district.trim() !== (p?.district ?? '').trim() ||
+      province.trim() !== (p?.province ?? '').trim() ||
+      subdistrict.trim() !== (p?.subdistrict ?? '').trim() ||
+      postalCode.trim() !== (p?.postalCode ?? '').trim() ||
+      propertyTypeId !== (p?.propertyTypeId ?? null) ||
+      numOrEmpty(latitude) !== numOrEmpty(initialData.latitude ?? p?.latitude) ||
+      numOrEmpty(longitude) !== numOrEmpty(initialData.longitude ?? p?.longitude) ||
+      listingTitle.trim() !== (initialData.listingTitle ?? '').trim() ||
+      roomId.trim() !== (initialData.roomId ?? '').trim() ||
+      roomTypeId !== (initialData.roomTypeId ?? null) ||
+      bedroom.trim() !== (layoutMap.bedroom ?? '') ||
+      bathroom.trim() !== (layoutMap.bathroom ?? '') ||
+      sizeSqm.trim() !== (layoutMap.room_size ?? '') ||
+      floor.trim() !== (layoutMap.floor ?? '') ||
+      building.trim() !== (layoutMap.building ?? '') ||
+      availableFrom !== clampMoveInDate(initialData.availableFromDate ?? todayIsoDate()) ||
+      promoTitle.trim() !== (initialData.promoTitle ?? '').trim() ||
+      description.trim() !== (initialData.listingDescription ?? '').trim() ||
+      curPhotos !== initPhotos ||
+      curFacilities !== initFacilities ||
+      curNearby !== initNearby ||
+      customFacilities.trim() !== customJoined.trim() ||
+      curPrices !== initPrices ||
+      advanceRentMonths !== (initialData.advanceRentMonths ?? null) ||
+      depositMonths !== (initialData.depositMonths ?? null) ||
+      waterRate.trim() !==
+        (initialData.waterRatePerUnit == null ? '' : String(initialData.waterRatePerUnit)) ||
+      electricRate.trim() !==
+        (initialData.electricRatePerUnit == null
+          ? ''
+          : String(initialData.electricRatePerUnit)) ||
+      listingSourceCode !== (initialData.listingSourceCode ?? null) ||
+      curContactKey !== initContactKey ||
+      Boolean(promoStale) !== Boolean(initialData.promoCopyStale)
+    );
+  })();
+  hubDirtyRef.current = hubDirty;
   const currentSection = editSections.find((s) => s.step === step);
 
   const confirmSource = () => {
@@ -1905,6 +2143,31 @@ export const MobileCreateListingWizardBody: React.FC<
       requestAnimationFrame(() => scrollToTop());
       return;
     }
+
+    const hasPromo = promoTitle.trim().length > 0 || description.trim().length > 0;
+    if (promoStale && hasPromo) {
+      Alert.alert(cr.promoStaleAlertTitle, cr.promoStaleAlertBody, [
+        {
+          text: cr.promoStaleKeep,
+          style: 'cancel',
+          onPress: () => {
+            void runSubmitListing();
+          },
+        },
+        {
+          text: cr.promoStaleEdit,
+          onPress: () => {
+            openSection(7);
+          },
+        },
+      ]);
+      return;
+    }
+
+    await runSubmitListing();
+  };
+
+  const runSubmitListing = async () => {
     if (submitLock.current) return;
     setHubSaveHighlight([]);
     if (onSubmitListing && (uploadPhoto || photos.every((photo) => photo.mediaUrl))) {
@@ -1999,10 +2262,7 @@ export const MobileCreateListingWizardBody: React.FC<
           </>
         ) : showOverview ? (
           <>
-            {/* Shell header shows Add room on hub; section titles move to header. */}
-            <Text style={styles.pageTitle}>
-              {title ?? (initialData ? cr.title : cr.setupHubTitle)}
-            </Text>
+            {/* Shell header owns Add/Edit room title — body only shows a short lead. */}
             <Text style={styles.sourceLead}>
               {initialData ? cr.editSections : cr.setupHubHint}
             </Text>
@@ -2030,17 +2290,20 @@ export const MobileCreateListingWizardBody: React.FC<
                       style={styles.hubPreviewThumbImg}
                     />
                   ) : (
-                    <MobileIcon name="buildings" size={22} color={tokens.colors.textSecondary} />
+                    <MobileIcon name="buildings" size={26} color={tokens.colors.textSecondary} />
                   )}
                 </View>
                 <View style={styles.hubPreviewCopy}>
                   <Text style={styles.hubPreviewTitle} numberOfLines={1}>
-                    {hubSnapshot.listingTitle ||
-                      hubSnapshot.propertyName ||
+                    {hubSnapshot.propertyName ||
+                      hubSnapshot.listingTitle ||
                       cr.steps.property}
                   </Text>
                   <Text style={styles.hubPreviewMeta} numberOfLines={1}>
                     {[
+                      hubSnapshot.roomId
+                        ? interpolate(cr.setupRoomMeta, { id: hubSnapshot.roomId })
+                        : null,
                       formatBedroomSpec(
                         hubSnapshot.bedroom,
                         {
@@ -2061,52 +2324,61 @@ export const MobileCreateListingWizardBody: React.FC<
             <RoomEditSectionList
               sections={editSections}
               disabled={submitting}
-              progress={
-                requiredHubSteps.length
-                  ? requiredCompleteCount / requiredHubSteps.length
-                  : 0
-              }
+              progress={overallProgress}
+              encouragement={hubEncouragement}
+              nextSection={nextHubSection}
+              nextTitle={cr.setupNextPrefix}
+              groupLabels={{
+                room: cr.setupGroupRoom,
+                listing: cr.setupGroupListing,
+              }}
               summaryTone={
                 hubSaveHighlight.length > 0
                   ? 'error'
-                  : requiredCompleteCount >= requiredHubSteps.length && incompleteSectionCount === 0
+                  : overallCompleteCount >= overallTotal && overallTotal > 0
                     ? 'success'
                     : 'warning'
               }
               summaryLabel={interpolate(cr.setupProgress, {
-                done: requiredCompleteCount,
-                total: requiredHubSteps.length,
+                done: overallCompleteCount,
+                total: overallTotal,
               })}
               onSelect={openSection}
             />
+            {hubSaveHighlight.length > 0 ? (
             <View
               style={[
                 styles.hubFootnoteRow,
-                hubSaveHighlight.length > 0 ? styles.hubSaveBanner : null,
+                styles.hubSaveBanner,
               ]}
             >
               <Text
                 style={[
                   styles.hubFootnoteIcon,
-                  hubSaveHighlight.length > 0 ? styles.hubSaveBannerIcon : null,
+                  styles.hubSaveBannerIcon,
                 ]}
               >
-                {hubSaveHighlight.length > 0 ? '!' : 'ⓘ'}
+                !
               </Text>
               <Text
                 style={[
                   styles.hubFootnote,
-                  hubSaveHighlight.length > 0 ? styles.hubSaveBannerText : null,
+                  styles.hubSaveBannerText,
                 ]}
               >
-                {hubSaveHighlight.length > 0
-                  ? cr.setupSaveMissingBanner
-                  : cr.setupMissingHint}
+                {cr.setupSaveMissingBanner}
               </Text>
             </View>
+            ) : null}
           </ScrollView>
           <View style={styles.footer}>
-            {!initialData && <Text style={styles.footerNoteText}>{cr.visibilityPrivateHint}</Text>}
+            {initialData ? (
+              hubDirty ? (
+                <Text style={styles.footerNoteText}>{cr.setupUnsavedChanges}</Text>
+              ) : null
+            ) : (
+              <Text style={styles.footerNoteText}>{cr.visibilityPrivateHint}</Text>
+            )}
             <MobileButton
               onPress={handleSubmit}
               isLoading={submitting}
@@ -3048,30 +3320,75 @@ export const MobileCreateListingWizardBody: React.FC<
             ) : null}
             {generateListingPromo ? (
               <View style={styles.promoAssistCard}>
-                <View style={styles.promoAssistCopy}>
-                  <View style={styles.promoAssistHeading}>
-                    <MobileIcon name="sparkle" size={20} color={tokens.colors.brand[600]} />
-                    <Text style={styles.promoAssistTitle}>{cr.promoAssistTitle}</Text>
+                <View style={styles.promoAssistTop}>
+                  <View style={styles.promoAssistCopy}>
+                    <View style={styles.promoAssistHeading}>
+                      <MobileIcon name="sparkle" size={20} color={tokens.colors.brand[600]} />
+                      <Text style={styles.promoAssistTitle}>{cr.promoAssistTitle}</Text>
+                    </View>
+                    <Text style={styles.promoAssistHint}>{cr.promoAssistHint}</Text>
                   </View>
-                  <Text style={styles.promoAssistHint}>{cr.promoAssistHint}</Text>
+                  <MobileAiQuotaAction
+                    label={cr.promoDraftAction}
+                    remaining={promoRemaining}
+                    limit={MOCK_AI_PROMO_LIMIT}
+                    showQuota={false}
+                    loading={generatingPromo}
+                    disabled={generatingPromo || promoAiPhase !== 'closed'}
+                    style={styles.promoAssistBtn}
+                    onPress={() => {
+                      if (generatingPromo || promoAiPhase !== 'closed' || !generateListingPromo) return;
+                      if (promoRemaining <= 0) {
+                        Alert.alert(cr.promoQuotaExhausted);
+                        return;
+                      }
+                      void runPromoGenerate();
+                    }}
+                  />
                 </View>
-                <MobileAiQuotaAction
-                  label={cr.promoDraftAction}
-                  remaining={promoRemaining}
-                  limit={MOCK_AI_PROMO_LIMIT}
-                  showQuota={false}
-                  loading={generatingPromo}
-                  disabled={generatingPromo || promoAiPhase !== 'closed'}
-                  style={styles.promoAssistBtn}
-                  onPress={() => {
-                    if (generatingPromo || promoAiPhase !== 'closed' || !generateListingPromo) return;
-                    if (promoRemaining <= 0) {
-                      Alert.alert(cr.promoQuotaExhausted);
-                      return;
-                    }
-                    void runPromoGenerate();
-                  }}
-                />
+                <View style={styles.promoLocaleBlock}>
+                  <Text style={styles.promoLocaleLabel}>{cr.promoOutputLanguage}</Text>
+                  <View style={styles.promoLocaleRow}>
+                    {PROMO_OUTPUT_LOCALE_OPTIONS.map((code) => {
+                      const selected = promoOutputLocale === code;
+                      const label =
+                        code === 'th'
+                          ? cr.promoLocaleTh
+                          : code === 'en'
+                            ? cr.promoLocaleEn
+                            : code === 'zh'
+                              ? cr.promoLocaleZh
+                              : cr.promoLocaleJa;
+                      return (
+                        <Pressable
+                          key={code}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                          disabled={generatingPromo || promoAiPhase !== 'closed'}
+                          onPress={() => {
+                            setPromoLocaleTouched(true);
+                            setPromoOutputLocale(code);
+                          }}
+                          android_ripple={{ color: `${accent}22` }}
+                          style={({ pressed }) => [
+                            styles.promoLocaleChip,
+                            selected ? styles.promoLocaleChipOn : null,
+                            pressed && Platform.OS === 'ios' ? { opacity: 0.85 } : null,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.promoLocaleChipText,
+                              selected ? styles.promoLocaleChipTextOn : null,
+                            ]}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
               </View>
             ) : null}
             <View style={styles.promoFields}>
@@ -3844,9 +4161,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   hubPreviewThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
+    width: 64,
+    height: 64,
+    borderRadius: 12,
     backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
@@ -4456,8 +4773,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   promoAssistCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 12,
     paddingVertical: 14,
     paddingHorizontal: 14,
@@ -4465,6 +4780,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFBEB',
     borderWidth: 1,
     borderColor: '#FDE68A',
+  },
+  promoAssistTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   promoAssistCopy: {
     flex: 1,
@@ -4490,6 +4810,46 @@ const styles = StyleSheet.create({
   promoAssistBtn: {
     flexShrink: 0,
     minWidth: 112,
+  },
+  promoLocaleBlock: {
+    gap: 8,
+  },
+  promoLocaleLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: tokens.colors.textSecondary,
+  },
+  promoLocaleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  promoLocaleChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 36,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    backgroundColor: tokens.colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promoLocaleChipOn: {
+    borderColor: tokens.colors.brand[500],
+    backgroundColor: '#FEF3C7',
+  },
+  promoLocaleChipText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: tokens.colors.textSecondary,
+  },
+  promoLocaleChipTextOn: {
+    color: '#211E1E',
   },
   promoFields: {
     gap: 16,

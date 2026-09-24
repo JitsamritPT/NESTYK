@@ -1,9 +1,9 @@
 import { PropertyEntity } from '../../entities/property.entity';
 import { canonicalProvince, canonicalArea, leadProvinces } from './lead-locations';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import type { CreateLeadInput } from '@nestyk/types';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import type { CreateLeadInput, LeadStatus, AgentLeadsSort } from '@nestyk/types';
 import { LeadEntity } from '../../entities/lead.entity';
 import { MasterRoomTypeEntity } from '../../entities/master-room-type.entity';
 import { MasterVisaTypeEntity } from '../../entities/master-visa-type.entity';
@@ -19,7 +19,7 @@ export function validateLead(input: unknown): CreateLeadInput {
   if (!Array.isArray(locations) || locations.length > 50 || locations.some((v) => typeof v !== 'string' || !v.trim() || v.length > 255)) throw new BadRequestException('Invalid locations');
   result.locations = [...new Set(locations.map(canonicalArea))];
   if ((result.locations as string[]).some((v) => !v || v === '-')) throw new BadRequestException('Invalid locations');
-  const textFields = { locationPlaceId: 255, locationName: 500, name: 255, phone: 50, nationality: 120, preferredLocation: 500, moveInPlan: 255, occupation: 255 };
+  const textFields = { locationPlaceId: 255, locationName: 500, name: 255, phone: 50, nationality: 120, preferredLocation: 500, moveInPlan: 255, occupation: 255, notes: 500 };
   for (const [key, max] of Object.entries(textFields)) {
     const value = body[key];
     const required = key === 'name' || key === 'phone';
@@ -103,7 +103,7 @@ export class AgentLeadsService {
       preferred_location: b.preferredLocation, move_in_plan: b.moveInPlan, has_pets: b.hasPets,
       occupation: b.occupation, visa_type_id: b.visaTypeId, lease_duration_months: b.leaseDurationMonths,
       uses_car: b.usesCar, occupant_count: b.occupantCount, is_smoker: b.isSmoker,
-      desired_room_type_id: b.desiredRoomTypeId, created_by_user_id: agentId,
+      desired_room_type_id: b.desiredRoomTypeId, notes: b.notes, created_by_user_id: agentId,
       rent_room_id: null, status: 'new', other_contacts: [],
     }));
     const saved = await this.leads.findOne({ where: { id: row.id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
@@ -135,15 +135,15 @@ export class AgentLeadsService {
       preferred_location: b.preferredLocation, move_in_plan: b.moveInPlan, has_pets: b.hasPets,
       occupation: b.occupation, visa_type_id: b.visaTypeId, lease_duration_months: b.leaseDurationMonths,
       uses_car: b.usesCar, occupant_count: b.occupantCount, is_smoker: b.isSmoker,
-      desired_room_type_id: b.desiredRoomTypeId,
+      desired_room_type_id: b.desiredRoomTypeId, notes: b.notes,
     });
     const saved = await this.leads.findOne({ where: { id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
     if (!saved) throw new NotFoundException('Lead not found');
     return toLead(saved);
   }
 
-  async list(agentId: number, query: { q?: string; page?: string; limit?: string; province?: string; locations?: string; includeUnspecified?: string }) {
-    if ([query.q, query.province, query.locations, query.page, query.limit, query.includeUnspecified].some((v) => v != null && typeof v !== 'string')) throw new BadRequestException('Invalid query parameters');
+  async list(agentId: number, query: { q?: string; page?: string; limit?: string; province?: string; locations?: string; includeUnspecified?: string; sort?: string }) {
+    if ([query.q, query.province, query.locations, query.page, query.limit, query.includeUnspecified, query.sort].some((v) => v != null && typeof v !== 'string')) throw new BadRequestException('Invalid query parameters');
     const province = query.province ? canonicalProvince(query.province) : null;
     if (query.province && !province) throw new BadRequestException('Invalid province');
     let locations: string[] = [];
@@ -152,6 +152,7 @@ export class AgentLeadsService {
       if (!Array.isArray(locations) || locations.length > 50 || locations.some((v) => typeof v !== 'string' || !v.trim() || v.length > 255)) throw new BadRequestException('Invalid locations');
       if (locations.length && !province) throw new BadRequestException('Province is required for locations');
     }
+    const sort = normalizeLeadSort(query.sort);
     const page = Math.max(1, Math.min(1000000, Math.floor(Number(query.page) || 1)));
     const limit = Math.max(1, Math.min(50, Math.floor(Number(query.limit) || 20)));
     const qb = this.leads.createQueryBuilder('lead').leftJoinAndSelect('lead.desired_room_type', 'roomType')
@@ -163,21 +164,106 @@ export class AgentLeadsService {
       : 'lead.locations && CAST(:locations AS text[])', { locations });
     const q = query.q?.trim();
     if (q) qb.andWhere("(lead.name ILIKE :q OR lead.phone ILIKE :q OR lead.preferred_location ILIKE :q OR lead.location_name ILIKE :q OR lead.province ILIKE :q OR array_to_string(lead.locations, ', ') ILIKE :q)", { q: `%${q.replace(/[\\%_]/g, '\\$&')}%` });
-    const [rows, total] = await qb.orderBy('lead.created_at', 'DESC').addOrderBy('lead.id', 'DESC').skip((page - 1) * limit).take(limit).getManyAndCount();
+    applyLeadSort(qb, sort);
+    const [rows, total] = await qb.skip((page - 1) * limit).take(limit).getManyAndCount();
     return { items: rows.map(toLead), total, page, limit };
   }
 
   async view(agentId: number, id: number) {
     const row = await this.leads.findOne({ where: { id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
     if (!row) throw new NotFoundException('Lead not found');
-    if (row.status === 'new') {
-      row.status = 'viewed';
-      row.viewed_at = new Date();
-      await this.leads.save(row);
-    }
     return toLead(row);
   }
+
+  async markInProgress(agentId: number, id: number) {
+    const row = await this.requireLead(agentId, id);
+    if (row.status === 'booked') throw new ConflictException('Booked leads cannot move to in progress');
+    if (row.status === 'inprogress') return toLead(row);
+    row.status = 'inprogress';
+    row.lost_reason = null;
+    await this.leads.save(row);
+    return toLead(row);
+  }
+
+  async markLost(agentId: number, id: number, input: unknown) {
+    const row = await this.requireLead(agentId, id);
+    if (row.status === 'booked') throw new ConflictException('Booked leads cannot be marked lost');
+    const reason = parseLostReason(input);
+    row.status = 'lost';
+    row.lost_reason = reason;
+    await this.leads.save(row);
+    return toLead(row);
+  }
+
+  private async requireLead(agentId: number, id: number) {
+    const row = await this.leads.findOne({ where: { id, created_by_user_id: agentId }, relations: { desired_room_type: true, visa_type: true } });
+    if (!row) throw new NotFoundException('Lead not found');
+    return row;
+  }
 }
+
+function parseLostReason(input: unknown): string {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Lost reason is required');
+  const value = (input as Record<string, unknown>).lostReason;
+  if (typeof value !== 'string' || !value.trim() || value.trim().length > 500) {
+    throw new BadRequestException('lostReason must be text up to 500 characters');
+  }
+  return value.trim();
+}
+
+const LEAD_SORTS: AgentLeadsSort[] = [
+  'created_desc',
+  'created_asc',
+  'updated_desc',
+  'name_asc',
+  'budget_asc',
+  'budget_desc',
+  'status_asc',
+  'status_desc',
+];
+
+const STATUS_RANK_SQL =
+  "CASE lead.status WHEN 'new' THEN 1 WHEN 'inprogress' THEN 2 WHEN 'booked' THEN 3 WHEN 'lost' THEN 4 ELSE 5 END";
+
+const BUDGET_SORT_SQL = 'COALESCE(lead.budget_min, lead.budget_max)';
+
+export function normalizeLeadSort(value?: string): AgentLeadsSort {
+  if (value == null || value === '') return 'created_desc';
+  if ((LEAD_SORTS as string[]).includes(value)) return value as AgentLeadsSort;
+  throw new BadRequestException('Invalid sort');
+}
+
+function applyLeadSort(qb: SelectQueryBuilder<LeadEntity>, sort: AgentLeadsSort) {
+  if (sort === 'created_asc') {
+    qb.orderBy('lead.created_at', 'ASC').addOrderBy('lead.id', 'ASC');
+    return;
+  }
+  if (sort === 'updated_desc') {
+    qb.orderBy('lead.updated_at', 'DESC').addOrderBy('lead.id', 'DESC');
+    return;
+  }
+  if (sort === 'name_asc') {
+    qb.orderBy('lead.name', 'ASC').addOrderBy('lead.id', 'ASC');
+    return;
+  }
+  if (sort === 'budget_asc' || sort === 'budget_desc') {
+    // TypeORM orderBy cannot take raw COALESCE(...) — select an alias first.
+    qb.addSelect(BUDGET_SORT_SQL, 'sort_budget');
+    qb.orderBy('sort_budget', sort === 'budget_asc' ? 'ASC' : 'DESC', 'NULLS LAST')
+      .addOrderBy('lead.id', sort === 'budget_asc' ? 'ASC' : 'DESC');
+    return;
+  }
+  if (sort === 'status_asc' || sort === 'status_desc') {
+    // TypeORM orderBy cannot take raw CASE ... — select an alias first.
+    qb.addSelect(STATUS_RANK_SQL, 'sort_status_rank');
+    qb.orderBy('sort_status_rank', sort === 'status_asc' ? 'ASC' : 'DESC')
+      .addOrderBy('lead.created_at', 'DESC')
+      .addOrderBy('lead.id', 'DESC');
+    return;
+  }
+  qb.orderBy('lead.created_at', 'DESC').addOrderBy('lead.id', 'DESC');
+}
+
 function toLead(row: LeadEntity) {
   return {
     locationPlaceId: row.location_place_id ?? null, locationName: row.location_name ?? null, latitude: row.latitude ?? null, longitude: row.longitude ?? null, radiusKm: row.radius_km ?? null,
@@ -189,6 +275,7 @@ function toLead(row: LeadEntity) {
     leaseDurationMonths: row.lease_duration_months,
     usesCar: row.uses_car, occupantCount: row.occupant_count, isSmoker: row.is_smoker,
     desiredRoomTypeId: row.desired_room_type_id, desiredRoomTypeCode: row.desired_room_type?.code ?? null,
-    status: row.status, createdAt: row.created_at,
+    notes: row.notes ?? null,
+    status: row.status as LeadStatus, lostReason: row.lost_reason ?? null, createdAt: row.created_at,
   };
 }

@@ -19,6 +19,7 @@ export type MobileAppTab =
   | 'listingRoom'
   | 'createListing'
   | 'listingLead'
+  | 'createLead'
   | 'clients'
   | 'more'
   | 'contact'

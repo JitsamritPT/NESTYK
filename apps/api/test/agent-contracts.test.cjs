@@ -68,7 +68,7 @@ test('creates tenancy and draft using server-owned identity and locked room', as
   assert.ok(f.calls.some(c => c[0] === 'andWhere' && c[1].includes('c.end_date >= :start')));
 });
 test('rejects unbooked leads, unauthorized rooms and overlapping contracts without writes', async () => {
-  for (const options of [{ status: 'viewed' }, { foreignRoom: true }, { overlap: 1 }]) { const f = fixture(options); await assert.rejects(() => f.service.create(7, valid)); assert.equal(f.saved.length, 0); }
+  for (const options of [{ status: 'inprogress' }, { foreignRoom: true }, { overlap: 1 }]) { const f = fixture(options); await assert.rejects(() => f.service.create(7, valid)); assert.equal(f.saved.length, 0); }
 });
 test('failed contract save rolls back the tenancy transaction', async () => {
   const f = fixture({ failSave: true }); await assert.rejects(() => f.service.create(7, valid), /database failure/); assert.equal(f.saved.length, 0); assert.equal(f.rolledBack(), true);

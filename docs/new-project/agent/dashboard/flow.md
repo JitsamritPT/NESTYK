@@ -55,7 +55,7 @@ Pull-to-refresh → reload `GET /agent/dashboard`
 | `scoutRooms` | ห้อง scout | `COUNT(rent_rooms)` scout + created_by | `/agent/listings` |
 | `publishedRooms` | ประกาศ public | `visibility = published` | `/agent/listings?visibility=published` |
 | `newLeads` | Lead ใหม่ | `leads.status = new` | `/agent/leads?status=new` |
-| `activeLeads` | กำลังติดตาม | `inprogress` + `viewed` | `/agent/leads?status=inprogress` |
+| `activeLeads` | กำลังติดตาม | `inprogress` | `/agent/leads?status=inprogress` |
 | `pendingContracts` | สัญญารอดำเนินการ | ดู §5 | `/agent/contracts?status=pending` |
 | `activeContracts` | สัญญา active | `lease_contracts.status = active` | `/agent/contracts?status=active` |
 

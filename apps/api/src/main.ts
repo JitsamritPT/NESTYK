@@ -1,6 +1,6 @@
 import { config as loadEnv } from 'dotenv';
 import { existsSync } from 'fs';
-import { resolve } from 'path';
+import { isAbsolute, resolve } from 'path';
 
 /** Load monorepo root `.env.api` (backend only). */
 function loadApiEnv() {
@@ -14,10 +14,36 @@ function loadApiEnv() {
   for (const path of candidates) {
     if (!existsSync(path)) continue;
     loadEnv({ path });
+    resolveVertexCredentialsEnv(path);
     return;
   }
 
   console.warn('[api] No root .env.api found — using process.env only');
+}
+
+/** Make service-account JSON path absolute so Google Auth finds it. */
+function resolveVertexCredentialsEnv(envFilePath: string) {
+  const raw = (
+    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+    process.env.VERTEX_CREDENTIALS ||
+    ''
+  )
+    .trim()
+    .replace(/^['"]|['"]$/g, '');
+  if (!raw) return;
+
+  const envDir = resolve(envFilePath, '..');
+  const candidates = [
+    isAbsolute(raw) ? raw : null,
+    resolve(envDir, raw),
+    resolve(process.cwd(), raw),
+  ].filter((p): p is string => Boolean(p));
+
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = path;
+    return;
+  }
 }
 
 loadApiEnv();

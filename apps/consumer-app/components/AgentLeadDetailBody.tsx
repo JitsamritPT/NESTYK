@@ -3,26 +3,52 @@ import { NearbyPlacesMap } from '@nestyk/feature-listing';
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { AgentLead } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
-import { tokens, useMobileTheme } from '@nestyk/ui/native';
+import { tokens, useMobileTheme, MobileStatusPill, MobileButton, type MobileStatusPillToneKey } from '@nestyk/ui/native';
+import { LEAD_NATIONALITY_OPTIONS, LEAD_OCCUPATION_OPTIONS, presetCodeFor } from '../lib/lead-profile-options';
 
-const NEW_BADGE = { color: '#BE185D', background: '#FCE7F3' };
+const LEAD_STATUS_TONE: Record<string, MobileStatusPillToneKey> = {
+  new: 'yellow',
+  inprogress: 'blue',
+  booked: 'green',
+  lost: 'red',
+};
+
+export function leadStatusTone(status: string): MobileStatusPillToneKey {
+  return LEAD_STATUS_TONE[status] ?? 'slate';
+}
+
+export function leadAvatarInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0].slice(0, 1)}${parts[1].slice(0, 1)}`.toUpperCase();
+}
 
 export function LeadStatusBadge({ status }: { status: string }) {
   const { t } = useLocale();
   const c = t.agent.leads;
-  if (status !== 'new') return null;
-  return (
-    <Text style={[styles.badge, { color: NEW_BADGE.color, backgroundColor: NEW_BADGE.background }]}>
-      {c.statuses.new || c.newLead}
-    </Text>
-  );
+  const key = status as keyof typeof c.statuses;
+  const label = c.statuses[key] || status;
+  return <MobileStatusPill label={label} tone={leadStatusTone(status)} />;
 }
 
-export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
+export function AgentLeadDetailBody({
+  lead,
+  statusBusy = false,
+  onMarkInProgress,
+  onMarkLost,
+}: {
+  lead: AgentLead;
+  statusBusy?: boolean;
+  onMarkInProgress?: () => void;
+  onMarkLost?: () => void;
+}) {
   const { t } = useLocale();
   const c = t.agent.leads;
   const { theme } = useMobileTheme();
   const agentColor = tokens.colors.roles.agent;
+  const canMarkInProgress = lead.status === 'new' || lead.status === 'lost';
+  const canMarkLost = lead.status === 'new' || lead.status === 'inprogress';
 
   const display = (v: string | number | boolean | null | undefined) =>
     v == null || v === '' ? c.unknown : typeof v === 'boolean' ? (v ? c.yes : c.no) : String(v);
@@ -42,9 +68,11 @@ export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
       : [lead.budgetMin?.toLocaleString(), lead.budgetMax?.toLocaleString()].filter(Boolean).join(' – ')
         + t.agent.listings.rentPerMonth.replace('{price}', '');
 
+  const nationalityCode = presetCodeFor(LEAD_NATIONALITY_OPTIONS, lead.nationality ?? '');
+  const occupationCode = presetCodeFor(LEAD_OCCUPATION_OPTIONS, lead.occupation ?? '');
   const profileRows: Array<[string, string]> = [
-    [c.nationality, display(lead.nationality)],
-    [c.occupation, display(lead.occupation)],
+    [c.nationality, nationalityCode ? c.nationalityOptions[nationalityCode as keyof typeof c.nationalityOptions] : display(lead.nationality)],
+    [c.occupation, occupationCode ? c.occupationOptions[occupationCode as keyof typeof c.occupationOptions] : display(lead.occupation)],
     [c.visaType, visa],
   ];
   const requirementRows: Array<[string, string]> = [
@@ -100,6 +128,28 @@ export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
           <Text style={[styles.budgetLabel, { color: theme.textSecondary }]}>{c.budget}</Text>
           <Text style={[styles.budgetValue, { color: agentColor }]}>{budget}</Text>
         </View>
+
+        {lead.status === 'lost' && lead.lostReason ? (
+          <View style={[styles.lostReasonBox, { borderColor: theme.border, backgroundColor: theme.background }]}>
+            <Text style={[styles.budgetLabel, { color: theme.textSecondary }]}>{c.lostReason}</Text>
+            <Text style={[styles.lostReasonText, { color: theme.textHeading }]}>{lead.lostReason}</Text>
+          </View>
+        ) : null}
+
+        {(canMarkInProgress || canMarkLost) && (onMarkInProgress || onMarkLost) ? (
+          <View style={styles.statusActions}>
+            {canMarkInProgress && onMarkInProgress ? (
+              <MobileButton onPress={onMarkInProgress} disabled={statusBusy} isLoading={statusBusy}>
+                {c.markInProgress}
+              </MobileButton>
+            ) : null}
+            {canMarkLost && onMarkLost ? (
+              <MobileButton variant="outline" onPress={onMarkLost} disabled={statusBusy}>
+                {c.markLost}
+              </MobileButton>
+            ) : null}
+          </View>
+        ) : null}
       </View>
 
       {lead.latitude != null && lead.longitude != null && lead.radiusKm != null && <Section title={c.mapLocation} theme={theme}>
@@ -119,9 +169,10 @@ export function AgentLeadDetailBody({ lead }: { lead: AgentLead }) {
         {requirementRows.map(([label, value]) => (
           <DetailRow key={label} label={label} value={value} theme={theme} divider />
         ))}
-        {flags.map(([label, value], index) => (
-          <DetailRow key={label} label={label} value={display(value)} theme={theme} divider={index < flags.length - 1} />
+        {flags.map(([label, value]) => (
+          <DetailRow key={label} label={label} value={display(value)} theme={theme} divider />
         ))}
+        <DetailRow label={c.notes} value={display(lead.notes)} theme={theme} divider={false} />
       </Section>
     </ScrollView>
   );
@@ -185,17 +236,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     lineHeight: 30,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    overflow: 'hidden',
-    fontFamily: tokens.typography.native.body,
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '600',
-  },
   phoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -233,6 +273,20 @@ const styles = StyleSheet.create({
     fontFamily: tokens.typography.native.headingTh,
     fontSize: 22,
     lineHeight: 33,
+  },
+  lostReasonBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+  },
+  lostReasonText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  statusActions: {
+    gap: 10,
   },
   sectionCard: {
     borderWidth: 1,

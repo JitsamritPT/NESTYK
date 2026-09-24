@@ -3,12 +3,14 @@ import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View
 import { SafeAreaView, SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import type { LeadLocationCatalog } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
-import { MobileButton, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
+import { MobileButton, MobileIcon, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
 import { fetchLeadLocations } from '../lib/agent-leads-api';
 
-export function LeadLocationPicker({ province, locations, onChange, filter = false, provinceOnly = false, disabled = false, error }: {
+export function LeadLocationPicker({ province, locations, onChange, filter = false, provinceOnly = false, disabled = false, markRequired = true, error, layout = 'stack' }: {
   province: string; locations: string[]; onChange: (province: string, locations: string[]) => void;
-  filter?: boolean; provinceOnly?: boolean; disabled?: boolean; error?: string;
+  filter?: boolean; provinceOnly?: boolean; disabled?: boolean; markRequired?: boolean; error?: string;
+  /** `row`: province and areas as two compact selects side by side (create lead form). */
+  layout?: 'stack' | 'row';
 }) {
   const { t, locale } = useLocale(); const c = t.agent.leads; const { theme } = useMobileTheme();
   const [catalog, setCatalog] = useState<LeadLocationCatalog>([]);
@@ -26,27 +28,17 @@ export function LeadLocationPicker({ province, locations, onChange, filter = fal
     ? catalog.filter((p) => `${p.name} ${p.nameEn}`.toLowerCase().includes(search.trim().toLowerCase())).map((p) => ({ value: p.name, label: provinceLabel(p) }))
     : [...new Set([...(selectedProvince?.locations ?? []), ...locations])].filter((a) => a.toLowerCase().includes(search.trim().toLowerCase())).map((a) => ({ value: a, label: a }));
   const rowStyle = { borderColor: theme.border, backgroundColor: theme.surface };
-  return <View style={styles.group}>
-    <Text style={[styles.label, { color: theme.textHeading }]}>{c.province}{filter ? '' : ' *'}</Text>
-    <Pressable accessibilityRole="button" disabled={disabled} onPress={() => open('province')} style={[styles.select, rowStyle]}>
-      <Text style={[styles.value, { color: province ? theme.textHeading : theme.textSecondary }]}>{selectedProvince ? provinceLabel(selectedProvince) : province || (filter ? c.allProvinces : c.selectProvince)}</Text>
-      <Text style={{ color: theme.textSecondary }}>⌄</Text>
-    </Pressable>
-    {error ? <Text style={{ color: '#DC2626' }}>{error}</Text> : null}
-    {province && !provinceOnly ? <>
-      <Text style={[styles.label, { color: theme.textHeading }]}>{c.areas}</Text>
-      <Pressable accessibilityRole="button" disabled={disabled} onPress={() => open('areas')} style={[styles.select, rowStyle]}>
-        <Text style={[styles.value, { color: locations.length ? theme.textHeading : theme.textSecondary }]}>{locations.length ? locations.join(' · ') : filter ? c.preferredLocation : c.unspecifiedArea}</Text>
-        <Text style={{ color: theme.textSecondary }}>⌄</Text>
+  const compactSelect = (label: string, text: string, filled: boolean, icon: 'map-pin' | 'grid', onPress: () => void, off: boolean) => (
+    <View style={styles.compactCol}>
+      <Text style={[styles.compactLabel, { color: theme.textHeading }]} numberOfLines={1}>{label}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${label}: ${text}`} disabled={off} onPress={onPress} style={[styles.compactSelect, off && { backgroundColor: tokens.colors.background }]}>
+        <MobileIcon name={icon} size={18} color={tokens.colors.textSecondary} />
+        <Text style={[styles.compactValue, { color: filled ? tokens.colors.primary : tokens.colors.placeholder }]} numberOfLines={1}>{text}</Text>
+        <MobileIcon name="chevron-down" size={16} color={tokens.colors.textSecondary} />
       </Pressable>
-      {locations.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {locations.map((area) => <Pressable key={area} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${c.clearFilters}: ${area}`} onPress={() => onChange(province, locations.filter((a) => a !== area))} style={{ borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface, borderRadius: 12, paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' }}>
-          <Text style={[styles.hint, { color: theme.textHeading }]}>{area} ×</Text>
-        </Pressable>)}
-      </View>}
-      {!filter && <Text style={[styles.hint, { color: theme.textSecondary }]}>{c.areasHint}</Text>}
-    </> : null}
-    <Modal visible={panel !== null} animationType="slide" onRequestClose={() => setPanel(null)}>
+    </View>
+  );
+  const picker = <Modal visible={panel !== null} animationType="slide" onRequestClose={() => setPanel(null)}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}><SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: theme.textHeading }]}>{panel === 'province' ? c.province : c.areas}</Text>
@@ -69,7 +61,38 @@ export function LeadLocationPicker({ province, locations, onChange, filter = fal
           </>}
         </ScrollView>
       </SafeAreaView></SafeAreaProvider>
-    </Modal>
+    </Modal>;
+  if (layout === 'row') {
+    return <View style={styles.group}>
+      <View style={styles.compactRow}>
+        {compactSelect(c.province, selectedProvince ? provinceLabel(selectedProvince) : province || c.selectProvince, !!province, 'map-pin', () => open('province'), disabled)}
+        {compactSelect(c.areasMulti, locations.length ? locations.join(' · ') : c.selectAreas, locations.length > 0, 'grid', () => open('areas'), disabled || !province)}
+      </View>
+      {error ? <Text style={{ color: tokens.colors.error }}>{error}</Text> : null}
+      {picker}
+    </View>;
+  }
+  return <View style={styles.group}>
+    <Text style={[styles.label, { color: theme.textHeading }]}>{c.province}{filter || !markRequired ? '' : ' *'}</Text>
+    <Pressable accessibilityRole="button" disabled={disabled} onPress={() => open('province')} style={[styles.select, rowStyle]}>
+      <Text style={[styles.value, { color: province ? theme.textHeading : theme.textSecondary }]}>{selectedProvince ? provinceLabel(selectedProvince) : province || (filter ? c.allProvinces : c.selectProvince)}</Text>
+      <Text style={{ color: theme.textSecondary }}>⌄</Text>
+    </Pressable>
+    {error ? <Text style={{ color: '#DC2626' }}>{error}</Text> : null}
+    {province && !provinceOnly ? <>
+      <Text style={[styles.label, { color: theme.textHeading }]}>{c.areas}</Text>
+      <Pressable accessibilityRole="button" disabled={disabled} onPress={() => open('areas')} style={[styles.select, rowStyle]}>
+        <Text style={[styles.value, { color: locations.length ? theme.textHeading : theme.textSecondary }]}>{locations.length ? locations.join(' · ') : filter ? c.preferredLocation : c.unspecifiedArea}</Text>
+        <Text style={{ color: theme.textSecondary }}>⌄</Text>
+      </Pressable>
+      {locations.length > 0 && <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {locations.map((area) => <Pressable key={area} disabled={disabled} accessibilityRole="button" accessibilityLabel={`${c.clearFilters}: ${area}`} onPress={() => onChange(province, locations.filter((a) => a !== area))} style={{ borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface, borderRadius: 12, paddingHorizontal: 12, minHeight: 44, justifyContent: 'center' }}>
+          <Text style={[styles.hint, { color: theme.textHeading }]}>{area} ×</Text>
+        </Pressable>)}
+      </View>}
+      {!filter && <Text style={[styles.hint, { color: theme.textSecondary }]}>{c.areasHint}</Text>}
+    </> : null}
+    {picker}
   </View>;
 }
-const styles = StyleSheet.create({ group: { gap: 8 }, label: { fontFamily: tokens.typography.native.body, fontSize: 14 }, select: { minHeight: 48, padding: 14, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, value: { flex: 1, fontFamily: tokens.typography.native.body, fontSize: 14, lineHeight: 22 }, hint: { fontSize: 12, lineHeight: 20 }, header: { padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, title: { fontFamily: tokens.typography.native.headingTh, fontSize: 18 }, list: { padding: 20, gap: 10, paddingBottom: 40 } });
+const styles = StyleSheet.create({ compactRow: { flexDirection: 'row', gap: 10 }, compactCol: { flex: 1, minWidth: 0, gap: 6 }, compactLabel: { fontFamily: tokens.typography.native.body, fontSize: 13, lineHeight: 19, fontWeight: '500' }, compactSelect: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: tokens.colors.border, borderRadius: 8, paddingHorizontal: 12 }, compactValue: { flex: 1, minWidth: 0, fontFamily: tokens.typography.native.body, fontSize: 14, lineHeight: 21 }, group: { gap: 8 }, label: { fontFamily: tokens.typography.native.body, fontSize: 14 }, select: { minHeight: 48, padding: 14, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, value: { flex: 1, fontFamily: tokens.typography.native.body, fontSize: 14, lineHeight: 22 }, hint: { fontSize: 12, lineHeight: 20 }, header: { padding: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, title: { fontFamily: tokens.typography.native.headingTh, fontSize: 18 }, list: { padding: 20, gap: 10, paddingBottom: 40 } });

@@ -81,6 +81,8 @@ export type AppIconName =
   | 'bus'
   | 'train'
   | 'park'
+  | 'graduation-cap'
+  | 'hospital'
   | 'flame'
   | 'coat-hanger'
   | 'door'

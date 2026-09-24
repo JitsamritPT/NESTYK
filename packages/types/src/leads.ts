@@ -21,13 +21,33 @@ export type CreateLeadInput = {
   occupantCount?: number | null;
   isSmoker?: boolean | null;
   desiredRoomTypeId?: number | null;
+  /** Free-text care notes, up to 500 characters. */
+  notes?: string | null;
 };
+export type LeadStatus = 'new' | 'inprogress' | 'lost' | 'booked';
+
+export type AgentLeadsSort =
+  | 'created_desc'
+  | 'created_asc'
+  | 'updated_desc'
+  | 'name_asc'
+  | 'budget_asc'
+  | 'budget_desc'
+  | 'status_asc'
+  | 'status_desc';
+
 export type AgentLead = Required<Omit<CreateLeadInput, 'budgetMin' | 'budgetMax' | 'province'>> & {
   province: string | null;
   id: number; budgetMin: number | null; budgetMax: number | null;
-  desiredRoomTypeCode: string | null; visaTypeCode: string | null; status: string; createdAt: string;
+  desiredRoomTypeCode: string | null; visaTypeCode: string | null;
+  status: LeadStatus; lostReason: string | null; createdAt: string;
 };
 export type AgentLeadsPage = { items: AgentLead[]; total: number; page: number; limit: number };
 
 export type LeadLocationCatalog = { name: string; nameEn: string; locations: string[] }[];
-export type LeadFilters = { province?: string; locations?: string[]; includeUnspecified?: boolean };
+export type LeadFilters = {
+  province?: string;
+  locations?: string[];
+  includeUnspecified?: boolean;
+  sort?: AgentLeadsSort;
+};

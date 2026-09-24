@@ -12,11 +12,15 @@ Base: `/agent/leads` · Auth: Bearer JWT + role `agent`
 
 ## `GET /agent/leads`
 
-Query: `rentRoomId`, `status`, `q` (name/phone), `page`, `limit`
+Query: `rentRoomId`, `status`, `q` (name/phone), `sort`, `page`, `limit`
+
+`sort`: `created_desc` (default) | `created_asc` | `updated_desc` | `name_asc` | `budget_asc` | `budget_desc` | `status_asc` | `status_desc`
 
 ---
 
 ## `GET /agent/leads/:id`
+
+อ่านรายละเอียด — **ไม่เปลี่ยน status**
 
 ---
 
@@ -34,25 +38,34 @@ Query: `rentRoomId`, `status`, `q` (name/phone), `page`, `limit`
 }
 ```
 
-**Response `201`:** `{ "id": 101, "status": "new", "tenantId": null }`
+**Response `201`:** `{ "id": 101, "status": "new", "tenantId": null }`  
+(server บังคับ `status = new` แม้ client ส่งค่าอื่น)
 
 ---
 
 ## `PATCH /agent/leads/:id`
 
-อัปเดต contact / เปลี่ยนสถานะ
+อัปเดตโปรไฟล์ / ความต้องการ — **ไม่รับเปลี่ยน status**
+
+---
+
+## `POST /agent/leads/:id/mark-inprogress`
+
+เริ่มดูแล · จาก `new` หรือ `lost` → `inprogress` (เคลียร์ `lostReason`)
+
+**Errors:** `409` ถ้า `booked`
+
+---
+
+## `POST /agent/leads/:id/mark-lost`
 
 ```json
-{
-  "status": "viewed",
-  "viewedAt": "2026-04-01T14:00:00Z",
-  "notes": "ดูห้องแล้ว ชอบวิว"
-}
+{ "lostReason": "เลือกห้องอื่น" }
 ```
 
-Allowed status: `new` | `inprogress` | `viewed` | `lost` | `booked`
+→ `status = lost` · `lostReason` บังคับ (1–500 ตัวอักษร)
 
-**`booked` ผ่าน PATCH อย alone ได้** — แต่ถ้าจะทำสัญญา ใช้ promote endpoint ด้านล่าง (สร้าง tenant ด้วย)
+**Errors:** `409` ถ้า `booked`
 
 ---
 
@@ -96,8 +109,4 @@ Allowed status: `new` | `inprogress` | `viewed` | `lost` | `booked`
 
 ## `POST /agent/leads/:id/mark-lost`
 
-```json
-{ "lostReason": "เลือกห้องอื่น" }
-```
-
-→ `status = lost`
+(ย้ายไปด้านบน — ใช้ endpoint นี้สำหรับปิด lead พร้อมเหตุผล)

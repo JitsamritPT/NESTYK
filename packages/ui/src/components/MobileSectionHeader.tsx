@@ -23,10 +23,10 @@ export interface MobileSectionHeaderProps {
   onMenuPress?: () => void;
   onBackPress?: () => void;
   backDisabled?: boolean;
-  /** Compact brand CTA (e.g. Rooms add) */
+  /** Compact brand CTA (e.g. Rooms / Leads add) */
   onAddPress?: () => void;
-  /** `label` = “+ Add”; `room` = house + plus fine-outline icon button */
-  addVariant?: 'label' | 'room';
+  /** `label` = “+ Add”; `room` / `lead` = outline icon button */
+  addVariant?: 'label' | 'room' | 'lead';
   addLabel?: string;
   addAccessibilityLabel?: string;
   /**
@@ -75,7 +75,8 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
   const isBack = leading === 'back';
   const showAction = Boolean(onActionPress && actionLabel);
   const hasTrailing = Boolean(onAddPress || onSearchPress || showAction);
-  const isRoomAdd = addVariant === 'room';
+  const isIconAdd = addVariant === 'room' || addVariant === 'lead';
+  const addIconName: AppIconName = addVariant === 'lead' ? 'user-plus' : 'house-plus';
   const isIconAction = actionVariant === 'icon';
 
   return (
@@ -122,8 +123,8 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
               <Pressable
                 style={({ pressed }) => [
                   styles.addBtn,
-                  isRoomAdd && styles.outlineIconBtn,
-                  pressed && (isRoomAdd ? styles.outlineIconBtnPressed : { opacity: 0.85 }),
+                  isIconAdd && styles.outlineIconBtn,
+                  pressed && (isIconAdd ? styles.outlineIconBtnPressed : { opacity: 0.85 }),
                 ]}
                 onPress={onAddPress}
                 accessibilityRole="button"
@@ -132,8 +133,8 @@ export const MobileSectionHeader: React.FC<MobileSectionHeaderProps> = ({
                   ? { android_ripple: { color: 'rgba(33,30,30,0.12)' } }
                   : {})}
               >
-                {isRoomAdd ? (
-                  <MobileIcon name="house-plus" size={24} color={tokens.colors.primary} />
+                {isIconAdd ? (
+                  <MobileIcon name={addIconName} size={24} color={tokens.colors.primary} />
                 ) : (
                   <Text style={styles.addLabel} numberOfLines={1}>
                     {`+ ${addLabel}`}

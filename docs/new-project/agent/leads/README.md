@@ -25,6 +25,8 @@
 | ไฟล์ | อ่านเมื่อ |
 |------|-----------|
 | [flow.md](./flow.md) | status pipeline, promote → tenant |
+| [add-lead-groups.md](./add-lead-groups.md) | ฟอร์ม Add Lead สองส่วนและข้อมูลขั้นต่ำสำหรับ matching |
+| [matching.md](./matching.md) | hard set + AI score สำหรับจับคู่ห้องกับ lead |
 | [api.md](./api.md) | CRUD leads, เปลี่ยนสถานะ |
 | [database.md](./database.md) | คอลัมน์, invariant |
 | [schema.sql](./schema.sql) | DDL `leads` |

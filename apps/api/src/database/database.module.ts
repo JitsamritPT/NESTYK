@@ -21,7 +21,8 @@ function buildTypeOrmOptions() {
     entities: ALL_ENTITIES,
     synchronize: false,
     ssl: isLocalhost ? false : { rejectUnauthorized: false },
-    logging: process.env.NODE_ENV === 'development',
+    // Opt-in only — default off so turbo/dev terminals stay readable.
+    logging: process.env.TYPEORM_LOGGING === 'true',
   };
 }
 
