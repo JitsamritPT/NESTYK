@@ -353,6 +353,7 @@ export const zh: TranslationSchema = {
         "confirm": "确认创建",
         "back": "返回",
         "hint": "请核对预填信息，并填写所有带 * 的必填项。",
+        "standaloneHint": "可直接填写发票，无需关联预订书。",
         "receiptHint": "金额与明细以发票为准 — 仅填写收款信息。",
         "receiptTotalHint": "合计金额跟随发票，收据中不可修改。",
         "needInvoiceFirst": "请先创建发票，再创建收据。",

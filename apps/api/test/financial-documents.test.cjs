@@ -251,3 +251,51 @@ test("finalized reservation letter rejects financial create/edit", async () => {
   );
   assert.equal(counts().uploads, 0);
 });
+test("standalone invoice number is generated and ignores the submitted number", async () => {
+  let saved = null;
+  const repo = {
+    find: async () => (saved ? [saved] : []),
+    create: (row) => row,
+    save: async (row) => {
+      saved = { ...row, id: 4, issue_date: row.issue_date };
+      return saved;
+    },
+  };
+  const db = {
+    getRepository: () => repo,
+    transaction: async (fn) =>
+      fn({
+        getRepository: () => repo,
+        query: async (sql) =>
+          String(sql).includes("document_no") && saved
+            ? [{ document_no: saved.document_no }]
+            : [],
+      }),
+  };
+  const documents = {
+    uploadStandaloneInvoice: async () => ({ path: "7/invoices/a.pdf" }),
+    signPaths: async (paths) => new Map(paths.filter(Boolean).map((path) => [path, `https://files/${path}`])),
+    remove: async () => {},
+  };
+  const service = new AgentContractsService(db, documents);
+  const created = await service.createStandaloneInvoice(7, {
+    ...sample,
+    documentNo: "INV-FREE",
+    paymentMethod: "",
+    receiverName: "",
+  });
+  assert.match(created.documentNo, /^INV\d{4}\d{5}$/);
+  assert.notEqual(created.documentNo, "INV-FREE");
+  assert.equal(created.customerName, sample.customerName);
+  assert.equal(created.total, 20000);
+  assert.equal(created.invoiceUrl, "https://files/7/invoices/a.pdf");
+  assert.equal(saved.document_no, created.documentNo);
+  const again = await service.createStandaloneInvoice(7, {
+    ...sample,
+    documentNo: "HACKED",
+    paymentMethod: "",
+    receiverName: "",
+  });
+  assert.notEqual(again.documentNo, created.documentNo);
+  assert.match(again.documentNo, /^INV\d{4}\d{5}$/);
+});

@@ -55,6 +55,7 @@ import type {
   AgreementTemplate,
   AgentContract,
   AgentContractDocumentKind,
+  StandaloneInvoice,
   AgentContractSignParty,
   AgentContractStatus,
   ContractCandidate,
@@ -65,6 +66,7 @@ import type {
 } from "@nestyk/types";
 import {
   listAgentContracts,
+  listStandaloneInvoices,
   listAgreementTypes,
   listAgreementTemplates,
   getAgentContract,
@@ -139,6 +141,10 @@ export function ContractsScreen({
   const { t } = useLocale();
   const docs = t.agent.contracts;
   const [contracts, setContracts] = useState<AgentContract[]>([]);
+  const [invoices, setInvoices] = useState<StandaloneInvoice[]>([]);
+  const [viewingInvoice, setViewingInvoice] = useState<StandaloneInvoice | null>(
+    null,
+  );
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -147,13 +153,20 @@ export function ContractsScreen({
     const request = ++listRequest.current;
     setLoadingList(true);
     setListError("");
-    listAgentContracts()
-      .then((rows) => {
-        if (request === listRequest.current)
-          setContracts(
-            rows.filter((row) => !tenant || row.tenantId === tenant.id),
-          );
-      })
+    Promise.allSettled([
+      listAgentContracts(),
+      tenant ? Promise.resolve([] as StandaloneInvoice[]) : listStandaloneInvoices(),
+    ]).then(([contractResult, invoiceResult]) => {
+      if (request !== listRequest.current) return;
+      if (contractResult.status === "fulfilled")
+        setContracts(
+          contractResult.value.filter(
+            (row) => !tenant || row.tenantId === tenant.id,
+          ),
+        );
+      else setListError(message(contractResult.reason));
+      if (invoiceResult.status === "fulfilled") setInvoices(invoiceResult.value);
+    })
       .catch((e) => {
         if (request === listRequest.current) setListError(message(e));
       })
@@ -1174,6 +1187,16 @@ export function ContractsScreen({
           setMenuCreate(null);
           setChoosingType(true);
         }}
+        onStandaloneCreated={(invoice) => {
+          setInvoices((rows) => [
+            invoice,
+            ...rows.filter((row) => row.id !== invoice.id),
+          ]);
+          setMenuCreate(null);
+          setViewingInvoice(invoice);
+          setNotice(docs.financial.success);
+          onChanged?.();
+        }}
         onCreated={(row) => {
           setSelected(row);
           setContracts((rows) =>
@@ -2172,6 +2195,92 @@ export function ContractsScreen({
         </MobileBottomSheet>
       </View>
     );
+  if (viewingInvoice)
+    return (
+      <View style={s.root}>
+        {button("← กลับ", () => {
+          setViewingInvoice(null);
+          setPreviewDoc(null);
+        })}
+        <Text style={[s.heading, title]}>ใบแจ้งหนี้</Text>
+        {errorView}
+        <View style={[s.card, card]}>
+          <Text style={[s.subtitle, title]}>{viewingInvoice.documentNo}</Text>
+          <Text style={[s.body, title]}>{viewingInvoice.customerName}</Text>
+          <Text style={[s.small, muted]}>
+            วันที่ {date(viewingInvoice.issueDate)}
+          </Text>
+          <Text style={[s.body, title]}>{money(viewingInvoice.total)}</Text>
+        </View>
+        {viewingInvoice.invoiceUrl
+          ? button(
+              "ดูเอกสาร",
+              () =>
+                openDocumentPreview(
+                  `ใบแจ้งหนี้ ${viewingInvoice.documentNo}`,
+                  viewingInvoice.invoiceUrl!,
+                  "invoice",
+                ),
+              true,
+            )
+          : (
+              <Text style={[s.body, muted]}>ยังเปิดเอกสารไม่ได้</Text>
+            )}
+        <Modal
+          visible={previewDoc != null}
+          onRequestClose={() => setPreviewDoc(null)}
+          animationType="slide"
+          presentationStyle="fullScreen"
+        >
+          <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+            <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: 16,
+                  gap: 12,
+                }}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="ปิดเอกสาร"
+                  onPress={() => setPreviewDoc(null)}
+                  style={{ padding: 8 }}
+                >
+                  <Text style={title}>ปิด</Text>
+                </Pressable>
+                <Text style={[s.sheetTitle, title]}>
+                  {previewDoc
+                    ? docs.previewTitle.replace("{name}", previewDoc.name)
+                    : docs.preview}
+                </Text>
+              </View>
+              {previewDoc ? (
+                <ContractDocumentPreview
+                  key={previewDoc.url}
+                  url={previewDoc.url}
+                />
+              ) : null}
+              {previewDoc ? (
+                <View style={[s.previewActions, { padding: 12 }]}>
+                  <MobileButton
+                    variant="outline"
+                    disabled={busy}
+                    onPress={() => {
+                      void openDocumentExternally(previewDoc.url);
+                    }}
+                  >
+                    {docs.openExternally}
+                  </MobileButton>
+                </View>
+              ) : null}
+            </SafeAreaView>
+          </SafeAreaProvider>
+        </Modal>
+      </View>
+    );
   return (
     <View style={s.root}>
       <View
@@ -2196,6 +2305,7 @@ export function ContractsScreen({
         {button(
           "＋ สร้างสัญญา",
           () => {
+            setViewingInvoice(null);
             setChoosingType(true);
             setNotice("");
             setError("");
@@ -2204,6 +2314,45 @@ export function ContractsScreen({
         )}
       </View>
       {errorView}
+      {!tenant && (
+        <>
+          <Text style={[s.subtitle, title]}>
+            ใบแจ้งหนี้
+            {!loadingList ? ` (${invoices.length})` : ""}
+          </Text>
+          {!loadingList &&
+            invoices.map((invoice) => (
+              <Pressable
+                key={invoice.id}
+                accessibilityRole="button"
+                accessibilityLabel={`ดูใบแจ้งหนี้ ${invoice.documentNo}`}
+                disabled={busy}
+                onPress={() => {
+                  setError("");
+                  setNotice("");
+                  setViewingInvoice(invoice);
+                }}
+                style={({ pressed }) => [
+                  s.card,
+                  card,
+                  { opacity: pressed || busy ? 0.65 : 1 },
+                ]}
+              >
+                <Text style={[s.subtitle, title]}>{invoice.documentNo}</Text>
+                <Text style={[s.body, title]}>{invoice.customerName}</Text>
+                <View style={s.row}>
+                  <Text style={[s.small, muted]}>
+                    {date(invoice.issueDate)} · {money(invoice.total)}
+                  </Text>
+                  <Text style={[s.small, { color: accent }]}>ดูเอกสาร →</Text>
+                </View>
+              </Pressable>
+            ))}
+          {!loadingList && !invoices.length && (
+            <Text style={[s.body, muted]}>ยังไม่มีใบแจ้งหนี้</Text>
+          )}
+        </>
+      )}
       <Text style={[s.subtitle, title]}>
         สัญญาที่สร้างแล้ว
         {!loadingList && !listError ? ` (${contracts.length})` : ""}

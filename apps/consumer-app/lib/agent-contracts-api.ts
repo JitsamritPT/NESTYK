@@ -250,6 +250,22 @@ export async function getFinancialDocumentDefaults(id: number, kind: import('@ne
   await ensureAgentSession();
   return apiGet(`/agent/contracts/${id}/financial-documents/${kind}`);
 }
+export async function getNextInvoiceNumber(): Promise<{ documentNo: string }> {
+  await ensureAgentSession();
+  return apiGet("/agent/contracts/invoices/next-number");
+}
+export async function listStandaloneInvoices(): Promise<
+  import("@nestyk/types").StandaloneInvoice[]
+> {
+  await ensureAgentSession();
+  return apiGet("/agent/contracts/invoices");
+}
+export async function createStandaloneInvoice(
+  input: import("@nestyk/types").FinancialDocumentInput,
+): Promise<import("@nestyk/types").StandaloneInvoice> {
+  await ensureAgentSession();
+  return apiPost("/agent/contracts/invoices", input);
+}
 export async function generateFinancialDocument(
   id: number,
   kind: import("@nestyk/types").FinancialDocumentKind,

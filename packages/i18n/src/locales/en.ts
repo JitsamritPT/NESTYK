@@ -354,6 +354,7 @@ export const en: TranslationSchema = {
         "confirm": "Confirm creation",
         "back": "Back",
         "hint": "Review the prefilled details and complete all fields marked * before creating the document.",
+        "standaloneHint": "Fill in the invoice now. It does not need a reservation letter.",
         "receiptHint": "Amounts and line items follow the invoice — enter payment details only.",
         "receiptTotalHint": "Total follows the invoice and cannot be edited on the receipt.",
         "needInvoiceFirst": "Create the invoice first, then the receipt.",

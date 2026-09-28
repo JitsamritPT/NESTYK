@@ -6,10 +6,13 @@ import type {
   AgentContract,
   FinancialDocumentInput,
   FinancialDocumentKind,
+  StandaloneInvoice,
 } from "@nestyk/types";
 import {
+  createStandaloneInvoice,
   generateFinancialDocument,
   getFinancialDocumentDefaults,
+  getNextInvoiceNumber,
 } from "../lib/agent-contracts-api";
 
 type TextField = Exclude<
@@ -31,17 +34,20 @@ export function FinancialDocumentForm({
   kind,
   onBack,
   onCreated,
+  onStandaloneCreated,
 }: {
   contractId?: number;
   hosts?: AgentContract[];
   kind: FinancialDocumentKind;
   onBack: () => void;
   onCreated: (value: AgentContract) => void;
+  onStandaloneCreated?: (value: StandaloneInvoice) => void;
 }) {
   const { t } = useLocale();
   const labels = t.agent.contracts.financial;
   const { theme } = useMobileTheme();
-  const needsHostPick = fixedContractId == null;
+  const standalone = kind === "invoice" && fixedContractId == null;
+  const needsHostPick = fixedContractId == null && !standalone;
   const [hostId, setHostId] = useState<number | null>(fixedContractId ?? null);
   const contractId = fixedContractId ?? hostId;
   const [form, setForm] = useState<FinancialDocumentInput | null>(null);
@@ -65,6 +71,55 @@ export function FinancialDocumentForm({
     return () => sub.remove();
   }, [onBack]);
   useEffect(() => {
+    if (standalone) {
+      let active = true;
+      const today = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Bangkok",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      setLoading(true);
+      setError("");
+      getNextInvoiceNumber()
+        .then(({ documentNo }) => {
+          if (!active) return;
+          setForm({
+            documentNo,
+            issueDate: today,
+            dueDate: today,
+            reference: "",
+            customerName: "",
+            customerAddress: "",
+            customerTaxId: "",
+            customerPhone: "",
+            customerEmail: "",
+            issuerName: "",
+            issuerAddress: "",
+            issuerTaxId: "",
+            issuerPhone: "",
+            issuerEmail: "",
+            items: [{ description: "", quantity: 1, unitPrice: 0 }],
+            vatRate: 0,
+            discount: 0,
+            paymentMethod: "",
+            paymentDetails: "",
+            receiverName: "",
+            notes: "",
+          });
+          setItems([{ description: "", quantity: "1", unitPrice: "" }]);
+          setDiscount("0");
+        })
+        .catch((e) => {
+          if (active) setError(e instanceof Error ? e.message : labels.invalid);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+      return () => {
+        active = false;
+      };
+    }
     if (contractId == null) {
       setForm(null);
       setLoading(false);
@@ -96,7 +151,7 @@ export function FinancialDocumentForm({
     return () => {
       active = false;
     };
-  }, [contractId, kind, retry, labels.invalid]);
+  }, [standalone, contractId, kind, retry, labels.invalid]);
   const required: TextField[] = isReceipt
     ? [
         "documentNo",
@@ -107,7 +162,6 @@ export function FinancialDocumentForm({
           : []),
       ]
     : [
-        "documentNo",
         "issueDate",
         "customerName",
         "customerAddress",
@@ -139,8 +193,10 @@ export function FinancialDocumentForm({
   const total =
     (taxable + Math.round((taxable * vatRate) / 100)) / 100;
   async function submit() {
-    if (!form || contractId == null || saving.current) return;
+    if (!form || saving.current) return;
+    if (!standalone && contractId == null) return;
     if (isReceipt) {
+      if (contractId == null) return;
       if (
         required.some((key) => !form[key].trim()) ||
         !form.paymentMethod ||
@@ -197,13 +253,17 @@ export function FinancialDocumentForm({
     setBusy(true);
     setError("");
     try {
-      onCreated(
-        await generateFinancialDocument(contractId, kind, {
-          ...form,
-          items: parsedItems,
-          discount: decimal(discount),
-        }),
-      );
+      const payload = {
+        ...form,
+        items: parsedItems,
+        discount: decimal(discount),
+      };
+      if (standalone) {
+        if (!onStandaloneCreated) return;
+        onStandaloneCreated(await createStandaloneInvoice(payload));
+        return;
+      }
+      onCreated(await generateFinancialDocument(contractId!, kind, payload));
     } catch (e) {
       setError(e instanceof Error ? e.message : labels.invalid);
     } finally {
@@ -218,7 +278,7 @@ export function FinancialDocumentForm({
         label={labels[key]}
         required={required.includes(key)}
         value={form[key]}
-        editable={!busy}
+        editable={!busy && (isReceipt || key !== "documentNo")}
         maxLength={maxLength}
         multiline={multiline}
         placeholder={
@@ -255,7 +315,11 @@ export function FinancialDocumentForm({
       <Text
         style={{ fontSize: 14, lineHeight: 22, color: theme.textSecondary }}
       >
-        {isReceipt ? labels.receiptHint : labels.hint}
+        {standalone
+          ? labels.standaloneHint
+          : isReceipt
+            ? labels.receiptHint
+            : labels.hint}
       </Text>
       {needsHostPick && (
         <View style={{ gap: 8 }}>
@@ -307,7 +371,7 @@ export function FinancialDocumentForm({
           {error}
         </Text>
       )}
-      {contractId == null ? null : loading ? (
+      {!standalone && contractId == null ? null : loading ? (
         <ActivityIndicator />
       ) : !form ? (
         <MobileButton onPress={() => setRetry((n) => n + 1)}>

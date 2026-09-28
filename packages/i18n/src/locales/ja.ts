@@ -354,6 +354,7 @@ export const ja: TranslationSchema = {
         "confirm": "作成を確定",
         "back": "戻る",
         "hint": "入力済みの情報を確認し、* の必須項目を入力してください。",
+        "standaloneHint": "予約書に紐づけず、請求書の内容をそのまま入力できます。",
         "receiptHint": "金額と明細は請求書に準拠します — 入金情報のみ入力してください。",
         "receiptTotalHint": "合計は請求書に従い、領収書では変更できません。",
         "needInvoiceFirst": "先に請求書を作成してから領収書を作成してください。",

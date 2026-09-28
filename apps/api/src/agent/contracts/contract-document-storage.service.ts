@@ -265,6 +265,25 @@ export class ContractDocumentStorageService {
     return { path };
   }
 
+  async uploadStandaloneInvoice(agentId: number, pdf: Buffer) {
+    if (
+      this.sniff(pdf).mime !== "application/pdf" ||
+      pdf.length > MAX_CONTRACT_DOCUMENT_BYTES
+    )
+      throw new BadRequestException("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกิน 10 MB");
+    await this.ensureBucket();
+    const path = `${agentId}/invoices/${randomUUID()}.pdf`;
+    const { error } = await this.storage().upload(path, pdf, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "สร้างเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path };
+  }
+
   async signPaths(paths: Array<string | null | undefined>) {
     const unique = [...new Set(paths.filter((path): path is string => !!path))];
     const signed = new Map<string, string>();

@@ -63,6 +63,19 @@ export class AgentContractsController {
   @Get() list(@CurrentUser() user: AuthRequestUser) {
     return this.contracts.list(user.id);
   }
+  @Get("invoices/next-number")
+  nextInvoiceNumber() {
+    return this.contracts.peekNextInvoiceNo();
+  }
+  @Get("invoices")
+  listInvoices(@CurrentUser() user: AuthRequestUser) {
+    return this.contracts.listStandaloneInvoices(user.id);
+  }
+  @Post("invoices")
+  @HttpCode(HttpStatus.OK)
+  createInvoice(@CurrentUser() user: AuthRequestUser, @Body() body: unknown) {
+    return this.contracts.createStandaloneInvoice(user.id, body);
+  }
   @Get(":id") view(
     @CurrentUser() user: AuthRequestUser,
     @Param("id", ParseIntPipe) id: number,

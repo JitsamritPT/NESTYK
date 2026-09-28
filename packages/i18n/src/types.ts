@@ -346,6 +346,7 @@ export interface TranslationSchema {
         confirm: string;
         back: string;
         hint: string;
+        standaloneHint: string;
         receiptHint: string;
         receiptTotalHint: string;
         needInvoiceFirst: string;

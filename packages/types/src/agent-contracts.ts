@@ -162,6 +162,16 @@ export interface FinancialDocumentInput {
   notes: string;
 }
 
+/** Invoice created without a reservation letter. */
+export interface StandaloneInvoice {
+  id: number;
+  documentNo: string;
+  customerName: string;
+  issueDate: string;
+  total: number;
+  invoiceUrl: string | null;
+}
+
 /** Fillable fields for residential lease PDF (สัญญาเช่า). */
 export interface LeaseAgreementInput {
   documentNo: string;
