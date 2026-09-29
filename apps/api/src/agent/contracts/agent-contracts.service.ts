@@ -1,5 +1,7 @@
 import { financialKind, validateFinancialDocument, buildReceiptFromInvoice, financialTotals } from "./financial-document";
 import { createFinancialPdf } from "./financial-pdf";
+import { validateCommissionConfirmation } from "./commission-confirmation";
+import { createCommissionConfirmationPdf } from "./commission-confirmation-pdf";
 import {
   AgreementAttachmentsService,
   reservationLetterFinalized,
@@ -53,6 +55,8 @@ import type {
   AgentContractSignParty,
   BrokerAppointmentInput,
   CreateAgentContract,
+  CommissionConfirmation,
+  CommissionConfirmationInput,
   FinancialDocumentInput,
   LeaseAgreementInput,
   ReservationLetterInput,
@@ -61,6 +65,7 @@ import type {
 import { AgreementSignInviteEntity } from "../../entities/agreement-sign-invite.entity";
 import { LeaseContractEntity } from "../../entities/lease-contract.entity";
 import { AgentInvoiceEntity } from "../../entities/agent-invoice.entity";
+import { AgentCommissionConfirmationEntity } from "../../entities/agent-commission-confirmation.entity";
 import { LeadEntity } from "../../entities/lead.entity";
 import { TenantEntity } from "../../entities/tenant.entity";
 import { RentRoomEntity } from "../../entities/rent-room.entity";
@@ -148,6 +153,91 @@ export async function nextInvoiceNo(manager: EntityManager, at = new Date()) {
   const match = rows[0]?.document_no?.match(INVOICE_NO_PATTERN);
   const lastSeq = match && Number(match[1]) === year ? Number(match[2]) : 0;
   return formatInvoiceNo(year, lastSeq + 1);
+}
+
+const RECEIPT_NO_PATTERN = /^REC(\d{4})(\d{5})$/;
+
+export function formatReceiptNo(year: number, seq: number) {
+  if (!Number.isInteger(seq) || seq < 1 || seq > 99999)
+    throw new ConflictException("เลขที่ใบเสร็จเต็มสำหรับปีนี้แล้ว");
+  return `REC${year}${String(seq).padStart(5, "0")}`;
+}
+
+const INVOICE_ISSUER_NAME = "NESTYK";
+const INVOICE_ISSUER_ADDRESS = "Bangkok";
+
+function tenantMailingAddress(tenant: TenantEntity) {
+  const property = tenant.lead?.rent_room?.property;
+  if (!property) return "";
+  return [
+    property.address,
+    property.subdistrict,
+    property.district,
+    property.province,
+    property.postal_code,
+  ]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter((part) => part && part !== "-")
+    .join(", ")
+    .slice(0, 240);
+}
+
+export async function invoicePayer(
+  manager: EntityManager,
+  agentId: number,
+  tenantId: unknown,
+) {
+  if (tenantId == null || tenantId === "") return null;
+  const id = Number(tenantId);
+  if (!Number.isSafeInteger(id) || id < 1)
+    throw new BadRequestException("ไม่พบผู้เช่า");
+  const tenant = await manager.findOne(TenantEntity, {
+    where: { id, created_by_user_id: agentId },
+    relations: { lead: { rent_room: { property: true } } },
+  });
+  if (!tenant) throw new NotFoundException("ไม่พบผู้เช่า");
+  const address = tenantMailingAddress(tenant);
+  if (!address)
+    throw new BadRequestException("ผู้เช่ายังไม่มีที่อยู่ จึงสร้างใบแจ้งหนี้ไม่ได้");
+  return { id: tenant.id, name: tenant.name.trim(), address };
+}
+
+export async function nextReceiptNo(manager: EntityManager, at = new Date()) {
+  const year = contractYear(at);
+  await manager.query("SELECT pg_advisory_xact_lock($1)", [910_000_000 + year]);
+  const rows = (await manager.query(
+    `SELECT receipt_document_no FROM agent_invoices
+     WHERE receipt_document_no LIKE $1
+     ORDER BY receipt_document_no DESC
+     LIMIT 1`,
+    [`REC${year}%`],
+  )) as Array<{ receipt_document_no: string }>;
+  const match = rows[0]?.receipt_document_no?.match(RECEIPT_NO_PATTERN);
+  const lastSeq = match && Number(match[1]) === year ? Number(match[2]) : 0;
+  return formatReceiptNo(year, lastSeq + 1);
+}
+
+const COMMISSION_NO_PATTERN = /^CCM(\d{4})(\d{5})$/;
+
+export function formatCommissionNo(year: number, seq: number) {
+  if (!Number.isInteger(seq) || seq < 1 || seq > 99999)
+    throw new ConflictException("เลขที่หนังสือยืนยันค่าคอมมิชชั่นเต็มสำหรับปีนี้แล้ว");
+  return `CCM${year}${String(seq).padStart(5, "0")}`;
+}
+
+export async function nextCommissionNo(manager: EntityManager, at = new Date()) {
+  const year = contractYear(at);
+  await manager.query("SELECT pg_advisory_xact_lock($1)", [920_000_000 + year]);
+  const rows = (await manager.query(
+    `SELECT document_no FROM agent_commission_confirmations
+     WHERE document_no LIKE $1
+     ORDER BY document_no DESC
+     LIMIT 1`,
+    [`CCM${year}%`],
+  )) as Array<{ document_no: string }>;
+  const match = rows[0]?.document_no?.match(COMMISSION_NO_PATTERN);
+  const lastSeq = match && Number(match[1]) === year ? Number(match[2]) : 0;
+  return formatCommissionNo(year, lastSeq + 1);
 }
 
 export function formatContractNo(
@@ -896,6 +986,8 @@ export class AgentContractsService {
 
   async generateFinancialDocument(agentId: number, id: number, kindInput: string, input: unknown) {
     const kind = financialKind(kindInput);
+    if (kind === "invoice")
+      throw new BadRequestException("ใบแจ้งหนี้สร้างแยกจากหนังสือจอง และคนเดียวกันสร้างได้หลายใบ");
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
     this.assertDocumentMutable(c);
@@ -921,8 +1013,6 @@ export class AgentContractsService {
     try { bytes = await createFinancialPdf(kind, data); }
     catch (error) { throw new BadRequestException(error instanceof Error ? error.message : "สร้าง PDF ไม่สำเร็จ"); }
     const stored = await this.documents.upload(agentId, id, kind, { buffer: bytes, size: bytes.length });
-    const previousReceiptPath =
-      kind === "invoice" ? c.receipt_url : null;
     try {
       await this.db.transaction(async (manager) => {
         const repo = manager.getRepository(LeaseContractEntity);
@@ -939,15 +1029,10 @@ export class AgentContractsService {
           ...((existing.documentFileNames as object) ?? {}),
           [kind]: `${kind}-${data.documentNo.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`,
         } as Record<string, string>;
-        if (kind === "invoice") {
-          delete financialDocuments.receipt;
-          delete documentFileNames.receipt;
-        }
         await repo.update(
           { id, created_by_user_id: agentId },
           {
             [DOCUMENT_COLUMNS[kind]]: stored.path,
-            ...(kind === "invoice" ? { receipt_url: null } : {}),
             data: {
               ...existing,
               financialDocuments,
@@ -960,8 +1045,6 @@ export class AgentContractsService {
       await this.documents.remove(stored.path).catch(() => undefined);
       throw error;
     }
-    if (previousReceiptPath)
-      await this.documents.remove(previousReceiptPath).catch(() => undefined);
     return this.view(agentId, id);
   }
 
@@ -971,13 +1054,116 @@ export class AgentContractsService {
       order: { id: "DESC" },
     });
     const signed = this.documents
-      ? await this.documents.signPaths(rows.map((row) => row.pdf_path))
+      ? await this.documents.signPaths(
+          rows.flatMap((row) => [
+            row.pdf_path,
+            row.receipt_pdf_path,
+            row.payment_slip_path,
+          ]),
+        )
       : new Map<string, string>();
     return rows.map((row) => this.serializeStandaloneInvoice(row, signed));
   }
 
   async peekNextInvoiceNo() {
     return { documentNo: await this.db.transaction((manager) => nextInvoiceNo(manager)) };
+  }
+
+  async peekNextCommissionNo() {
+    return {
+      documentNo: await this.db.transaction((manager) => nextCommissionNo(manager)),
+    };
+  }
+
+  async listCommissionConfirmations(
+    agentId: number,
+  ): Promise<CommissionConfirmation[]> {
+    const rows = await this.db
+      .getRepository(AgentCommissionConfirmationEntity)
+      .find({
+        where: { created_by_user_id: agentId },
+        order: { id: "DESC" },
+      });
+    const signed = this.documents
+      ? await this.documents.signPaths(rows.map((row) => row.pdf_path))
+      : new Map<string, string>();
+    return rows.map((row) => this.serializeCommissionConfirmation(row, signed));
+  }
+
+  async createCommissionConfirmation(
+    agentId: number,
+    input: unknown,
+  ): Promise<CommissionConfirmation> {
+    if (!this.documents)
+      throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
+    const body =
+      input && typeof input === "object" && !Array.isArray(input)
+        ? (input as Record<string, unknown>)
+        : {};
+    const documents = this.documents;
+    let storedPath: string | null = null;
+    try {
+      const saved = await this.db.transaction(async (manager) => {
+        let tenantId: number | null = null;
+        if (body.tenantId != null && body.tenantId !== "") {
+          const id = Number(body.tenantId);
+          if (!Number.isSafeInteger(id) || id < 1)
+            throw new BadRequestException("ไม่พบผู้เช่า");
+          const tenant = await manager.findOne(TenantEntity, {
+            where: { id, created_by_user_id: agentId },
+          });
+          if (!tenant) throw new NotFoundException("ไม่พบผู้เช่า");
+          tenantId = tenant.id;
+        }
+        const data = validateCommissionConfirmation({
+          ...body,
+          documentNo: await nextCommissionNo(manager),
+        });
+        let bytes: Buffer;
+        try {
+          bytes = await createCommissionConfirmationPdf(data);
+        } catch (error) {
+          throw new BadRequestException(
+            error instanceof Error ? error.message : "สร้าง PDF ไม่สำเร็จ",
+          );
+        }
+        const stored = await documents.uploadCommissionConfirmation(agentId, bytes);
+        storedPath = stored.path;
+        return manager.getRepository(AgentCommissionConfirmationEntity).save(
+          manager.getRepository(AgentCommissionConfirmationEntity).create({
+            created_by_user_id: agentId,
+            tenant_id: tenantId,
+            document_no: data.documentNo,
+            issue_date: data.issueDate,
+            landlord_name: data.landlordName,
+            data,
+            pdf_path: stored.path,
+          }),
+        );
+      });
+      const signed = await documents.signPaths([saved.pdf_path]);
+      return this.serializeCommissionConfirmation(saved, signed);
+    } catch (error) {
+      if (storedPath) await documents.remove(storedPath).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private serializeCommissionConfirmation(
+    row: AgentCommissionConfirmationEntity,
+    signed: Map<string, string>,
+  ): CommissionConfirmation {
+    const data = row.data as CommissionConfirmationInput;
+    return {
+      id: row.id,
+      documentNo: row.document_no,
+      issueDate: String(row.issue_date).slice(0, 10),
+      landlordName: row.landlord_name,
+      agentName: data.agentName,
+      tenantName: data.tenantName,
+      tenantId: row.tenant_id ?? null,
+      pdfUrl: signed.get(row.pdf_path) ?? null,
+    };
   }
 
   async createStandaloneInvoice(
@@ -994,8 +1180,17 @@ export class AgentContractsService {
     let storedPath: string | null = null;
     try {
       const saved = await this.db.transaction(async (manager) => {
+        const payer = await invoicePayer(manager, agentId, body.tenantId);
         const data = validateFinancialDocument(
-          { ...body, documentNo: await nextInvoiceNo(manager) },
+          {
+            ...body,
+            documentNo: await nextInvoiceNo(manager),
+            issuerName: INVOICE_ISSUER_NAME,
+            issuerAddress: INVOICE_ISSUER_ADDRESS,
+            ...(payer
+              ? { customerName: payer.name, customerAddress: payer.address }
+              : {}),
+          },
           "invoice",
         );
         let bytes: Buffer;
@@ -1011,6 +1206,7 @@ export class AgentContractsService {
         return manager.getRepository(AgentInvoiceEntity).save(
           manager.getRepository(AgentInvoiceEntity).create({
             created_by_user_id: agentId,
+            tenant_id: payer?.id ?? null,
             document_no: data.documentNo,
             issue_date: data.issueDate,
             customer_name: data.customerName,
@@ -1040,7 +1236,133 @@ export class AgentContractsService {
       issueDate,
       total: financialTotals(data).total,
       invoiceUrl: signed.get(row.pdf_path) ?? null,
+      tenantId: row.tenant_id ?? null,
+      receiptDocumentNo: row.receipt_document_no ?? null,
+      receiptUrl: row.receipt_pdf_path
+        ? (signed.get(row.receipt_pdf_path) ?? null)
+        : null,
+      paymentSlipUrl: row.payment_slip_path
+        ? (signed.get(row.payment_slip_path) ?? null)
+        : null,
     };
+  }
+
+  async receiptDefaults(agentId: number, invoiceId: number) {
+    const row = await this.db.getRepository(AgentInvoiceEntity).findOne({
+      where: { id: invoiceId, created_by_user_id: agentId },
+    });
+    if (!row) throw new NotFoundException("ไม่พบใบแจ้งหนี้");
+    const today = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Bangkok",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const prev = row.receipt_data;
+    const documentNo =
+      row.receipt_document_no ??
+      (await this.db.transaction((manager) => nextReceiptNo(manager)));
+    return {
+      ...row.data,
+      documentNo,
+      issueDate: prev?.issueDate || today,
+      reference: row.document_no,
+      paymentMethod: prev?.paymentMethod || "",
+      paymentDetails: prev?.paymentDetails || "",
+      receiverName: prev?.receiverName || "",
+      notes: prev?.notes || "",
+    };
+  }
+
+  async createReceiptForInvoice(
+    agentId: number,
+    invoiceId: number,
+    input: unknown,
+    file?: { buffer: Buffer; size: number },
+  ): Promise<StandaloneInvoice> {
+    if (!this.documents)
+      throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
+    const body =
+      input && typeof input === "object" && !Array.isArray(input)
+        ? (input as Partial<FinancialDocumentInput>)
+        : {};
+    const method = String(body.paymentMethod ?? "").trim();
+    const hasSlip = Boolean(file?.buffer?.length);
+    if (!method && !hasSlip)
+      throw new BadRequestException("กรุณาแนบสลิปการชำระเงิน");
+    const documents = this.documents;
+    let storedPath: string | null = null;
+    let slipPath: string | null = null;
+    let previousPath: string | null = null;
+    let previousSlip: string | null = null;
+    try {
+      if (hasSlip) {
+        const storedSlip = await documents.uploadPaymentSlip(agentId, file);
+        slipPath = storedSlip.path;
+      }
+      const saved = await this.db.transaction(async (manager) => {
+        const repo = manager.getRepository(AgentInvoiceEntity);
+        const row = await repo.findOne({
+          where: { id: invoiceId, created_by_user_id: agentId },
+          lock: { mode: "pessimistic_write" },
+        });
+        if (!row) throw new NotFoundException("ไม่พบใบแจ้งหนี้");
+        const today = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "Asia/Bangkok",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date());
+        const documentNo =
+          row.receipt_document_no ?? (await nextReceiptNo(manager));
+        const data = buildReceiptFromInvoice(
+          row.data,
+          { ...body, documentNo },
+          {
+            documentNo,
+            issueDate:
+              String(body.issueDate ?? "").trim() ||
+              row.receipt_data?.issueDate ||
+              today,
+          },
+          { paymentMethodOptional: !method },
+        );
+        let bytes: Buffer;
+        try {
+          bytes = await createFinancialPdf("receipt", data);
+        } catch (error) {
+          throw new BadRequestException(
+            error instanceof Error ? error.message : "สร้าง PDF ไม่สำเร็จ",
+          );
+        }
+        const stored = await documents.uploadStandaloneReceipt(agentId, bytes);
+        storedPath = stored.path;
+        previousPath = row.receipt_pdf_path;
+        row.receipt_document_no = data.documentNo;
+        row.receipt_issue_date = data.issueDate;
+        row.receipt_data = data;
+        row.receipt_pdf_path = stored.path;
+        if (slipPath) {
+          previousSlip = row.payment_slip_path;
+          row.payment_slip_path = slipPath;
+        }
+        return repo.save(row);
+      });
+      if (previousPath && previousPath !== saved.receipt_pdf_path)
+        await documents.remove(previousPath).catch(() => undefined);
+      if (previousSlip && previousSlip !== saved.payment_slip_path)
+        await documents.remove(previousSlip).catch(() => undefined);
+      const signed = await documents.signPaths([
+        saved.pdf_path,
+        saved.receipt_pdf_path,
+        saved.payment_slip_path,
+      ]);
+      return this.serializeStandaloneInvoice(saved, signed);
+    } catch (error) {
+      if (storedPath) await documents.remove(storedPath).catch(() => undefined);
+      if (slipPath) await documents.remove(slipPath).catch(() => undefined);
+      throw error;
+    }
   }
 
   async uploadDocument(

@@ -300,7 +300,7 @@ export async function createFinancialPdf(
     }
   } else {
     const method = data.paymentMethod;
-    if (method === "cash" || method === "transfer" || method === "cheque" || method === "other") {
+    if (method === "cash" || method === "transfer") {
       const box = CHECKS[method];
       const x = box.x + 2.3;
       const y = box.y + 2.6;

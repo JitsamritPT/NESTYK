@@ -284,6 +284,67 @@ export class ContractDocumentStorageService {
     return { path };
   }
 
+  async uploadCommissionConfirmation(agentId: number, pdf: Buffer) {
+    if (
+      this.sniff(pdf).mime !== "application/pdf" ||
+      pdf.length > MAX_CONTRACT_DOCUMENT_BYTES
+    )
+      throw new BadRequestException("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกิน 10 MB");
+    await this.ensureBucket();
+    const path = `${agentId}/commission-confirmations/${randomUUID()}.pdf`;
+    const { error } = await this.storage().upload(path, pdf, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "สร้างเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path };
+  }
+
+  async uploadPaymentSlip(
+    agentId: number,
+    file: { buffer: Buffer; size: number } | undefined,
+  ) {
+    if (!file?.buffer?.length)
+      throw new BadRequestException("กรุณาแนบสลิปการชำระเงิน");
+    if (file.buffer.length > MAX_CONTRACT_DOCUMENT_BYTES)
+      throw new BadRequestException("ไฟล์ต้องไม่เกิน 10 MB");
+    const detected = this.sniff(file.buffer);
+    await this.ensureBucket();
+    const path = `${agentId}/payment-slips/${randomUUID()}.${detected.ext}`;
+    const { error } = await this.storage().upload(path, file.buffer, {
+      contentType: detected.mime,
+      cacheControl: "3600",
+      upsert: false,
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "อัปโหลดสลิปไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path };
+  }
+
+  async uploadStandaloneReceipt(agentId: number, pdf: Buffer) {
+    if (
+      this.sniff(pdf).mime !== "application/pdf" ||
+      pdf.length > MAX_CONTRACT_DOCUMENT_BYTES
+    )
+      throw new BadRequestException("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกิน 10 MB");
+    await this.ensureBucket();
+    const path = `${agentId}/receipts/${randomUUID()}.pdf`;
+    const { error } = await this.storage().upload(path, pdf, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "สร้างเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path };
+  }
+
   async signPaths(paths: Array<string | null | undefined>) {
     const unique = [...new Set(paths.filter((path): path is string => !!path))];
     const signed = new Map<string, string>();

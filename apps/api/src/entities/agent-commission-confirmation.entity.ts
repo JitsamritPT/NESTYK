@@ -2,10 +2,10 @@ import { Entity, Column, ManyToOne, JoinColumn } from "typeorm";
 import { SerialTimestampEntity } from "./base.entity";
 import { UserEntity } from "./user.entity";
 import { TenantEntity } from "./tenant.entity";
-import type { FinancialDocumentInput } from "@nestyk/types";
+import type { CommissionConfirmationInput } from "@nestyk/types";
 
-@Entity({ name: "agent_invoices" })
-export class AgentInvoiceEntity extends SerialTimestampEntity {
+@Entity({ name: "agent_commission_confirmations" })
+export class AgentCommissionConfirmationEntity extends SerialTimestampEntity {
   @Column({ type: "int" })
   created_by_user_id: number;
 
@@ -26,27 +26,12 @@ export class AgentInvoiceEntity extends SerialTimestampEntity {
   @JoinColumn({ name: "tenant_id" })
   tenant: TenantEntity | null;
 
-  @Column({ type: "varchar", length: 120 })
-  customer_name: string;
+  @Column({ type: "varchar", length: 80 })
+  landlord_name: string;
 
   @Column({ type: "jsonb" })
-  data: FinancialDocumentInput;
+  data: CommissionConfirmationInput;
 
   @Column({ type: "text" })
   pdf_path: string;
-
-  @Column({ type: "varchar", length: 40, nullable: true })
-  receipt_document_no: string | null;
-
-  @Column({ type: "date", nullable: true })
-  receipt_issue_date: string | null;
-
-  @Column({ type: "jsonb", nullable: true })
-  receipt_data: FinancialDocumentInput | null;
-
-  @Column({ type: "text", nullable: true })
-  receipt_pdf_path: string | null;
-
-  @Column({ type: "text", nullable: true })
-  payment_slip_path: string | null;
 }

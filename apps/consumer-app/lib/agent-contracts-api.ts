@@ -250,6 +250,24 @@ export async function getFinancialDocumentDefaults(id: number, kind: import('@ne
   await ensureAgentSession();
   return apiGet(`/agent/contracts/${id}/financial-documents/${kind}`);
 }
+export async function listCommissionConfirmations(): Promise<
+  import("@nestyk/types").CommissionConfirmation[]
+> {
+  await ensureAgentSession();
+  return apiGet("/agent/contracts/commission-confirmations");
+}
+export async function getNextCommissionNumber(): Promise<{ documentNo: string }> {
+  await ensureAgentSession();
+  return apiGet("/agent/contracts/commission-confirmations/next-number");
+}
+export async function createCommissionConfirmation(
+  input: import("@nestyk/types").CommissionConfirmationInput & {
+    tenantId?: number | null;
+  },
+): Promise<import("@nestyk/types").CommissionConfirmation> {
+  await ensureAgentSession();
+  return apiPost("/agent/contracts/commission-confirmations", input);
+}
 export async function getNextInvoiceNumber(): Promise<{ documentNo: string }> {
   await ensureAgentSession();
   return apiGet("/agent/contracts/invoices/next-number");
@@ -265,6 +283,43 @@ export async function createStandaloneInvoice(
 ): Promise<import("@nestyk/types").StandaloneInvoice> {
   await ensureAgentSession();
   return apiPost("/agent/contracts/invoices", input);
+}
+export async function getReceiptDefaults(
+  invoiceId: number,
+): Promise<import("@nestyk/types").FinancialDocumentInput> {
+  await ensureAgentSession();
+  return apiGet(`/agent/contracts/invoices/${invoiceId}/receipt-defaults`);
+}
+export async function createReceiptForInvoice(
+  invoiceId: number,
+  input: Partial<import("@nestyk/types").FinancialDocumentInput>,
+  slip?: { uri: string; name: string; mimeType: string; file?: File },
+): Promise<import("@nestyk/types").StandaloneInvoice> {
+  await ensureAgentSession();
+  if (!slip)
+    return apiPost(`/agent/contracts/invoices/${invoiceId}/receipt`, input);
+  const form = new FormData();
+  form.append("payload", JSON.stringify(input));
+  if (Platform.OS === "web") {
+    const blob = slip.file ?? (await (await fetch(slip.uri)).blob());
+    form.append("file", blob, slip.name);
+  } else {
+    form.append("file", {
+      uri: slip.uri,
+      name: slip.name,
+      type: slip.mimeType,
+    } as unknown as Blob);
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  try {
+    return await apiRequest<import("@nestyk/types").StandaloneInvoice>(
+      `/agent/contracts/invoices/${invoiceId}/receipt`,
+      { method: "POST", body: form, signal: controller.signal },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 export async function generateFinancialDocument(
   id: number,

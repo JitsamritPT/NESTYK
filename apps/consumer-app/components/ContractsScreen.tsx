@@ -1,4 +1,5 @@
 import { FinancialDocumentForm } from "./FinancialDocumentForm";
+import { CommissionConfirmationForm } from "./CommissionConfirmationForm";
 import { AgreementAttachments } from "./AgreementAttachments";
 import {
   ReservationLetterFields,
@@ -20,7 +21,7 @@ import {
   ContractTypePicker,
   type CreateDocumentKind,
 } from "./ContractTypePicker";
-import React, { useContext, useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -55,6 +56,7 @@ import type {
   AgreementTemplate,
   AgentContract,
   AgentContractDocumentKind,
+  CommissionConfirmation,
   StandaloneInvoice,
   AgentContractSignParty,
   AgentContractStatus,
@@ -66,6 +68,7 @@ import type {
 } from "@nestyk/types";
 import {
   listAgentContracts,
+  listCommissionConfirmations,
   listStandaloneInvoices,
   listAgreementTypes,
   listAgreementTemplates,
@@ -140,11 +143,31 @@ export function ContractsScreen({
   const { theme } = useMobileTheme();
   const { t } = useLocale();
   const docs = t.agent.contracts;
+  const tenantPayer = useMemo(() => {
+    if (!tenant) return undefined;
+    const digits = (tenant.identityNumber ?? "").replace(/\D/g, "");
+    return {
+      tenantId: tenant.id,
+      name: tenant.name,
+      phone: tenant.phone,
+      email: tenant.email ?? "",
+      address: (tenant.fullAddress ?? "").slice(0, 240),
+      taxId: /^\d{13}$/.test(digits) ? digits : "",
+    };
+  }, [tenant]);
   const [contracts, setContracts] = useState<AgentContract[]>([]);
   const [invoices, setInvoices] = useState<StandaloneInvoice[]>([]);
+  const [commissions, setCommissions] = useState<CommissionConfirmation[]>([]);
+  const shownCommissions = tenant
+    ? commissions.filter((row) => row.tenantId === tenant.id)
+    : commissions;
+  const shownInvoices = tenant
+    ? invoices.filter((row) => row.tenantId === tenant.id)
+    : invoices;
   const [viewingInvoice, setViewingInvoice] = useState<StandaloneInvoice | null>(
     null,
   );
+  const [payingInvoice, setPayingInvoice] = useState(false);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -155,8 +178,9 @@ export function ContractsScreen({
     setListError("");
     Promise.allSettled([
       listAgentContracts(),
-      tenant ? Promise.resolve([] as StandaloneInvoice[]) : listStandaloneInvoices(),
-    ]).then(([contractResult, invoiceResult]) => {
+      listStandaloneInvoices(),
+      listCommissionConfirmations(),
+    ]).then(([contractResult, invoiceResult, commissionResult]) => {
       if (request !== listRequest.current) return;
       if (contractResult.status === "fulfilled")
         setContracts(
@@ -166,6 +190,8 @@ export function ContractsScreen({
         );
       else setListError(message(contractResult.reason));
       if (invoiceResult.status === "fulfilled") setInvoices(invoiceResult.value);
+      if (commissionResult.status === "fulfilled")
+        setCommissions(commissionResult.value);
     })
       .catch((e) => {
         if (request === listRequest.current) setListError(message(e));
@@ -241,7 +267,7 @@ export function ContractsScreen({
   const [previewDoc, setPreviewDoc] = useState<{
     name: string;
     url: string;
-    kind: AgentContractDocumentKind;
+    kind: AgentContractDocumentKind | "commission_confirmation";
   } | null>(null);
   const [signPadKey, setSignPadKey] = useState(0);
   const padRef = useRef<ContractSignaturePadHandle>(null);
@@ -359,17 +385,32 @@ export function ContractsScreen({
   function openDocumentPreview(
     name: string,
     url: string,
-    kind: AgentContractDocumentKind,
+    kind: AgentContractDocumentKind | "commission_confirmation",
   ) {
     setError("");
     setPreviewDoc({ name, url, kind });
+  }
+  function openPaymentProof(invoice: StandaloneInvoice) {
+    setNotice("");
+    setViewingInvoice(invoice);
+    if (!invoice.paymentSlipUrl) {
+      setPreviewDoc(null);
+      setError(docs.financial.slipMissing);
+      return;
+    }
+    openDocumentPreview(
+      docs.financial.paymentProof,
+      invoice.paymentSlipUrl,
+      "receipt",
+    );
   }
   function replaceFromPreview() {
     if (
       !previewDoc ||
       previewDoc.kind === "reservation_letter" ||
       previewDoc.kind === "broker_appointment" ||
-      previewDoc.kind === "lease_agreement"
+      previewDoc.kind === "lease_agreement" ||
+      previewDoc.kind === "commission_confirmation"
     )
       return;
     const kind = previewDoc.kind;
@@ -1164,24 +1205,35 @@ export function ContractsScreen({
     );
   if (menuCreate === "agent_commission")
     return (
-      <View style={s.root}>
-        {button("← เลือกประเภทสัญญา", () => {
+      <CommissionConfirmationForm
+        tenant={tenant}
+        onBack={() => {
           setMenuCreate(null);
           setChoosingType(true);
-        })}
-        <Text style={[s.heading, title]}>
-          ข้อตกลงแบ่งค่าคอมมิชชั่นระหว่างเอเจนต์
-        </Text>
-        <Text style={[s.body, muted]}>
-          กำลังเตรียมแม่แบบ PDF — จะเปิดให้กรอกฟอร์มสร้างเอกสารเร็วๆ นี้
-        </Text>
-      </View>
+        }}
+        onCreated={(doc) => {
+          setCommissions((rows) => [
+            doc,
+            ...rows.filter((row) => row.id !== doc.id),
+          ]);
+          setMenuCreate(null);
+          setNotice(docs.commissionConfirmation.success);
+          if (doc.pdfUrl)
+            openDocumentPreview(
+              docs.commissionConfirmation.title,
+              doc.pdfUrl,
+              "commission_confirmation",
+            );
+          onChanged?.();
+        }}
+      />
     );
-  if (menuCreate === "invoice" || menuCreate === "receipt")
+  if (menuCreate === "invoice")
     return (
       <FinancialDocumentForm
         key={`menu:${menuCreate}`}
         kind={menuCreate}
+        payer={tenantPayer}
         hosts={reservationHosts()}
         onBack={() => {
           setMenuCreate(null);
@@ -1486,8 +1538,17 @@ export function ContractsScreen({
       </View>
     );
   if (selected && financialKind && !reservationLocked && !draftCancelled)
-    return <FinancialDocumentForm key={`${selected.id}:${financialKind}`} contractId={selected.id} kind={financialKind}
+    return <FinancialDocumentForm key={`${selected.id}:${financialKind}`} contractId={selected.id} kind={financialKind} payer={tenantPayer}
       onBack={() => setFinancialKind(null)}
+      onStandaloneCreated={(invoice) => {
+        setInvoices((rows) => [
+          invoice,
+          ...rows.filter((row) => row.id !== invoice.id),
+        ]);
+        setFinancialKind(null);
+        setNotice(docs.financial.success);
+        onChanged?.();
+      }}
       onCreated={row => {
         setSelected(row);
         setContracts(rows => rows.map(existing => existing.id === row.id ? row : existing));
@@ -2195,10 +2256,31 @@ export function ContractsScreen({
         </MobileBottomSheet>
       </View>
     );
+  if (viewingInvoice && payingInvoice)
+    return (
+      <FinancialDocumentForm
+        key={`pay:${viewingInvoice.id}`}
+        kind="receipt"
+        fixedInvoiceId={viewingInvoice.id}
+        payer={tenantPayer}
+        onBack={() => setPayingInvoice(false)}
+        onStandaloneCreated={(invoice) => {
+          setInvoices((rows) =>
+            rows.map((row) => (row.id === invoice.id ? invoice : row)),
+          );
+          setViewingInvoice(invoice);
+          setPayingInvoice(false);
+          setNotice(docs.financial.success);
+          onChanged?.();
+        }}
+        onCreated={() => undefined}
+      />
+    );
   if (viewingInvoice)
     return (
       <View style={s.root}>
         {button("← กลับ", () => {
+          setPayingInvoice(false);
           setViewingInvoice(null);
           setPreviewDoc(null);
         })}
@@ -2211,7 +2293,39 @@ export function ContractsScreen({
             วันที่ {date(viewingInvoice.issueDate)}
           </Text>
           <Text style={[s.body, title]}>{money(viewingInvoice.total)}</Text>
+          <Text
+            style={[
+              s.body,
+              { color: viewingInvoice.receiptDocumentNo ? "#198460" : "#B45309" },
+            ]}
+          >
+            {viewingInvoice.receiptDocumentNo
+              ? docs.financial.paid
+              : docs.financial.awaitingPayment}
+          </Text>
+          {viewingInvoice.receiptDocumentNo ? (
+            <Text style={[s.small, muted]}>
+              ใบเสร็จ {viewingInvoice.receiptDocumentNo}
+            </Text>
+          ) : null}
         </View>
+        {!viewingInvoice.receiptDocumentNo ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={docs.financial.markPaid}
+            onPress={() => setPayingInvoice(true)}
+            style={({ pressed }) => [
+              s.button,
+              {
+                backgroundColor: accent,
+                borderColor: accent,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Text style={[s.body, { color: "#fff" }]}>{docs.financial.markPaid}</Text>
+          </Pressable>
+        ) : null}
         {viewingInvoice.invoiceUrl
           ? button(
               "ดูเอกสาร",
@@ -2226,6 +2340,34 @@ export function ContractsScreen({
           : (
               <Text style={[s.body, muted]}>ยังเปิดเอกสารไม่ได้</Text>
             )}
+        {viewingInvoice.receiptUrl
+          ? button(
+              `ดูใบเสร็จ ${viewingInvoice.receiptDocumentNo ?? ""}`.trim(),
+              () =>
+                openDocumentPreview(
+                  `ใบเสร็จ ${viewingInvoice.receiptDocumentNo ?? ""}`.trim(),
+                  viewingInvoice.receiptUrl!,
+                  "receipt",
+                ),
+            )
+          : null}
+        {viewingInvoice.receiptDocumentNo ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={docs.financial.viewSlip}
+            onPress={() => openPaymentProof(viewingInvoice)}
+            style={({ pressed }) => [
+              s.button,
+              {
+                backgroundColor: theme.background,
+                borderColor: theme.border,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Text style={[s.body, title]}>{docs.financial.viewSlip}</Text>
+          </Pressable>
+        ) : null}
         <Modal
           visible={previewDoc != null}
           onRequestClose={() => setPreviewDoc(null)}
@@ -2314,23 +2456,83 @@ export function ContractsScreen({
         )}
       </View>
       {errorView}
-      {!tenant && (
+      {(
         <>
           <Text style={[s.subtitle, title]}>
             ใบแจ้งหนี้
-            {!loadingList ? ` (${invoices.length})` : ""}
+            {!loadingList ? ` (${shownInvoices.length})` : ""}
           </Text>
           {!loadingList &&
-            invoices.map((invoice) => (
+            shownInvoices.map((invoice) => (
+              <View key={invoice.id} style={[s.card, card]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`ดูใบแจ้งหนี้ ${invoice.documentNo}`}
+                  disabled={busy}
+                  onPress={() => {
+                    setError("");
+                    setNotice("");
+                    setViewingInvoice(invoice);
+                  }}
+                  style={({ pressed }) => ({
+                    opacity: pressed || busy ? 0.65 : 1,
+                    gap: 10,
+                  })}
+                >
+                  <Text style={[s.subtitle, title]}>{invoice.documentNo}</Text>
+                  <Text style={[s.body, title]}>{invoice.customerName}</Text>
+                  <View style={s.row}>
+                    <Text style={[s.small, muted]}>
+                      {date(invoice.issueDate)} · {money(invoice.total)}
+                    </Text>
+                    <Text
+                      style={[
+                        s.small,
+                        { color: invoice.receiptDocumentNo ? "#198460" : "#B45309" },
+                      ]}
+                    >
+                      {invoice.receiptDocumentNo
+                        ? docs.financial.paid
+                        : docs.financial.awaitingPayment}
+                    </Text>
+                  </View>
+                </Pressable>
+                {invoice.receiptDocumentNo ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={docs.financial.viewSlip}
+                    onPress={() => openPaymentProof(invoice)}
+                    style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+                  >
+                    <Text style={[s.body, { color: accent }]}>
+                      {docs.financial.viewSlip}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          {!loadingList && !shownInvoices.length && (
+            <Text style={[s.body, muted]}>ยังไม่มีใบแจ้งหนี้</Text>
+          )}
+          <Text style={[s.subtitle, title]}>
+            {docs.commissionConfirmation.list}
+            {!loadingList ? ` (${shownCommissions.length})` : ""}
+          </Text>
+          {!loadingList &&
+            shownCommissions.map((doc) => (
               <Pressable
-                key={invoice.id}
+                key={doc.id}
                 accessibilityRole="button"
-                accessibilityLabel={`ดูใบแจ้งหนี้ ${invoice.documentNo}`}
-                disabled={busy}
+                accessibilityLabel={`${docs.commissionConfirmation.view} ${doc.documentNo}`}
+                disabled={busy || !doc.pdfUrl}
                 onPress={() => {
+                  if (!doc.pdfUrl) return;
                   setError("");
-                  setNotice("");
-                  setViewingInvoice(invoice);
+                  openDocumentPreview(
+                    docs.commissionConfirmation.title,
+                    doc.pdfUrl,
+                    "commission_confirmation",
+                  );
                 }}
                 style={({ pressed }) => [
                   s.card,
@@ -2338,18 +2540,16 @@ export function ContractsScreen({
                   { opacity: pressed || busy ? 0.65 : 1 },
                 ]}
               >
-                <Text style={[s.subtitle, title]}>{invoice.documentNo}</Text>
-                <Text style={[s.body, title]}>{invoice.customerName}</Text>
-                <View style={s.row}>
-                  <Text style={[s.small, muted]}>
-                    {date(invoice.issueDate)} · {money(invoice.total)}
-                  </Text>
-                  <Text style={[s.small, { color: accent }]}>ดูเอกสาร →</Text>
-                </View>
+                <Text style={[s.subtitle, title]}>{doc.documentNo}</Text>
+                <Text style={[s.body, title]}>{doc.landlordName}</Text>
+                <Text style={[s.small, muted]}>
+                  {date(doc.issueDate)}
+                  {doc.tenantName ? ` · ${doc.tenantName}` : ""}
+                </Text>
               </Pressable>
             ))}
-          {!loadingList && !invoices.length && (
-            <Text style={[s.body, muted]}>ยังไม่มีใบแจ้งหนี้</Text>
+          {!loadingList && !shownCommissions.length && (
+            <Text style={[s.body, muted]}>{docs.commissionConfirmation.empty}</Text>
           )}
         </>
       )}

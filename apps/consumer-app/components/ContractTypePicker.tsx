@@ -12,13 +12,13 @@ import {
   useMobileTheme,
   type AppIconName,
 } from "@nestyk/ui/native";
+import { useLocale } from "@nestyk/i18n";
 
 /** Create-menu options shown under 「เลือกประเภทสัญญา」. */
 export type CreateDocumentKind =
   | "reservation"
   | "lease"
   | "invoice"
-  | "receipt"
   | "broker_appointment"
   | "agent_commission";
 
@@ -30,7 +30,6 @@ const CREATE_OPTIONS: Array<{
   { kind: "reservation", label: "หนังสือจองห้อง", icon: "calendar" },
   { kind: "lease", label: "สัญญาเช่า", icon: "key" },
   { kind: "invoice", label: "ใบแจ้งหนี้", icon: "note" },
-  { kind: "receipt", label: "ใบเสร็จ", icon: "note" },
   { kind: "broker_appointment", label: "แต่งตั้งนายหน้า", icon: "handshake" },
   {
     kind: "agent_commission",
@@ -47,6 +46,7 @@ export function ContractTypePicker({
   onBack: () => void;
 }) {
   const { theme } = useMobileTheme();
+  const { t } = useLocale();
   return (
     <View style={styles.root}>
       <MobileButton variant="outline" onPress={onBack}>
@@ -61,11 +61,16 @@ export function ContractTypePicker({
         </Text>
       </View>
       <View style={styles.grid}>
-        {CREATE_OPTIONS.map((option) => (
+        {CREATE_OPTIONS.map((option) => {
+          const label =
+            option.kind === "agent_commission"
+              ? t.agent.contracts.commissionConfirmation.menu
+              : option.label;
+          return (
           <Pressable
             key={option.kind}
             accessibilityRole="button"
-            accessibilityLabel={`สร้าง${option.label}`}
+            accessibilityLabel={`สร้าง${label}`}
             onPress={() => onSelect(option.kind)}
             style={({ pressed }) => [
               styles.tile,
@@ -78,9 +83,10 @@ export function ContractTypePicker({
               color="#FFFFFF"
               weight="regular"
             />
-            <Text style={styles.label}>{option.label}</Text>
+            <Text style={styles.label}>{label}</Text>
           </Pressable>
-        ))}
+          );
+        })}
       </View>
     </View>
   );

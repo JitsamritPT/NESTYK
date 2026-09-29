@@ -1,4 +1,6 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -9,7 +11,6 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
-  Body,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import { AuthGuard } from "../../auth/guards/auth.guard";
@@ -21,6 +22,22 @@ import {
 } from "../../auth/decorators/current-user.decorator";
 import { AgentContractsService } from "./agent-contracts.service";
 import { MAX_CONTRACT_DOCUMENT_BYTES } from "./contract-document-storage.service";
+
+function receiptPayload(body: unknown): unknown {
+  if (
+    body &&
+    typeof body === "object" &&
+    !Array.isArray(body) &&
+    typeof (body as { payload?: unknown }).payload === "string"
+  ) {
+    try {
+      return JSON.parse((body as { payload: string }).payload) as unknown;
+    } catch {
+      throw new BadRequestException("ข้อมูลไม่ถูกต้อง");
+    }
+  }
+  return body;
+}
 
 @Controller("agent/contracts")
 @UseGuards(AuthGuard, RolesGuard)
@@ -75,6 +92,49 @@ export class AgentContractsController {
   @HttpCode(HttpStatus.OK)
   createInvoice(@CurrentUser() user: AuthRequestUser, @Body() body: unknown) {
     return this.contracts.createStandaloneInvoice(user.id, body);
+  }
+  @Get("commission-confirmations/next-number")
+  nextCommissionNumber() {
+    return this.contracts.peekNextCommissionNo();
+  }
+  @Get("commission-confirmations")
+  listCommissionConfirmations(@CurrentUser() user: AuthRequestUser) {
+    return this.contracts.listCommissionConfirmations(user.id);
+  }
+  @Post("commission-confirmations")
+  @HttpCode(HttpStatus.OK)
+  createCommissionConfirmation(
+    @CurrentUser() user: AuthRequestUser,
+    @Body() body: unknown,
+  ) {
+    return this.contracts.createCommissionConfirmation(user.id, body);
+  }
+  @Get("invoices/:invoiceId/receipt-defaults")
+  receiptDefaults(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("invoiceId", ParseIntPipe) invoiceId: number,
+  ) {
+    return this.contracts.receiptDefaults(user.id, invoiceId);
+  }
+  @Post("invoices/:invoiceId/receipt")
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: { fileSize: MAX_CONTRACT_DOCUMENT_BYTES, files: 1 },
+    }),
+  )
+  createReceipt(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("invoiceId", ParseIntPipe) invoiceId: number,
+    @UploadedFile() file: { buffer: Buffer; size: number } | undefined,
+    @Body() body: unknown,
+  ) {
+    return this.contracts.createReceiptForInvoice(
+      user.id,
+      invoiceId,
+      receiptPayload(body),
+      file,
+    );
   }
   @Get(":id") view(
     @CurrentUser() user: AuthRequestUser,

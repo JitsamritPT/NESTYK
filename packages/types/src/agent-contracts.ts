@@ -162,7 +162,7 @@ export interface FinancialDocumentInput {
   notes: string;
 }
 
-/** Invoice created without a reservation letter. */
+/** Invoice created without a reservation letter. A receipt, when present, belongs to this invoice. */
 export interface StandaloneInvoice {
   id: number;
   documentNo: string;
@@ -170,6 +170,50 @@ export interface StandaloneInvoice {
   issueDate: string;
   total: number;
   invoiceUrl: string | null;
+  tenantId: number | null;
+  receiptDocumentNo: string | null;
+  receiptUrl: string | null;
+  paymentSlipUrl: string | null;
+}
+
+/** Landlord-to-agent commission confirmation, stamped onto the paper template. */
+export interface CommissionConfirmationInput {
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  landlordNationality: string;
+  landlordId: string;
+  agentName: string;
+  agentNationality: string;
+  agentId: string;
+  propertyType: string;
+  project: string;
+  unitNo: string;
+  propertyAddress: string;
+  tenantName: string;
+  tenantNationality: string;
+  tenantIdentity: string;
+  leasePeriod: string;
+  leaseStart: string;
+  leaseEnd: string;
+  monthlyRent: string;
+  agreedCommission: string;
+  bankAccount: string;
+  landlordSignName: string;
+  agentSignName: string;
+  landlordSignDate: string;
+  agentSignDate: string;
+}
+
+export interface CommissionConfirmation {
+  id: number;
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  agentName: string;
+  tenantName: string;
+  tenantId: number | null;
+  pdfUrl: string | null;
 }
 
 /** Fillable fields for residential lease PDF (สัญญาเช่า). */
