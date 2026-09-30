@@ -1,4 +1,4 @@
-# Agent calendar — API (placeholder)
+# Agent calendar — API (UI demo)
 
 | | |
 |--|--|
@@ -9,7 +9,7 @@
 
 ## สถานะ
 
-**ยังไม่มี API** — หน้า `/agent/calendar` เป็น placeholder UI ไม่เรียก backend
+**ยังไม่มี API** — เมนูปฏิทิน Agent ใน Consumer App ใช้ข้อมูลจำลองและ React state เท่านั้น ไม่เรียก backend
 
 ---
 

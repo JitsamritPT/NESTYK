@@ -261,6 +261,32 @@ export interface TranslationSchema {
     requestMaintenance: string;
   };
   agent: {
+    calendar: {
+      demoNotice: string;
+      today: string;
+      previousMonth: string;
+      nextMonth: string;
+      eventCount: string;
+      emptyTitle: string;
+      emptyHint: string;
+      add: string;
+      newEvent: string;
+      title: string;
+      titlePlaceholder: string;
+      location: string;
+      locationPlaceholder: string;
+      time: string;
+      save: string;
+      titleRequired: string;
+      timeInvalid: string;
+      viewing: string;
+      followUp: string;
+      contract: string;
+      confirmed: string;
+      pending: string;
+      kind: string;
+      saved: string;
+    };
     leads: {
       mapLocation: string;
       mapSearchHint: string;

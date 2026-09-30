@@ -1,3 +1,5 @@
+import { AgentCalendarScreen, emptyCalendarDraft } from '../components/AgentCalendarScreen';
+import { calendarDateKey, createCalendarDemoEvents } from '../lib/agent-calendar-demo';
 import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
@@ -101,6 +103,10 @@ export default function AppHomeScreen() {
   const router = useRouter();
   const { ready, isAuthenticated, session, displayName, initials, signOut } = useAuth();
   const [activeRole, setActiveRole] = useState<UserRole>(APP_CONFIG.defaultRole);
+  const [calendarEvents, setCalendarEvents] = useState(createCalendarDemoEvents);
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => calendarDateKey(new Date()));
+  const [calendarMonth, setCalendarMonth] = useState(() => calendarDateKey(new Date()).slice(0, 7) + '-01');
+  const [calendarDraft, setCalendarDraft] = useState(emptyCalendarDraft);
   const [activeTab, setActiveTab] = useState<MobileAppTab>(() =>
     getDefaultTabForRole(APP_CONFIG.defaultRole),
   );
@@ -769,6 +775,19 @@ export default function AppHomeScreen() {
           </View>
         </View>
       );
+    }
+
+    if (activeTab === 'calendar' && activeRole === 'agent') {
+      return <AgentCalendarScreen
+        events={calendarEvents}
+        onAdd={event => setCalendarEvents(previous => [...previous, event])}
+        selectedDate={calendarSelectedDate}
+        onSelectDate={setCalendarSelectedDate}
+        visibleMonth={calendarMonth}
+        onMonthChange={setCalendarMonth}
+        draft={calendarDraft}
+        onDraftChange={setCalendarDraft}
+      />;
     }
 
     if (activeTab === 'calendar') {

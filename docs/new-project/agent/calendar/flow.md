@@ -1,79 +1,13 @@
-# Agent calendar — Flow (placeholder)
+# Agent calendar — UI demo flow
 
-| | |
-|--|--|
-| กลับ | [README](./README.md) |
-| API | [api.md](./api.md) |
+1. เปิดเมนูปฏิทินในโหมด Agent ภายใต้ shell เดิม
+2. เริ่มแสดงเดือนและวันที่ปัจจุบัน พร้อมป้ายข้อมูลจำลอง
+3. เลือกวันเพื่อดูรายการนัด จุดใต้วันที่แสดงว่ามีนัด เลื่อนเดือนหรือกดวันนี้ได้
+4. วันที่ไม่มีนัดแสดง empty state พร้อมปุ่มเพิ่มนัด
+5. เพิ่มนัด: เลือกประเภท กรอกหัวข้อ สถานที่ (ไม่บังคับ) และเวลา `HH:mm`
+6. บันทึกลง state สำหรับวันที่แสดงในฟอร์ม เรียงตามเวลา พร้อมสถานะรอติดต่อ
+7. ยกเลิกปิดฟอร์มโดยเก็บร่างไว้ สลับเมนูเก็บรายการ/วันที่/เดือน/ร่างไว้จนรีโหลด
 
----
+ทุกข้อมูลเป็นตัวอย่าง ไม่มีการส่งข้อความ แจ้งเตือน เชื่อม lead หรือสัญญาจริง และไม่เรียก backend
 
-## 1. สรุป
-
-**Calendar** อยู่ในเมนู agent แล้ว แต่ยังเป็น **placeholder** — แสดง empty state ไม่โหลดข้อมูล
-
----
-
-## 2. User journey (ปัจจุบัน)
-
-```mermaid
-flowchart LR
-    A["Side menu / nav"] --> B["/agent/calendar"]
-    B --> C["Empty state<br/>Coming soon"]
-```
-
----
-
-## 3. Placeholder UX
-
-| องค์ประกอบ | พฤติกรรม |
-|------------|----------|
-| Shell | `AgentModePage` · title `agent.pages.calendarTitle` |
-| เนื้อหา | ไอคอน calendar + ข้อความ `agent.calendar.emptyTitle` / `emptyMessage` |
-| Loading | ไม่มี — ไม่เรียก API |
-| Error | ไม่มี |
-| CTA | ไม่บังคับ — อาจมีปุ่มกลับ dashboard (optional) |
-
-**ห้าม** mock ข้อมูลนัด · ห้าม calendar grid ปลอม — รอ spec รอบถัดไป
-
----
-
-## 4. i18n (แนะนำ)
-
-Prefix: `agent.calendar.*` · `agent.pages.calendarTitle`
-
-| Key | ตัวอย่าง (th) |
-|-----|----------------|
-| `agent.pages.calendarTitle` | ปฏิทิน |
-| `agent.pages.calendarDescription` | นัดหมายและติดตามงาน |
-| `agent.calendar.emptyTitle` | เร็ว ๆ นี้ |
-| `agent.calendar.emptyMessage` | ปฏิทินนัดหมายกำลังพัฒนา |
-
-ครบ `th.ts`, `en.ts`, `zh.ts`, `ja.ts`, `types.ts` เมื่อ implement UI
-
----
-
-## 5. Navigation
-
-| ช่องทาง | Calendar |
-|---------|----------|
-| Side menu / More | ✅ |
-| Tab bar | ❌ (ยกเว้นจะย้ายในอนาคต) |
-| Web sidebar | ✅ |
-
-ลำดับเมนูเต็ม — [README § Navigation](./README.md#navigation-agent)
-
----
-
-## 6. อนาคต (draft — ไม่ implement)
-
-```mermaid
-flowchart TD
-    CAL["/agent/calendar"] --> V["Viewing appointments"]
-    CAL --> F["Lead follow-up dates"]
-    CAL --> C["Contract milestones"]
-    V --> LEADS["leads + viewed_at"]
-    F --> LEADS
-    C --> CONTRACTS["lease_contracts dates"]
-```
-
-Spec รายละเอียดจะเพิ่มเมื่อเริ่ม pack จริง (อาจมี `agent_calendar_events` หรือ derive จาก leads)
+[README](./README.md) · [API](./api.md)
