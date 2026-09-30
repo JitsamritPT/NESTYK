@@ -104,7 +104,8 @@ export function AgentTenantsScreen({
   const [editing, setEditing] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editForm, setEditForm] = useState({
-    name: "",
+    firstName: "",
+    lastName: "",
     phone: "",
     email: "",
     identityNumber: "",
@@ -222,7 +223,8 @@ export function AgentTenantsScreen({
   }
   function beginEdit(tenant: AgentTenant) {
     setEditForm({
-      name: tenant.name,
+      firstName: tenant.firstName || tenant.name.trim().split(/\s+/)[0] || "",
+      lastName: tenant.lastName || tenant.name.trim().split(/\s+/).slice(1).join(" "),
       phone: tenant.phone,
       email: tenant.email || "",
       identityNumber: tenant.identityNumber || "",
@@ -235,7 +237,7 @@ export function AgentTenantsScreen({
   }
   async function saveEdit() {
     if (!selected || savingEdit) return;
-    if (!editForm.name.trim() || !editForm.phone.trim()) {
+    if (!editForm.firstName.trim() || !editForm.phone.trim()) {
       setError("กรุณากรอกชื่อและเบอร์โทร");
       return;
     }
@@ -243,7 +245,9 @@ export function AgentTenantsScreen({
     setError("");
     try {
       const latest = await updateAgentTenant(selected.id, {
-        name: editForm.name.trim(),
+        name: [editForm.firstName.trim(), editForm.lastName.trim()].filter(Boolean).join(" "),
+        firstName: editForm.firstName.trim(),
+        lastName: editForm.lastName.trim(),
         phone: editForm.phone.trim(),
         email: editForm.email.trim(),
         identityNumber: editForm.identityNumber.trim(),
@@ -380,7 +384,8 @@ export function AgentTenantsScreen({
           <View style={[s.card, panel]}>
             {(
               [
-                ["name", "ชื่อ–นามสกุล *", "ชื่อที่ใช้ในสัญญา"],
+                ["firstName", "ชื่อ *", "ชื่อ"],
+                ["lastName", "นามสกุล", "ไม่บังคับ"],
                 ["phone", "เบอร์โทร *", "เบอร์โทรที่ติดต่อได้"],
                 ["email", "อีเมล", "name@example.com"],
                 [

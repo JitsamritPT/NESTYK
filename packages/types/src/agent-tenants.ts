@@ -3,6 +3,8 @@ export interface AgentTenant {
   id: number;
   leadId: number;
   name: string;
+  firstName: string;
+  lastName: string;
   phone: string;
   email: string | null;
   note: string | null;
@@ -17,6 +19,8 @@ export interface AgentTenant {
 export interface TenantLeadOption {
   id: number;
   name: string;
+  firstName: string;
+  lastName: string;
   phone: string;
   email: string | null;
   nationality: string | null;
@@ -28,6 +32,8 @@ export interface TenantRoomOption {
 }
 export interface UpdateAgentTenant {
   name: string;
+  firstName: string;
+  lastName: string;
   phone: string;
   email?: string;
   note?: string;

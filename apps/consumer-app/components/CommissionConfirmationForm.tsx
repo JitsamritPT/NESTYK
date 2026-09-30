@@ -16,6 +16,8 @@ type Field = keyof CommissionConfirmationInput;
 
 const OPTIONAL = new Set<Field>([
   "documentNo",
+  "landlordLastName",
+  "tenantLastName",
   "landlordNationality",
   "landlordId",
   "agentNationality",
@@ -38,7 +40,8 @@ const OPTIONAL = new Set<Field>([
 const ORDER: Field[] = [
   "documentNo",
   "issueDate",
-  "landlordName",
+  "landlordFirstName",
+  "landlordLastName",
   "landlordNationality",
   "landlordId",
   "agentName",
@@ -48,7 +51,8 @@ const ORDER: Field[] = [
   "project",
   "unitNo",
   "propertyAddress",
-  "tenantName",
+  "tenantFirstName",
+  "tenantLastName",
   "tenantNationality",
   "tenantIdentity",
   "leasePeriod",
@@ -67,6 +71,8 @@ const EMPTY: CommissionConfirmationInput = {
   documentNo: "",
   issueDate: "",
   landlordName: "",
+  landlordFirstName: "",
+  landlordLastName: "",
   landlordNationality: "",
   landlordId: "",
   agentName: "",
@@ -77,6 +83,8 @@ const EMPTY: CommissionConfirmationInput = {
   unitNo: "",
   propertyAddress: "",
   tenantName: "",
+  tenantFirstName: "",
+  tenantLastName: "",
   tenantNationality: "",
   tenantIdentity: "",
   leasePeriod: "",
@@ -119,7 +127,21 @@ export function CommissionConfirmationForm({
     project: tenant?.property ?? "",
     unitNo: tenant?.room ?? "",
     propertyAddress: (tenant?.fullAddress ?? "").slice(0, 180),
-    tenantName: tenant?.name ?? "",
+    ...(() => {
+      const given = tenant?.firstName?.trim() ?? "";
+      const family = tenant?.lastName?.trim() ?? "";
+      const parts = (tenant?.name ?? "").trim().split(/\s+/).filter(Boolean);
+      const tenantFirstName = given || parts[0] || "";
+      const tenantLastName = family || (given ? "" : parts.slice(1).join(" "));
+      return {
+        tenantFirstName,
+        tenantLastName,
+        tenantName:
+          [tenantFirstName, tenantLastName].filter(Boolean).join(" ") ||
+          tenant?.name ||
+          "",
+      };
+    })(),
     tenantNationality: tenant?.nationality ?? "",
     tenantIdentity: tenant?.identityNumber ?? "",
   }));
@@ -228,7 +250,25 @@ export function CommissionConfirmationForm({
                 : "default"
             }
             onChangeText={(value) =>
-              setForm((current) => ({ ...current, [key]: value }))
+              setForm((current) => {
+                const next = { ...current, [key]: value };
+                if (key === "landlordFirstName" || key === "landlordLastName") {
+                  const full = [next.landlordFirstName, next.landlordLastName]
+                    .map((part) => part.trim())
+                    .filter(Boolean)
+                    .join(" ");
+                  next.landlordName = full;
+                  if (!current.landlordSignName || current.landlordSignName === current.landlordName)
+                    next.landlordSignName = full;
+                }
+                if (key === "tenantFirstName" || key === "tenantLastName") {
+                  next.tenantName = [next.tenantFirstName, next.tenantLastName]
+                    .map((part) => part.trim())
+                    .filter(Boolean)
+                    .join(" ");
+                }
+                return next;
+              })
             }
           />
         ))

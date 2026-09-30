@@ -22,6 +22,12 @@ export class UserEntity extends SerialCreatedEntity {
   @Column({ type: 'varchar', length: 50, nullable: true })
   phone: string | null;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  identity_number: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  nationality: string | null;
+
   @Column({ type: 'varchar', length: 512, nullable: true })
   avatar_url: string | null;
 

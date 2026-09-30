@@ -39,6 +39,8 @@ const SLOTS: Record<BrokerTextField, Blank | Blank[]> = {
   documentNo: { x: 385.0, w: 62.0, y: 753.6 },
   issueDate: { x: 492.0, w: 65.0, y: 753.6 },
   landlordName: { x: 132.2, w: 88.9, y: 649.9 },
+  landlordFirstName: { x: 0, w: 0, y: 0 },
+  landlordLastName: { x: 0, w: 0, y: 0 },
   landlordNationality: { x: 308.4, w: 68.7, y: 649.9 },
   landlordId: { x: 486.9, w: 60.6, y: 649.9 },
   landlordAddress: { x: 130.0, w: 263.3, y: 630.1 },
@@ -195,6 +197,7 @@ export async function createBrokerAppointmentPdf(
 
   (Object.keys(SLOTS) as BrokerTextField[]).forEach((key) => {
     const slot = SLOTS[key];
+    if (!Array.isArray(slot) && !slot.w) return;
     const value = values[key];
     if (Array.isArray(slot)) slot.forEach((s) => write(value, s));
     else write(value, slot);

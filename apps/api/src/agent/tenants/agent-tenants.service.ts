@@ -20,7 +20,8 @@ function parseTenantProfile(input: unknown): UpdateAgentTenant {
     throw new BadRequestException("กรุณาระบุข้อมูลผู้เช่า");
   const b = input as Record<string, unknown>;
   for (const [key, max] of [
-    ["name", 255],
+    ["firstName", 255],
+    ["lastName", 255],
     ["phone", 50],
     ["email", 255],
     ["note", 500],
@@ -28,7 +29,7 @@ function parseTenantProfile(input: unknown): UpdateAgentTenant {
     ["nationality", 120],
   ] as const) {
     const v = b[key];
-    const required = key === "name" || key === "phone";
+    const required = key === "phone";
     if (v == null && !required) continue;
     if (
       typeof v !== "string" ||
@@ -58,8 +59,21 @@ function parseTenantProfile(input: unknown): UpdateAgentTenant {
     throw new BadRequestException(
       "กรุณาระบุเลขบัตรประชาชนหรือพาสปอร์ตให้ถูกต้อง",
     );
+  let firstName = typeof b.firstName === "string" ? b.firstName.trim() : "";
+  let lastName = typeof b.lastName === "string" ? b.lastName.trim() : "";
+  if (!firstName && typeof b.name === "string" && b.name.trim()) {
+    const parts = b.name.trim().split(/\s+/);
+    firstName = parts[0] ?? "";
+    lastName = lastName || parts.slice(1).join(" ");
+  }
+  if (!firstName || firstName.length > 255 || lastName.length > 255)
+    throw new BadRequestException(
+      "กรุณาระบุชื่อและเบอร์โทรให้ครบ และตรวจสอบความยาวข้อมูล",
+    );
   return {
-    name: String(b.name).trim(),
+    name: [firstName, lastName].filter(Boolean).join(" "),
+    firstName,
+    lastName,
     phone,
     email,
     note: typeof b.note === "string" ? b.note.trim() : "",
@@ -127,6 +141,8 @@ export class AgentTenantsService {
       id: t.id,
       leadId: t.lead_id,
       name: t.name,
+      firstName: t.first_name ?? "",
+      lastName: t.last_name ?? "",
       phone: t.phone,
       email: t.email,
       note: t.note,
@@ -163,7 +179,7 @@ export class AgentTenantsService {
       .where("lead.created_by_user_id = :agentId", { agentId })
       .andWhere("lead.tenant_id IS NULL")
       .andWhere("lead.status != :lost", { lost: "lost" })
-      .andWhere("(lead.name ILIKE :q OR lead.phone ILIKE :q)", {
+      .andWhere("(lead.name ILIKE :q OR lead.first_name ILIKE :q OR lead.last_name ILIKE :q OR lead.phone ILIKE :q)", {
         q: `%${String(q).slice(0, 255)}%`,
       })
       .orderBy("lead.id", "DESC")
@@ -172,6 +188,8 @@ export class AgentTenantsService {
     return leads.map((l) => ({
       id: l.id,
       name: l.name,
+      firstName: l.first_name ?? "",
+      lastName: l.last_name ?? "",
       phone: l.phone,
       email: l.email,
       nationality: l.nationality,
@@ -224,6 +242,8 @@ export class AgentTenantsService {
           lead_id: lead.id,
           created_by_user_id: agentId,
           name: b.name,
+          first_name: b.firstName,
+          last_name: b.lastName,
           phone: b.phone,
           email: b.email || null,
           note: b.note || null,
@@ -246,6 +266,8 @@ export class AgentTenantsService {
       .getOne();
     if (!tenant) throw new NotFoundException("ไม่พบผู้เช่า");
     tenant.name = b.name;
+    tenant.first_name = b.firstName;
+    tenant.last_name = b.lastName;
     tenant.phone = b.phone;
     tenant.email = b.email || null;
     tenant.note = b.note || null;

@@ -8,6 +8,7 @@ import {
   Param,
   ParseIntPipe,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -58,6 +59,10 @@ export class AgentContractsController {
   }
   @Get("candidates") candidates(@CurrentUser() user: AuthRequestUser) {
     return this.contracts.candidates(user.id);
+  }
+  @Get("owner-users")
+  ownerUsers(@Query("q") q?: string) {
+    return this.contracts.searchOwnerUsers(q ?? "");
   }
   @Get("reservation-defaults/:leadId") reservationDefaults(
     @CurrentUser() user: AuthRequestUser,

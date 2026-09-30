@@ -19,14 +19,23 @@ export function validateLead(input: unknown): CreateLeadInput {
   if (!Array.isArray(locations) || locations.length > 50 || locations.some((v) => typeof v !== 'string' || !v.trim() || v.length > 255)) throw new BadRequestException('Invalid locations');
   result.locations = [...new Set(locations.map(canonicalArea))];
   if ((result.locations as string[]).some((v) => !v || v === '-')) throw new BadRequestException('Invalid locations');
-  const textFields = { locationPlaceId: 255, locationName: 500, name: 255, phone: 50, nationality: 120, preferredLocation: 500, moveInPlan: 255, occupation: 255 };
+  const textFields = { locationPlaceId: 255, locationName: 500, firstName: 255, lastName: 255, phone: 50, nationality: 120, preferredLocation: 500, moveInPlan: 255, occupation: 255 };
   for (const [key, max] of Object.entries(textFields)) {
     const value = body[key];
-    const required = key === 'name' || key === 'phone';
+    const required = key === 'phone';
     if (value == null && !required) { result[key] = null; continue; }
     if (typeof value !== 'string' || value.trim().length > max || (required && !value.trim())) throw new BadRequestException(`${key} ${required ? 'is required and ' : ''}must be text up to ${max} characters`);
     result[key] = value.trim() || null;
   }
+  if (!result.firstName && typeof body.name === 'string' && body.name.trim()) {
+    const parts = body.name.trim().split(/\s+/);
+    result.firstName = parts[0];
+    if (!result.lastName) result.lastName = parts.slice(1).join(' ') || null;
+  }
+  if (typeof result.firstName !== 'string' || !result.firstName || result.firstName.length > 255)
+    throw new BadRequestException('firstName is required and must be text up to 255 characters');
+  result.lastName = typeof result.lastName === 'string' ? result.lastName : '';
+  result.name = [result.firstName, result.lastName].filter(Boolean).join(' ');
   const pinFields = ['latitude', 'longitude', 'radiusKm'];
   const hasPin = pinFields.some((key) => body[key] != null);
   if ((hasPin || locations.length > 0) && !result.province) throw new BadRequestException('A valid province is required for a location');
@@ -98,7 +107,7 @@ export class AgentLeadsService {
     const row = await this.leads.save(this.leads.create({
       location_place_id: b.locationPlaceId, location_name: b.locationName, latitude: b.latitude, longitude: b.longitude, radius_km: b.radiusKm,
       province: b.province, locations: b.locations,
-      name: b.name, phone: b.phone, nationality: b.nationality,
+      name: b.name, first_name: b.firstName, last_name: b.lastName, phone: b.phone, nationality: b.nationality,
       budget_min: b.budgetMin == null ? null : String(b.budgetMin), budget_max: b.budgetMax == null ? null : String(b.budgetMax),
       preferred_location: b.preferredLocation, move_in_plan: b.moveInPlan, has_pets: b.hasPets,
       occupation: b.occupation, visa_type_id: b.visaTypeId, lease_duration_months: b.leaseDurationMonths,
@@ -130,7 +139,7 @@ export class AgentLeadsService {
     await this.leads.update({ id, created_by_user_id: agentId }, {
       location_place_id: b.locationPlaceId, location_name: b.locationName, latitude: b.latitude, longitude: b.longitude, radius_km: b.radiusKm,
       province: b.province, locations: b.locations,
-      name: b.name, phone: b.phone, nationality: b.nationality,
+      name: b.name, first_name: b.firstName, last_name: b.lastName, phone: b.phone, nationality: b.nationality,
       budget_min: b.budgetMin == null ? null : String(b.budgetMin), budget_max: b.budgetMax == null ? null : String(b.budgetMax),
       preferred_location: b.preferredLocation, move_in_plan: b.moveInPlan, has_pets: b.hasPets,
       occupation: b.occupation, visa_type_id: b.visaTypeId, lease_duration_months: b.leaseDurationMonths,
@@ -162,7 +171,7 @@ export class AgentLeadsService {
       ? '(lead.locations && CAST(:locations AS text[]) OR (cardinality(lead.locations) = 0 AND lead.latitude IS NULL))'
       : 'lead.locations && CAST(:locations AS text[])', { locations });
     const q = query.q?.trim();
-    if (q) qb.andWhere("(lead.name ILIKE :q OR lead.phone ILIKE :q OR lead.preferred_location ILIKE :q OR lead.location_name ILIKE :q OR lead.province ILIKE :q OR array_to_string(lead.locations, ', ') ILIKE :q)", { q: `%${q.replace(/[\\%_]/g, '\\$&')}%` });
+    if (q) qb.andWhere("(lead.name ILIKE :q OR lead.first_name ILIKE :q OR lead.last_name ILIKE :q OR lead.phone ILIKE :q OR lead.preferred_location ILIKE :q OR lead.location_name ILIKE :q OR lead.province ILIKE :q OR array_to_string(lead.locations, ', ') ILIKE :q)", { q: `%${q.replace(/[\\%_]/g, '\\$&')}%` });
     const [rows, total] = await qb.orderBy('lead.created_at', 'DESC').addOrderBy('lead.id', 'DESC').skip((page - 1) * limit).take(limit).getManyAndCount();
     return { items: rows.map(toLead), total, page, limit };
   }
@@ -182,7 +191,7 @@ function toLead(row: LeadEntity) {
   return {
     locationPlaceId: row.location_place_id ?? null, locationName: row.location_name ?? null, latitude: row.latitude ?? null, longitude: row.longitude ?? null, radiusKm: row.radius_km ?? null,
     province: row.province ?? null, locations: row.locations ?? [],
-    id: row.id, name: row.name, phone: row.phone, nationality: row.nationality,
+    id: row.id, name: row.name, firstName: row.first_name ?? '', lastName: row.last_name ?? '', phone: row.phone, nationality: row.nationality,
     budgetMin: row.budget_min == null ? null : Number(row.budget_min), budgetMax: row.budget_max == null ? null : Number(row.budget_max),
     preferredLocation: row.preferred_location, moveInPlan: row.move_in_plan, hasPets: row.has_pets,
     occupation: row.occupation, visaTypeId: row.visa_type_id, visaTypeCode: row.visa_type?.code ?? null,

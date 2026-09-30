@@ -49,6 +49,7 @@ import {
   pickLeaseRentFromRoom,
 } from "./lease-agreement";
 import { validateReservationLetter, emptyReservationLetter, stampReservationDocumentHeader, bangkokDate } from "./reservation-letter";
+import { ensurePartyLogin } from "./party-login";
 import type {
   AgentContract,
   AgentContractDocumentKind,
@@ -69,6 +70,7 @@ import { AgentCommissionConfirmationEntity } from "../../entities/agent-commissi
 import { LeadEntity } from "../../entities/lead.entity";
 import { TenantEntity } from "../../entities/tenant.entity";
 import { RentRoomEntity } from "../../entities/rent-room.entity";
+import { RentRoomContactEntity } from "../../entities/rent-room-contact.entity";
 import { RoomTenancyEntity } from "../../entities/room-tenancy.entity";
 import {
   CONTRACT_DOCUMENT_KINDS,
@@ -199,7 +201,11 @@ export async function invoicePayer(
   const address = tenantMailingAddress(tenant);
   if (!address)
     throw new BadRequestException("ผู้เช่ายังไม่มีที่อยู่ จึงสร้างใบแจ้งหนี้ไม่ได้");
-  return { id: tenant.id, name: tenant.name.trim(), address };
+  const firstName = tenant.first_name?.trim() || tenant.name.trim().split(/\s+/)[0] || "";
+  const lastName =
+    tenant.last_name?.trim() || tenant.name.trim().split(/\s+/).slice(1).join(" ");
+  const name = [firstName, lastName].filter(Boolean).join(" ") || tenant.name.trim();
+  return { id: tenant.id, name, firstName, lastName, address };
 }
 
 export async function nextReceiptNo(manager: EntityManager, at = new Date()) {
@@ -958,7 +964,10 @@ export class AgentContractsService {
     const base: FinancialDocumentInput = {
       documentNo: `${kind === 'invoice' ? 'INV' : 'REC'}-${v.contractNo}`,
       issueDate: today, dueDate: today, reference: v.contractNo,
-      customerName: v.tenant, customerAddress: String(snapshot.tenantAddress ?? ''), customerTaxId: String(snapshot.tenantTaxId ?? ''),
+      customerName: [c.tenant?.first_name, c.tenant?.last_name].filter((part) => part?.trim()).join(" ") || v.tenant,
+      customerFirstName: c.tenant?.first_name ?? "",
+      customerLastName: c.tenant?.last_name ?? "",
+      customerAddress: String(snapshot.tenantAddress ?? ''), customerTaxId: String(snapshot.tenantTaxId ?? ''),
       customerPhone: String(snapshot.tenantPhone ?? c.tenant?.phone ?? ''),
       customerEmail: String(snapshot.tenantEmail ?? c.tenant?.email ?? ''),
       issuerName: String(snapshot.ownerName ?? owner?.name ?? (ownerUser ? `${ownerUser.first_name} ${ownerUser.last_name}`.trim() : '')), issuerAddress: String(snapshot.ownerAddress ?? ''), issuerTaxId: String(snapshot.ownerTaxId ?? ''),
@@ -1188,7 +1197,12 @@ export class AgentContractsService {
             issuerName: INVOICE_ISSUER_NAME,
             issuerAddress: INVOICE_ISSUER_ADDRESS,
             ...(payer
-              ? { customerName: payer.name, customerAddress: payer.address }
+              ? {
+                  customerName: payer.name,
+                  customerFirstName: payer.firstName,
+                  customerLastName: payer.lastName,
+                  customerAddress: payer.address,
+                }
               : {}),
           },
           "invoice",
@@ -1710,6 +1724,51 @@ export class AgentContractsService {
     }));
   }
 
+  async searchOwnerUsers(query: string) {
+    const q = query.trim();
+    if (!q || q.length > 80) return [];
+    const like = `%${q.replace(/[%_\\]/g, "")}%`;
+    const rows: Array<{
+      id: number;
+      email: string;
+      phone: string | null;
+      first_name: string;
+      last_name: string;
+      identity_number: string | null;
+      nationality: string | null;
+    }> = await this.db.query(
+      `
+      SELECT u.id, u.email, u.phone, u.first_name, u.last_name,
+             u.identity_number, u.nationality
+      FROM users u
+      INNER JOIN user_roles ur ON ur.user_id = u.id
+      INNER JOIN master_roles r ON r.id = ur.role_id
+      WHERE r.name = 'owner'
+        AND (
+          u.email ILIKE $1
+          OR COALESCE(u.phone, '') ILIKE $1
+          OR u.first_name ILIKE $1
+          OR u.last_name ILIKE $1
+          OR (u.first_name || ' ' || u.last_name) ILIKE $1
+          OR COALESCE(u.identity_number, '') ILIKE $1
+        )
+      ORDER BY u.first_name ASC, u.id ASC
+      LIMIT 15
+      `,
+      [like],
+    );
+    return rows.map((row) => ({
+      id: row.id,
+      name: `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim(),
+      firstName: row.first_name ?? "",
+      lastName: row.last_name ?? "",
+      email: row.email,
+      phone: row.phone ?? "",
+      identityNumber: row.identity_number ?? "",
+      nationality: row.nationality ?? "",
+    }));
+  }
+
   async reservationDefaults(
     agentId: number,
     leadId: number,
@@ -1734,6 +1793,21 @@ export class AgentContractsService {
     const ownerUser = room.owner_id
       ? await this.db.getRepository(UserEntity).findOneBy({ id: room.owner_id })
       : null;
+    const roomContacts = await this.db.getRepository(RentRoomContactEntity).find({
+      where: { rent_room_id: room.id },
+      relations: { contact: true },
+    });
+    const roomContact =
+      roomContacts.find((link) => link.is_primary)?.contact ??
+      roomContacts[0]?.contact ??
+      null;
+    const firstText = (...values: Array<string | null | undefined>) => {
+      for (const value of values) {
+        const text = value?.trim();
+        if (text) return text;
+      }
+      return "";
+    };
     const agent = await this.db.getRepository(UserEntity).findOneBy({
       id: agentId,
     });
@@ -1748,24 +1822,43 @@ export class AgentContractsService {
           .filter((part) => part && part !== "-")
           .join(" ")
       : "";
-    const landlordName =
-      owner?.name ??
-      (ownerUser
-        ? `${ownerUser.first_name ?? ""} ${ownerUser.last_name ?? ""}`.trim()
-        : "");
+    const landlordName = firstText(
+      owner?.name,
+      ownerUser
+        ? `${ownerUser.first_name ?? ""} ${ownerUser.last_name ?? ""}`
+        : "",
+      roomContact?.name,
+    );
     const agentName = agent
       ? `${agent.first_name ?? ""} ${agent.last_name ?? ""}`.trim()
       : "";
+    const ownerFull = ownerUser
+      ? `${ownerUser.first_name ?? ""} ${ownerUser.last_name ?? ""}`.trim()
+      : "";
+    const landlordIsUser = Boolean(ownerFull) && landlordName === ownerFull;
     return {
       ...emptyReservationLetter(),
       issueDate: bangkokDate(),
-      tenantName: tenant.name ?? "",
+      tenantName:
+        [tenant.first_name, tenant.last_name].filter((part) => part?.trim()).join(" ") ||
+        tenant.name ||
+        "",
+      tenantFirstName: tenant.first_name ?? "",
+      tenantLastName: tenant.last_name ?? "",
       tenantPhone: tenant.phone ?? "",
+      tenantEmail: tenant.email ?? "",
       tenantId: tenant.identity_number ?? "",
       tenantNationality: tenant.nationality ?? "",
       landlordName,
-      landlordPhone: owner?.phone ?? ownerUser?.phone ?? "",
-      landlordId: room.owner_identity_number ?? "",
+      landlordFirstName: landlordIsUser ? ownerUser?.first_name ?? "" : "",
+      landlordLastName: landlordIsUser ? ownerUser?.last_name ?? "" : "",
+      landlordPhone: firstText(owner?.phone, ownerUser?.phone, roomContact?.phone),
+      landlordEmail: firstText(owner?.email, ownerUser?.email, roomContact?.email),
+      landlordId: firstText(
+        room.owner_identity_number,
+        landlordIsUser ? ownerUser?.identity_number : "",
+      ),
+      landlordNationality: landlordIsUser ? ownerUser?.nationality ?? "" : "",
       agentName,
       agentPhone: agent?.phone ?? "",
       project: property?.name || room.listing_title || "",
@@ -1811,6 +1904,8 @@ export class AgentContractsService {
       documentNo: "",
       issueDate: base.issueDate,
       landlordName: base.landlordName,
+      landlordFirstName: base.landlordFirstName,
+      landlordLastName: base.landlordLastName,
       landlordNationality: "",
       landlordId: base.landlordId,
       landlordAddress: base.address,
@@ -1888,10 +1983,14 @@ export class AgentContractsService {
       ...emptyLeaseAgreement(),
       issueDate: base.issueDate,
       landlordName: base.landlordName,
+      landlordFirstName: base.landlordFirstName,
+      landlordLastName: base.landlordLastName,
       landlordId: base.landlordId,
       landlordAddress: base.address,
       landlordPhone: base.landlordPhone,
       tenantName: base.tenantName,
+      tenantFirstName: base.tenantFirstName,
+      tenantLastName: base.tenantLastName,
       tenantNationality: base.tenantNationality,
       tenantId: base.tenantId,
       tenantPhone: base.tenantPhone,
@@ -2033,11 +2132,50 @@ export class AgentContractsService {
       const savedLetter = existing?.data?.reservationLetter as
         | ReservationLetterInput
         | undefined;
-      reservationLetter = validateReservationLetter(
-        stampReservationDocumentHeader(rawData.reservationLetter, savedLetter),
+      const pulled = await this.reservationDefaults(agentId, b.leadId);
+      const stamped = stampReservationDocumentHeader(
+        rawData.reservationLetter,
+        savedLetter,
       );
+      if (stamped && typeof stamped === "object" && !Array.isArray(stamped)) {
+        const letter = stamped as Record<string, unknown>;
+        letter.tenantName = pulled.tenantName;
+        letter.tenantFirstName = pulled.tenantFirstName;
+        letter.tenantLastName = pulled.tenantLastName;
+        letter.tenantPhone = pulled.tenantPhone;
+        letter.tenantEmail = pulled.tenantEmail;
+        letter.tenantId = pulled.tenantId;
+        letter.tenantNationality = pulled.tenantNationality;
+      }
+      reservationLetter = validateReservationLetter(stamped);
       delete rawData.reservationLetter;
     }
+    const reservationParties = reservationLetter
+      ? {
+          tenantUserId: await ensurePartyLogin(this.db, {
+            email: reservationLetter.tenantEmail,
+            phone: reservationLetter.tenantPhone,
+            firstName: reservationLetter.tenantFirstName,
+            lastName: reservationLetter.tenantLastName,
+            name: reservationLetter.tenantName,
+            identityNumber: reservationLetter.tenantId,
+            nationality: reservationLetter.tenantNationality,
+            role: "tenant",
+            who: "ผู้เช่า",
+          }),
+          ownerUserId: await ensurePartyLogin(this.db, {
+            email: reservationLetter.landlordEmail,
+            phone: reservationLetter.landlordPhone,
+            firstName: reservationLetter.landlordFirstName,
+            lastName: reservationLetter.landlordLastName,
+            name: reservationLetter.landlordName,
+            identityNumber: reservationLetter.landlordId,
+            nationality: reservationLetter.landlordNationality,
+            role: "owner",
+            who: "ผู้ให้เช่า",
+          }),
+        }
+      : null;
     if (type.form_kind === "broker_appointment" && rawData.brokerAppointment != null) {
       brokerAppointment = validateBrokerAppointment(rawData.brokerAppointment);
       delete rawData.brokerAppointment;
@@ -2106,6 +2244,12 @@ export class AgentContractsService {
       });
       if (!tenant || !room)
         throw new NotFoundException("ไม่พบผู้เช่าหรือห้องที่คุณมีสิทธิ์จัดการ");
+      if (reservationParties) {
+        tenant.user_id = reservationParties.tenantUserId;
+        room.owner_id = reservationParties.ownerUserId;
+        await manager.save(tenant);
+        await manager.save(room);
+      }
       if (existing) {
         const current = await manager.findOne(LeaseContractEntity, {
           where: { id: existing.id, created_by_user_id: agentId }, lock: { mode: "pessimistic_write" },
@@ -2245,11 +2389,17 @@ export class AgentContractsService {
             tenantIdNumber: tenant.identity_number,
             tenantNationality: tenant.nationality,
             ownerName:
-              owner?.name ??
+              reservationLetter?.landlordName ||
+              owner?.name ||
               (ownerUser
                 ? `${ownerUser.first_name} ${ownerUser.last_name}`.trim()
-                : null),
-            ownerPhone: owner?.phone ?? ownerUser?.phone ?? null,
+                : null) ||
+              null,
+            ownerPhone:
+              reservationLetter?.landlordPhone ||
+              owner?.phone ||
+              ownerUser?.phone ||
+              null,
             ownerIdNumber: room.owner_identity_number,
             agentName: agent
               ? `${agent.first_name} ${agent.last_name}`.trim()

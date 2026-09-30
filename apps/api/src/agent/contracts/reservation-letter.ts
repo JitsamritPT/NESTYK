@@ -5,11 +5,17 @@ const TEXT = [
   ["documentNo", 40],
   ["issueDate", 32],
   ["tenantName", 120],
+  ["tenantFirstName", 120],
+  ["tenantLastName", 120],
   ["tenantPhone", 40],
+  ["tenantEmail", 120],
   ["tenantId", 40],
   ["tenantNationality", 40],
   ["landlordName", 120],
+  ["landlordFirstName", 120],
+  ["landlordLastName", 120],
   ["landlordPhone", 40],
+  ["landlordEmail", 120],
   ["landlordId", 40],
   ["landlordNationality", 40],
   ["agentName", 80],
@@ -76,11 +82,17 @@ export function emptyReservationLetter(): ReservationLetterInput {
     documentNo: "",
     issueDate: "",
     tenantName: "",
+    tenantFirstName: "",
+    tenantLastName: "",
     tenantPhone: "",
+    tenantEmail: "",
     tenantId: "",
     tenantNationality: "",
     landlordName: "",
+    landlordFirstName: "",
+    landlordLastName: "",
     landlordPhone: "",
+    landlordEmail: "",
     landlordId: "",
     landlordNationality: "",
     agentName: "",
@@ -124,10 +136,30 @@ export function validateReservationLetter(
   const out = emptyReservationLetter();
   for (const [key, max] of TEXT) {
     const v = b[key];
+    if (
+      (key === "tenantEmail" ||
+        key === "landlordEmail" ||
+        key === "landlordFirstName" ||
+        key === "landlordLastName" ||
+        key === "tenantFirstName" ||
+        key === "tenantLastName") &&
+      (v == null || v === "")
+    ) {
+      out[key] = "";
+      continue;
+    }
     if (typeof v !== "string" || v.trim().length > max)
       throw new BadRequestException("ข้อมูลในฟอร์มไม่ครบหรือยาวเกินไป");
     out[key] = v.trim();
   }
+  for (const key of ["tenantEmail", "landlordEmail"] as const) {
+    if (out[key] && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(out[key]))
+      throw new BadRequestException("รูปแบบอีเมลไม่ถูกต้อง");
+  }
+  if (out.tenantFirstName)
+    out.tenantName = [out.tenantFirstName, out.tenantLastName].filter(Boolean).join(" ");
+  if (out.landlordFirstName)
+    out.landlordName = [out.landlordFirstName, out.landlordLastName].filter(Boolean).join(" ");
   out.applyToAdvance = b.applyToAdvance === true;
   out.applyToDeposit = b.applyToDeposit === true;
   if (!PAYMENT_METHODS.has(out.paymentMethod))

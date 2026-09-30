@@ -8,11 +8,25 @@ type TextField = Exclude<
   "landlordSignaturePng" | "brokerSignaturePng"
 >;
 
+export function completeBrokerNames(
+  input: Partial<BrokerAppointmentInput>,
+): BrokerAppointmentInput {
+  const form = { ...emptyBrokerAppointmentForm(), ...input };
+  if (!form.landlordFirstName.trim() && !form.landlordLastName.trim()) {
+    const parts = form.landlordName.trim().split(/\s+/).filter(Boolean);
+    form.landlordFirstName = parts[0] ?? "";
+    form.landlordLastName = parts.slice(1).join(" ");
+  }
+  return form;
+}
+
 export function emptyBrokerAppointmentForm(): BrokerAppointmentInput {
   return {
     documentNo: "",
     issueDate: "",
     landlordName: "",
+    landlordFirstName: "",
+    landlordLastName: "",
     landlordNationality: "",
     landlordId: "",
     landlordAddress: "",
@@ -37,7 +51,7 @@ export function emptyBrokerAppointmentForm(): BrokerAppointmentInput {
 
 export const BROKER_APPOINTMENT_REQUIRED: TextField[] = [
   "issueDate",
-  "landlordName",
+  "landlordFirstName",
   "brokerCompany",
   "brokerContact",
   "propertyLine",
@@ -73,7 +87,8 @@ const FIELDS: Array<{
     required: true,
     placeholder: "2026-10-01",
   },
-  { key: "landlordName", label: "ผู้ให้เช่า", required: true },
+  { key: "landlordFirstName", label: "ชื่อผู้ให้เช่า", required: true },
+  { key: "landlordLastName", label: "นามสกุลผู้ให้เช่า" },
   { key: "landlordNationality", label: "สัญชาติผู้ให้เช่า" },
   { key: "landlordId", label: "เลขบัตร / พาสปอร์ตผู้ให้เช่า" },
   { key: "landlordAddress", label: "ที่อยู่ผู้ให้เช่า", multiline: true },
@@ -144,7 +159,14 @@ export function BrokerAppointmentFields({
           value={value[field.key]}
           onChangeText={(text) => {
             const next = { ...value, [field.key]: text };
-            if (field.key === "landlordName") next.landlordSignName = text;
+            if (field.key === "landlordFirstName" || field.key === "landlordLastName") {
+              const full = [next.landlordFirstName, next.landlordLastName]
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .join(" ");
+              next.landlordName = full;
+              next.landlordSignName = full;
+            }
             if (field.key === "brokerContact" && !value.brokerSignName.trim())
               next.brokerSignName = text;
             onChange(next);

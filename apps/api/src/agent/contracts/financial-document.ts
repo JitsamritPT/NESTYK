@@ -34,6 +34,14 @@ export function validateFinancialDocument(
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new BadRequestException("ข้อมูลเอกสารไม่ถูกต้อง");
   const obj = input as Record<string, unknown>;
+  const customerFirst =
+    typeof obj.customerFirstName === "string" ? obj.customerFirstName.trim() : "";
+  const customerLast =
+    typeof obj.customerLastName === "string" ? obj.customerLastName.trim() : "";
+  if (customerFirst)
+    obj.customerName = [customerFirst, customerLast].filter(Boolean).join(" ");
+  if (obj.customerFirstName == null) obj.customerFirstName = "";
+  if (obj.customerLastName == null) obj.customerLastName = "";
   const result: Record<string, unknown> = {};
   const limits: Record<string, number> = {
     documentNo: 40,
@@ -41,6 +49,8 @@ export function validateFinancialDocument(
     dueDate: 10,
     reference: 60,
     customerName: 120,
+    customerFirstName: 120,
+    customerLastName: 120,
     customerAddress: 240,
     customerTaxId: 13,
     customerPhone: 40,

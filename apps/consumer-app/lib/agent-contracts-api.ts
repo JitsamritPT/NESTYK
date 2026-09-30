@@ -21,6 +21,24 @@ export async function listContractCandidates(): Promise<ContractCandidate[]> {
   await ensureAgentSession();
   return apiGet("/agent/contracts/candidates");
 }
+export async function searchOwnerUsers(
+  query: string,
+): Promise<
+  Array<{
+    id: number;
+    name: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    identityNumber: string;
+    nationality: string;
+  }>
+> {
+  await ensureAgentSession();
+  const q = encodeURIComponent(query.trim());
+  return apiGet(`/agent/contracts/owner-users?q=${q}`);
+}
 export async function getReservationDefaults(
   leadId: number,
 ): Promise<import("@nestyk/types").ReservationLetterInput> {

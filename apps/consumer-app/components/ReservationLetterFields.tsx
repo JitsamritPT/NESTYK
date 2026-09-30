@@ -1,18 +1,25 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { MobileInput, useMobileTheme } from "@nestyk/ui/native";
 import type { ReservationLetterInput } from "@nestyk/types";
+import { searchOwnerUsers } from "../lib/agent-contracts-api";
 
 export function emptyReservationLetterForm(): ReservationLetterInput {
   return {
     documentNo: "",
     issueDate: "",
     tenantName: "",
+    tenantFirstName: "",
+    tenantLastName: "",
     tenantPhone: "",
+    tenantEmail: "",
     tenantId: "",
     tenantNationality: "",
     landlordName: "",
+    landlordFirstName: "",
+    landlordLastName: "",
     landlordPhone: "",
+    landlordEmail: "",
     landlordId: "",
     landlordNationality: "",
     agentName: "",
@@ -53,8 +60,8 @@ type TextKey = Exclude<
 >;
 
 export const RESERVATION_LETTER_REQUIRED: TextKey[] = [
-  "tenantName",
-  "landlordName",
+  "tenantFirstName",
+  "landlordFirstName",
   "project",
   "reservationPayment",
 ];
@@ -88,35 +95,58 @@ export function reservationLetterFieldErrors(
     errors.termFrom = "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)";
   if (value.termTo.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(value.termTo.trim()))
     errors.termTo = "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)";
+  if (!value.tenantPhone.trim()) errors.tenantPhone = REQUIRED_MESSAGE;
+  if (!value.tenantEmail.trim()) errors.tenantEmail = REQUIRED_MESSAGE;
+  if (!value.landlordPhone.trim()) errors.landlordPhone = REQUIRED_MESSAGE;
+  if (!value.landlordEmail.trim()) errors.landlordEmail = REQUIRED_MESSAGE;
+  for (const key of ["tenantEmail", "landlordEmail"] as const) {
+    if (
+      value[key].trim() &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value[key].trim())
+    )
+      errors[key] = "รูปแบบอีเมลไม่ถูกต้อง";
+  }
   return errors;
 }
 
+type PartyField = {
+  key: TextKey;
+  label: string;
+  placeholder?: string;
+  multiline?: boolean;
+  required?: boolean;
+  email?: boolean;
+  locked?: boolean;
+};
+
+const TENANT_FIELDS: PartyField[] = [
+  { key: "tenantFirstName", label: "ชื่อผู้จอง", required: true, locked: true },
+  { key: "tenantLastName", label: "นามสกุลผู้จอง", locked: true },
+  { key: "tenantPhone", label: "เบอร์ติดต่อผู้จอง", required: true, locked: true },
+  { key: "tenantEmail", label: "อีเมลผู้จอง", email: true, required: true, locked: true },
+  { key: "tenantId", label: "เลขบัตร / พาสปอร์ต / นิติบุคคล ผู้จอง", locked: true },
+  { key: "tenantNationality", label: "สัญชาติผู้จอง", locked: true },
+];
+
+const LANDLORD_FIELDS: PartyField[] = [
+  { key: "landlordFirstName", label: "ชื่อผู้ให้เช่า", required: true },
+  { key: "landlordLastName", label: "นามสกุลผู้ให้เช่า" },
+  { key: "landlordPhone", label: "เบอร์ติดต่อผู้ให้เช่า", required: true },
+  { key: "landlordEmail", label: "อีเมลผู้ให้เช่า", email: true, required: true },
+  { key: "landlordId", label: "เลขบัตร / พาสปอร์ต / นิติบุคคล ผู้ให้เช่า" },
+  { key: "landlordNationality", label: "สัญชาติผู้ให้เช่า" },
+];
+
+const AGENT_FIELDS: PartyField[] = [
+  { key: "agentName", label: "ชื่อเอเจนท์" },
+  { key: "companyName", label: "ชื่อบริษัท" },
+  { key: "agentPhone", label: "โทรเอเจนท์" },
+];
+
 const SECTIONS: Array<{
   title: string;
-  fields: Array<{
-    key: TextKey;
-    label: string;
-    placeholder?: string;
-    multiline?: boolean;
-    required?: boolean;
-  }>;
+  fields: PartyField[];
 }> = [
-  {
-    title: "01 คู่สัญญาและผู้ประสานงาน",
-    fields: [
-      { key: "tenantName", label: "ผู้จอง", required: true },
-      { key: "tenantPhone", label: "เบอร์ติดต่อผู้จอง" },
-      { key: "tenantId", label: "เลขบัตร / พาสปอร์ต / นิติบุคคล ผู้จอง" },
-      { key: "tenantNationality", label: "สัญชาติผู้จอง" },
-      { key: "landlordName", label: "ผู้ให้เช่า", required: true },
-      { key: "landlordPhone", label: "เบอร์ติดต่อผู้ให้เช่า" },
-      { key: "landlordId", label: "เลขบัตร / พาสปอร์ต / นิติบุคคล ผู้ให้เช่า" },
-      { key: "landlordNationality", label: "สัญชาติผู้ให้เช่า" },
-      { key: "agentName", label: "ชื่อเอเจนท์" },
-      { key: "companyName", label: "ชื่อบริษัท" },
-      { key: "agentPhone", label: "โทรเอเจนท์" },
-    ],
-  },
   {
     title: "02 ทรัพย์สินและข้อตกลงการเช่า",
     fields: [
@@ -192,11 +222,269 @@ export function ReservationLetterFields({
   const { theme } = useMobileTheme();
   const title = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
-  const set = (key: TextKey, text: string) =>
-    onChange({ ...value, [key]: text });
+  const [party, setParty] = useState<"tenant" | "landlord">("landlord");
+  const [ownerQuery, setOwnerQuery] = useState("");
+  const [ownerHits, setOwnerHits] = useState<
+    Array<{
+      id: number;
+      name: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+      identityNumber: string;
+      nationality: string;
+    }>
+  >([]);
+  const [ownerSearchError, setOwnerSearchError] = useState("");
+  const [landlordOpen, setLandlordOpen] = useState(false);
+  const searchSeq = useRef(0);
+  const set = (key: TextKey, text: string) => {
+    const next = { ...value, [key]: text };
+    if (key === "landlordFirstName" || key === "landlordLastName") {
+      const full = [next.landlordFirstName, next.landlordLastName]
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .join(" ");
+      if (!value.payee || value.payee === value.landlordName) next.payee = full;
+      if (!value.landlordSignName || value.landlordSignName === value.landlordName)
+        next.landlordSignName = full;
+      next.landlordName = full;
+    }
+    onChange(next);
+  };
+  useEffect(() => {
+    const q = ownerQuery.trim();
+    if (q.length < 1) {
+      setOwnerHits([]);
+      setOwnerSearchError("");
+      return;
+    }
+    const seq = ++searchSeq.current;
+    const timer = setTimeout(() => {
+      void searchOwnerUsers(q)
+        .then((rows) => {
+          if (seq === searchSeq.current) {
+            setOwnerHits(rows);
+            setOwnerSearchError("");
+          }
+        })
+        .catch(() => {
+          if (seq === searchSeq.current) {
+            setOwnerHits([]);
+            setOwnerSearchError("ค้นหาผู้ให้เช่าไม่สำเร็จ");
+          }
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [ownerQuery]);
+  const pickOwner = (owner: {
+    name: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    identityNumber: string;
+    nationality: string;
+  }) => {
+    onChange({
+      ...value,
+      landlordFirstName: owner.firstName,
+      landlordLastName: owner.lastName,
+      landlordName: owner.name,
+      landlordPhone: owner.phone,
+      landlordEmail: owner.email,
+      landlordId: owner.identityNumber,
+      landlordNationality: owner.nationality,
+      landlordSignName: owner.name,
+      payee: !value.payee || value.payee === value.landlordName ? owner.name : value.payee,
+    });
+    setLandlordOpen(true);
+    setOwnerQuery("");
+    setOwnerHits([]);
+  };
+  const addLandlord = () => {
+    onChange({
+      ...value,
+      landlordName: "",
+      landlordFirstName: "",
+      landlordLastName: "",
+      landlordPhone: "",
+      landlordEmail: "",
+      landlordId: "",
+      landlordNationality: "",
+      landlordSignName:
+        value.landlordSignName === value.landlordName ? "" : value.landlordSignName,
+      payee: value.payee === value.landlordName ? "" : value.payee,
+    });
+    setLandlordOpen(true);
+    setOwnerQuery("");
+    setOwnerHits([]);
+  };
+  const partyFields = party === "tenant" ? TENANT_FIELDS : LANDLORD_FIELDS;
+  const partyHasError = (fields: PartyField[]) =>
+    fields.some((field) => !!errors?.[field.key]);
+  useEffect(() => {
+    if (!errors) return;
+    const tenantError = partyHasError(TENANT_FIELDS);
+    const landlordError = partyHasError(LANDLORD_FIELDS);
+    if (party === "tenant" && landlordError && !tenantError) setParty("landlord");
+    if (party === "landlord" && tenantError && !landlordError) setParty("tenant");
+  }, [errors, party]);
+
+  const renderField = (field: PartyField) => (
+    <MobileInput
+      key={field.key}
+      label={field.label}
+      required={field.required}
+      error={errors?.[field.key]}
+      value={value[field.key]}
+      onChangeText={(text) => set(field.key, text)}
+      placeholder={field.placeholder}
+      editable={!disabled && !field.locked}
+      multiline={field.multiline}
+      keyboardType={field.email ? "email-address" : "default"}
+      autoCapitalize={field.email ? "none" : "sentences"}
+    />
+  );
+  const tab = (id: "tenant" | "landlord", label: string, fields: PartyField[]) => {
+    const selected = party === id;
+    const hasError = partyHasError(fields);
+    return (
+      <Pressable
+        key={id}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        disabled={disabled}
+        onPress={() => setParty(id)}
+        style={{
+          flex: 1,
+          minHeight: 44,
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 999,
+          borderWidth: 1,
+          borderColor: selected ? "#F8B615" : hasError ? "#DC2626" : theme.border,
+          backgroundColor: selected ? "#FFFBEB" : theme.background,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 14,
+            lineHeight: 21,
+            color: hasError && !selected ? "#DC2626" : theme.textHeading,
+            fontWeight: selected ? "600" : "400",
+          }}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    );
+  };
 
   return (
     <View style={{ gap: 16 }}>
+      <View
+        style={{
+          gap: 10,
+          padding: 14,
+          borderRadius: 16,
+          borderWidth: 1,
+          borderColor: theme.border,
+          backgroundColor: theme.surface,
+        }}
+      >
+        <Text style={{ fontSize: 16, lineHeight: 24, fontWeight: "600", color: theme.textHeading }}>
+          01 คู่สัญญา
+        </Text>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {tab("landlord", "ผู้ให้เช่า", LANDLORD_FIELDS)}
+          {tab("tenant", "ผู้จอง", TENANT_FIELDS)}
+        </View>
+        {party === "tenant" ? (
+          <Text style={{ fontSize: 13, lineHeight: 20, color: theme.textSecondary }}>
+            ดึงจากข้อมูลผู้เช่า แก้ไขไม่ได้
+          </Text>
+        ) : (
+          <>
+            <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-end" }}>
+              <View style={{ flex: 1 }}>
+                <MobileInput
+                  label="ค้นหาผู้ให้เช่า"
+                  value={ownerQuery}
+                  onChangeText={setOwnerQuery}
+                  placeholder="ชื่อ อีเมล หรือเบอร์"
+                  editable={!disabled}
+                />
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                disabled={disabled}
+                onPress={addLandlord}
+                style={{
+                  minHeight: 44,
+                  justifyContent: "center",
+                  borderRadius: 12,
+                  backgroundColor: "#F8B615",
+                  paddingHorizontal: 12,
+                  marginBottom: 2,
+                }}
+              >
+                <Text style={{ fontSize: 14, lineHeight: 21, fontWeight: "600", color: "#211E1E" }}>
+                  + เพิ่มผู้ให้เช่า
+                </Text>
+              </Pressable>
+            </View>
+            {ownerSearchError ? (
+              <Text style={{ fontSize: 13, lineHeight: 20, color: "#DC2626" }}>{ownerSearchError}</Text>
+            ) : null}
+            {!landlordOpen && errors?.landlordFirstName ? (
+              <Text style={{ fontSize: 13, lineHeight: 20, color: "#DC2626" }}>
+                เลือกผู้ให้เช่าจากผลค้นหา หรือกดเพิ่มผู้ให้เช่า
+              </Text>
+            ) : null}
+            {ownerHits.map((owner) => (
+              <Pressable
+                key={owner.id}
+                accessibilityRole="button"
+                disabled={disabled}
+                onPress={() => pickOwner(owner)}
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  backgroundColor: theme.background,
+                }}
+              >
+                <Text style={{ fontSize: 14, lineHeight: 21, color: theme.textHeading }}>{owner.name}</Text>
+                <Text style={{ fontSize: 13, lineHeight: 20, color: theme.textSecondary }}>
+                  {[owner.email, owner.phone].filter(Boolean).join(" · ")}
+                </Text>
+              </Pressable>
+            ))}
+          </>
+        )}
+        {party === "landlord" && !landlordOpen ? null : partyFields.map(renderField)}
+      </View>
+      <View
+        style={{
+          gap: 10,
+          padding: 14,
+          borderRadius: 16,
+          borderWidth: 1,
+          borderColor: theme.border,
+          backgroundColor: theme.surface,
+        }}
+      >
+        <Text style={{ fontSize: 16, lineHeight: 24, fontWeight: "600", color: theme.textHeading }}>
+          ผู้ประสานงาน
+        </Text>
+        {AGENT_FIELDS.map(renderField)}
+      </View>
       {SECTIONS.map((section) => (
         <View
           key={section.title}
@@ -221,19 +509,7 @@ export function ReservationLetterFields({
           >
             {section.title}
           </Text>
-          {section.fields.map((field) => (
-            <MobileInput
-              key={field.key}
-              label={field.label}
-              required={field.required}
-              error={errors?.[field.key]}
-              value={value[field.key]}
-              onChangeText={(text) => set(field.key, text)}
-              placeholder={field.placeholder}
-              editable={!disabled}
-              multiline={field.multiline}
-            />
-          ))}
+          {section.fields.map(renderField)}
           {section.title.startsWith("03") ? (
             <>
               <Text style={[{ fontSize: 14, lineHeight: 21 }, title]}>

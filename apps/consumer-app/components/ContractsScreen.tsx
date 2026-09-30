@@ -10,11 +10,13 @@ import {
 import {
   BrokerAppointmentFields,
   emptyBrokerAppointmentForm,
+  completeBrokerNames,
   brokerAppointmentFieldErrors,
 } from "./BrokerAppointmentFields";
 import {
   LeaseAgreementFields,
   emptyLeaseAgreementForm,
+  completeLeaseNames,
   leaseAgreementFieldErrors,
 } from "./LeaseAgreementFields";
 import {
@@ -149,6 +151,8 @@ export function ContractsScreen({
     return {
       tenantId: tenant.id,
       name: tenant.name,
+      firstName: tenant.firstName,
+      lastName: tenant.lastName,
       phone: tenant.phone,
       email: tenant.email ?? "",
       address: (tenant.fullAddress ?? "").slice(0, 240),
@@ -870,7 +874,7 @@ export function ContractsScreen({
       if (type.formKind === "broker_appointment" && initialLead) {
         try {
           const defaults = await getBrokerAppointmentLeadDefaults(initialLead);
-          setBrokerForm(defaults);
+          setBrokerForm(completeBrokerNames(defaults));
           setForm((current) => ({
             ...current,
             startDate: defaults.issueDate || current.startDate,
@@ -883,14 +887,15 @@ export function ContractsScreen({
         try {
           const defaults = await getLeaseDefaults(initialLead);
           if (source?.data?.leaseAgreement && typeof source.data.leaseAgreement === "object") {
-            setLeaseForm({
-              ...emptyLeaseAgreementForm(),
-              ...(source.data.leaseAgreement as LeaseAgreementInput),
-              landlordSignaturePng: "",
-              tenantSignaturePng: "",
-            });
+            setLeaseForm(
+              completeLeaseNames({
+                ...(source.data.leaseAgreement as LeaseAgreementInput),
+                landlordSignaturePng: "",
+                tenantSignaturePng: "",
+              }),
+            );
           } else {
-            setLeaseForm(defaults);
+            setLeaseForm(completeLeaseNames(defaults));
           }
           setForm((current) => ({
             ...current,
@@ -942,8 +947,8 @@ export function ContractsScreen({
         monthlyRent: String(latest.monthlyRent ?? ""), deposit: String(latest.deposit ?? ""),
         reservationFee: String(latest.reservationFee ?? ""), notes: latest.notes ?? "" });
       setLetter({ ...emptyReservationLetterForm(), ...(latest.data.reservationLetter as Partial<ReservationLetterInput> ?? {}) });
-      setBrokerForm({ ...emptyBrokerAppointmentForm(), ...(latest.data.brokerAppointment as Partial<BrokerAppointmentInput> ?? {}) });
-      setLeaseForm({ ...emptyLeaseAgreementForm(), ...(latest.data.leaseAgreement as Partial<LeaseAgreementInput> ?? {}) });
+      setBrokerForm(completeBrokerNames(latest.data.brokerAppointment as Partial<BrokerAppointmentInput> ?? {}));
+      setLeaseForm(completeLeaseNames(latest.data.leaseAgreement as Partial<LeaseAgreementInput> ?? {}));
       setLetterErrors({}); setBrokerErrors({}); setLeaseErrors({});
       setExtraFields(Object.fromEntries(Object.keys((draftTemplate.dataSchema.properties ?? {}) as object)
         .filter(key => !standardFields.has(key) && latest.data[key] != null)
@@ -1319,7 +1324,7 @@ export function ContractsScreen({
                 if (broker) {
                   void getBrokerAppointmentLeadDefaults(c.leadId)
                     .then((defaults) => {
-                      setBrokerForm(defaults);
+                      setBrokerForm(completeBrokerNames(defaults));
                       setForm((current) => ({
                         ...current,
                         startDate: defaults.issueDate || current.startDate,
@@ -1330,7 +1335,7 @@ export function ContractsScreen({
                 if (lease) {
                   void getLeaseDefaults(c.leadId)
                     .then((defaults) => {
-                      setLeaseForm(defaults);
+                      setLeaseForm(completeLeaseNames(defaults));
                       setForm((current) => ({
                         ...current,
                         startDate: defaults.termFrom || current.startDate,

@@ -5,12 +5,16 @@ const TEXT = [
   ["documentNo", 40],
   ["issueDate", 32],
   ["landlordName", 80],
+  ["landlordFirstName", 80],
+  ["landlordLastName", 80],
   ["landlordNationality", 40],
   ["landlordId", 40],
   ["landlordAddress", 160],
   ["landlordPhone", 40],
   ["landlordEmail", 80],
   ["tenantName", 80],
+  ["tenantFirstName", 80],
+  ["tenantLastName", 80],
   ["tenantNationality", 40],
   ["tenantId", 40],
   ["tenantAddress", 160],
@@ -76,12 +80,16 @@ export function emptyLeaseAgreement(): LeaseAgreementInput {
     documentNo: "",
     issueDate: "",
     landlordName: "",
+    landlordFirstName: "",
+    landlordLastName: "",
     landlordNationality: "",
     landlordId: "",
     landlordAddress: "",
     landlordPhone: "",
     landlordEmail: "",
     tenantName: "",
+    tenantFirstName: "",
+    tenantLastName: "",
     tenantNationality: "",
     tenantId: "",
     tenantAddress: "",
@@ -129,10 +137,24 @@ export function validateLeaseAgreement(input: unknown): LeaseAgreementInput {
   const out = emptyLeaseAgreement();
   for (const [key, max] of TEXT) {
     const v = b[key];
+    if (
+      (key === "landlordFirstName" ||
+        key === "landlordLastName" ||
+        key === "tenantFirstName" ||
+        key === "tenantLastName") &&
+      (v == null || v === "")
+    ) {
+      out[key] = "";
+      continue;
+    }
     if (typeof v !== "string" || v.trim().length > max)
       throw new BadRequestException("ข้อมูลในฟอร์มไม่ครบหรือยาวเกินไป");
     out[key] = v.trim();
   }
+  if (out.landlordFirstName)
+    out.landlordName = [out.landlordFirstName, out.landlordLastName].filter(Boolean).join(" ");
+  if (out.tenantFirstName)
+    out.tenantName = [out.tenantFirstName, out.tenantLastName].filter(Boolean).join(" ");
   out.landlordSignaturePng = optionalPng(
     b.landlordSignaturePng,
     "ลายเซ็นผู้ให้เช่า",

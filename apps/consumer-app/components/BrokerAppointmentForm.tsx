@@ -21,6 +21,7 @@ import {
   generateBrokerAppointment,
   getBrokerAppointmentDefaults,
 } from "../lib/agent-contracts-api";
+import { completeBrokerNames } from "./BrokerAppointmentFields";
 import {
   ContractSignaturePad,
   type ContractSignaturePadHandle,
@@ -42,7 +43,8 @@ const FIELDS: Array<{
 }> = [
   { key: "documentNo", label: "เลขที่ *", required: true },
   { key: "issueDate", label: "วันที่ * (YYYY-MM-DD)", required: true },
-  { key: "landlordName", label: "ผู้ให้เช่า *", required: true },
+  { key: "landlordFirstName", label: "ชื่อผู้ให้เช่า *", required: true },
+  { key: "landlordLastName", label: "นามสกุลผู้ให้เช่า" },
   { key: "landlordNationality", label: "สัญชาติผู้ให้เช่า" },
   { key: "landlordId", label: "เลขบัตร / พาสปอร์ตผู้ให้เช่า" },
   { key: "landlordAddress", label: "ที่อยู่ผู้ให้เช่า", multiline: true },
@@ -153,11 +155,13 @@ export function BrokerAppointmentForm({
     getBrokerAppointmentDefaults(contractId)
       .then((data) => {
         if (active)
-          setForm({
-            ...data,
-            landlordSignaturePng: data.landlordSignaturePng ?? "",
-            brokerSignaturePng: data.brokerSignaturePng ?? "",
-          });
+          setForm(
+            completeBrokerNames({
+              ...data,
+              landlordSignaturePng: data.landlordSignaturePng ?? "",
+              brokerSignaturePng: data.brokerSignaturePng ?? "",
+            }),
+          );
       })
       .catch((e) => {
         if (active)
@@ -299,9 +303,22 @@ export function BrokerAppointmentForm({
                   : undefined
               }
               onChangeText={(value) =>
-                setForm((current) =>
-                  current ? { ...current, [field.key]: value } : current,
-                )
+                setForm((current) => {
+                  if (!current) return current;
+                  const next = { ...current, [field.key]: value };
+                  if (
+                    field.key === "landlordFirstName" ||
+                    field.key === "landlordLastName"
+                  ) {
+                    const full = [next.landlordFirstName, next.landlordLastName]
+                      .map((part) => part.trim())
+                      .filter(Boolean)
+                      .join(" ");
+                    next.landlordName = full;
+                    next.landlordSignName = full;
+                  }
+                  return next;
+                })
               }
               placeholder={field.placeholder}
               maxLength={field.multiline ? 240 : 160}

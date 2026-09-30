@@ -8,17 +8,43 @@ type TextField = Exclude<
   "landlordSignaturePng" | "tenantSignaturePng"
 >;
 
+function splitStoredName(name: string): [string, string] {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return [parts[0] ?? "", parts.slice(1).join(" ")];
+}
+
+export function completeLeaseNames(
+  input: Partial<LeaseAgreementInput>,
+): LeaseAgreementInput {
+  const form = { ...emptyLeaseAgreementForm(), ...input };
+  if (!form.landlordFirstName.trim() && !form.landlordLastName.trim()) {
+    const [first, last] = splitStoredName(form.landlordName);
+    form.landlordFirstName = first;
+    form.landlordLastName = last;
+  }
+  if (!form.tenantFirstName.trim() && !form.tenantLastName.trim()) {
+    const [first, last] = splitStoredName(form.tenantName);
+    form.tenantFirstName = first;
+    form.tenantLastName = last;
+  }
+  return form;
+}
+
 export function emptyLeaseAgreementForm(): LeaseAgreementInput {
   return {
     documentNo: "",
     issueDate: "",
     landlordName: "",
+    landlordFirstName: "",
+    landlordLastName: "",
     landlordNationality: "",
     landlordId: "",
     landlordAddress: "",
     landlordPhone: "",
     landlordEmail: "",
     tenantName: "",
+    tenantFirstName: "",
+    tenantLastName: "",
     tenantNationality: "",
     tenantId: "",
     tenantAddress: "",
@@ -61,8 +87,8 @@ export function emptyLeaseAgreementForm(): LeaseAgreementInput {
 
 export const LEASE_AGREEMENT_REQUIRED: TextField[] = [
   "issueDate",
-  "landlordName",
-  "tenantName",
+  "landlordFirstName",
+  "tenantFirstName",
   "project",
   "termFrom",
   "termTo",
@@ -108,13 +134,15 @@ const FIELDS: Array<{
     required: true,
     placeholder: "2026-10-01",
   },
-  { key: "landlordName", label: "ผู้ให้เช่า", required: true },
+  { key: "landlordFirstName", label: "ชื่อผู้ให้เช่า", required: true },
+  { key: "landlordLastName", label: "นามสกุลผู้ให้เช่า" },
   { key: "landlordNationality", label: "สัญชาติผู้ให้เช่า" },
   { key: "landlordId", label: "เลขบัตร / พาสปอร์ตผู้ให้เช่า" },
   { key: "landlordAddress", label: "ที่อยู่ผู้ให้เช่า", multiline: true },
   { key: "landlordPhone", label: "เบอร์ติดต่อผู้ให้เช่า" },
   { key: "landlordEmail", label: "อีเมลผู้ให้เช่า" },
-  { key: "tenantName", label: "ผู้เช่า", required: true },
+  { key: "tenantFirstName", label: "ชื่อผู้เช่า", required: true },
+  { key: "tenantLastName", label: "นามสกุลผู้เช่า" },
   { key: "tenantNationality", label: "สัญชาติผู้เช่า" },
   { key: "tenantId", label: "เลขบัตร / พาสปอร์ตผู้เช่า" },
   { key: "tenantAddress", label: "ที่อยู่ผู้เช่า", multiline: true },
@@ -217,8 +245,22 @@ export function LeaseAgreementFields({
           value={value[field.key]}
           onChangeText={(text) => {
             const next = { ...value, [field.key]: text };
-            if (field.key === "landlordName") next.landlordSignName = text;
-            if (field.key === "tenantName") next.tenantSignName = text;
+            if (field.key === "landlordFirstName" || field.key === "landlordLastName") {
+              const full = [next.landlordFirstName, next.landlordLastName]
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .join(" ");
+              next.landlordName = full;
+              next.landlordSignName = full;
+            }
+            if (field.key === "tenantFirstName" || field.key === "tenantLastName") {
+              const full = [next.tenantFirstName, next.tenantLastName]
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .join(" ");
+              next.tenantName = full;
+              next.tenantSignName = full;
+            }
             if (field.key === "agentContact" && !value.witnessSignName.trim())
               next.witnessSignName = text;
             onChange(next);

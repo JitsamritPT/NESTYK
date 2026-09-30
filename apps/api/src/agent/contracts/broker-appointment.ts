@@ -5,6 +5,8 @@ const TEXT = [
   ["documentNo", 40],
   ["issueDate", 32],
   ["landlordName", 80],
+  ["landlordFirstName", 80],
+  ["landlordLastName", 80],
   ["landlordNationality", 40],
   ["landlordId", 40],
   ["landlordAddress", 120],
@@ -56,10 +58,19 @@ export function validateBrokerAppointment(
   const out = {} as BrokerAppointmentInput;
   for (const [key, max] of TEXT) {
     const v = b[key];
+    if (
+      (key === "landlordFirstName" || key === "landlordLastName") &&
+      (v == null || v === "")
+    ) {
+      out[key] = "";
+      continue;
+    }
     if (typeof v !== "string" || v.trim().length > max)
       throw new BadRequestException("ข้อมูลในฟอร์มไม่ครบหรือยาวเกินไป");
     out[key] = v.trim();
   }
+  if (out.landlordFirstName)
+    out.landlordName = [out.landlordFirstName, out.landlordLastName].filter(Boolean).join(" ");
   out.landlordSignaturePng = optionalPng(
     b.landlordSignaturePng,
     "ลายเซ็นผู้ให้เช่า",

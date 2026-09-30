@@ -20,6 +20,8 @@ const SLOT: Record<Field, { x: number; y: number; w: number }> = {
   documentNo: { x: 304, y: 727.2, w: 90 },
   issueDate: { x: 457, y: 727.2, w: 90 },
   landlordName: { x: 106, y: 601.3, w: 148 },
+  landlordFirstName: { x: 0, y: 0, w: 0 },
+  landlordLastName: { x: 0, y: 0, w: 0 },
   landlordNationality: { x: 336, y: 601.3, w: 36 },
   landlordId: { x: 468, y: 601.3, w: 72 },
   agentName: { x: 130, y: 568.3, w: 126 },
@@ -30,6 +32,8 @@ const SLOT: Record<Field, { x: number; y: number; w: number }> = {
   unitNo: { x: 458, y: 535.5, w: 80 },
   propertyAddress: { x: 134, y: 502.6, w: 400 },
   tenantName: { x: 98, y: 469.7, w: 148 },
+  tenantFirstName: { x: 0, y: 0, w: 0 },
+  tenantLastName: { x: 0, y: 0, w: 0 },
   tenantNationality: { x: 330, y: 469.7, w: 36 },
   tenantIdentity: { x: 462, y: 469.7, w: 78 },
   leasePeriod: { x: 121, y: 436.7, w: 124 },
@@ -146,6 +150,7 @@ export async function createCommissionConfirmationPdf(
 
   for (const key of Object.keys(SLOT) as Field[]) {
     const slot = SLOT[key];
+    if (!slot.w) continue;
     const raw = DATE_FIELDS.has(key)
       ? formatDate(data[key])
       : MONEY_FIELDS.has(key)

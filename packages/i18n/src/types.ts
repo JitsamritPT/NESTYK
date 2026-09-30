@@ -315,6 +315,8 @@ export interface TranslationSchema {
       create: string;
       listing: string;
       name: string;
+      firstName: string;
+      lastName: string;
       phone: string;
       nationality: string;
       budgetMin: string;
@@ -400,6 +402,8 @@ export interface TranslationSchema {
         dueDate: string;
         reference: string;
         customerName: string;
+        customerFirstName: string;
+        customerLastName: string;
         customerAddress: string;
         customerTaxId: string;
         customerPhone: string;
@@ -449,6 +453,8 @@ export interface TranslationSchema {
         view: string;
         success: string;
         landlordName: string;
+        landlordFirstName: string;
+        landlordLastName: string;
         landlordNationality: string;
         landlordId: string;
         agentName: string;
@@ -459,6 +465,8 @@ export interface TranslationSchema {
         unitNo: string;
         propertyAddress: string;
         tenantName: string;
+        tenantFirstName: string;
+        tenantLastName: string;
         tenantNationality: string;
         tenantIdentity: string;
         leasePeriod: string;

@@ -32,6 +32,25 @@ type TextField = Exclude<
   "items" | "vatRate" | "discount"
 >;
 
+function withCustomerNames(data: FinancialDocumentInput): FinancialDocumentInput {
+  const first = data.customerFirstName?.trim() ?? "";
+  const last = data.customerLastName?.trim() ?? "";
+  if (first || last) {
+    return {
+      ...data,
+      customerFirstName: first,
+      customerLastName: last,
+      customerName: [first, last].filter(Boolean).join(" ") || data.customerName,
+    };
+  }
+  const parts = (data.customerName ?? "").trim().split(/\s+/).filter(Boolean);
+  return {
+    ...data,
+    customerFirstName: parts[0] ?? "",
+    customerLastName: parts.slice(1).join(" "),
+  };
+}
+
 const RECEIPT_FIELDS: TextField[] = [
   "documentNo",
   "issueDate",
@@ -56,6 +75,8 @@ export function FinancialDocumentForm({
   payer?: {
     tenantId: number;
     name: string;
+    firstName: string;
+    lastName: string;
     phone: string;
     email: string;
     address: string;
@@ -155,7 +176,12 @@ export function FinancialDocumentForm({
             issueDate: today,
             dueDate: today,
             reference: "",
-            customerName: payer?.name ?? "",
+            customerName:
+              [payer?.firstName, payer?.lastName].filter(Boolean).join(" ") ||
+              payer?.name ||
+              "",
+            customerFirstName: payer?.firstName ?? "",
+            customerLastName: payer?.lastName ?? "",
             customerAddress: payer?.address ?? "",
             customerTaxId: payer?.taxId ?? "",
             customerPhone: payer?.phone ?? "",
@@ -198,7 +224,7 @@ export function FinancialDocumentForm({
     getFinancialDocumentDefaults(contractId, kind)
       .then((data) => {
         if (!active) return;
-        setForm(data);
+        setForm(withCustomerNames(data));
         setDiscount(String(data.discount));
         setItems(
           data.items.map((item) => ({
@@ -226,7 +252,7 @@ export function FinancialDocumentForm({
     getReceiptDefaults(invoiceId)
       .then((data) => {
         if (!active) return;
-        setForm(data);
+        setForm(withCustomerNames(data));
         setDiscount(String(data.discount));
         setItems(
           data.items.map((item) => ({
@@ -257,7 +283,7 @@ export function FinancialDocumentForm({
       ]
     : [
         "issueDate",
-        "customerName",
+        "customerFirstName",
         "customerAddress",
         "issuerName",
         "issuerAddress",
@@ -415,7 +441,11 @@ export function FinancialDocumentForm({
         issuerAddress: "Bangkok",
         ...(payer
           ? {
-              customerName: payer.name,
+              customerFirstName: payer.firstName,
+              customerLastName: payer.lastName,
+              customerName:
+                [payer.firstName, payer.lastName].filter(Boolean).join(" ") ||
+                payer.name,
               customerAddress: payer.address,
               tenantId: payer.tenantId,
             }
@@ -448,7 +478,15 @@ export function FinancialDocumentForm({
           key !== "documentNo" &&
           key !== "issuerName" &&
           key !== "issuerAddress" &&
-          !(payer && (key === "customerName" || key === "customerAddress"))
+          !(
+            (isReceipt &&
+              (key === "customerFirstName" || key === "customerLastName")) ||
+            (payer &&
+              (key === "customerName" ||
+                key === "customerFirstName" ||
+                key === "customerLastName" ||
+                key === "customerAddress"))
+          )
         }
         maxLength={maxLength}
         multiline={multiline}
@@ -469,9 +507,17 @@ export function FinancialDocumentForm({
                 : "default"
         }
         onChangeText={(value) =>
-          setForm((current) =>
-            current ? { ...current, [key]: value } : current,
-          )
+          setForm((current) => {
+            if (!current) return current;
+            const next = { ...current, [key]: value };
+            if (key === "customerFirstName" || key === "customerLastName") {
+              next.customerName = [next.customerFirstName, next.customerLastName]
+                .map((part) => part.trim())
+                .filter(Boolean)
+                .join(" ");
+            }
+            return next;
+          })
         }
       />
     );
@@ -606,9 +652,10 @@ export function FinancialDocumentForm({
         </MobileButton>
       ) : isReceipt ? (
         <>
+          {input("customerFirstName")}
+          {input("customerLastName")}
           <Text style={[{ fontSize: 14, lineHeight: 22 }, muted]}>
-            {form.customerName}
-            {form.reference ? ` · ${labels.reference} ${form.reference}` : ""}
+            {form.reference ? `${labels.reference} ${form.reference}` : ""}
           </Text>
           {RECEIPT_FIELDS.filter((key) => key !== "paymentDetails" && key !== "notes").map(
             (key) => input(key, key === "documentNo" ? 40 : key === "issueDate" ? 10 : 120),
@@ -686,7 +733,8 @@ export function FinancialDocumentForm({
           {input("issueDate", 10)}
           {input("dueDate", 10)}
           {input("reference", 60)}
-          {input("customerName")}
+          {input("customerFirstName")}
+          {input("customerLastName")}
           {input("customerAddress", 240, true)}
           {input("customerTaxId", 13)}
           {input("customerPhone", 40)}

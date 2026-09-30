@@ -7,6 +7,8 @@ export type CreateLeadInput = {
   province?: string | null;
   locations?: string[];
   name: string;
+  firstName: string;
+  lastName: string;
   phone: string;
   nationality?: string | null;
   budgetMin?: number | null;

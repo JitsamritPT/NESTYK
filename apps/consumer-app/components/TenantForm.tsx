@@ -40,7 +40,8 @@ export function TenantForm({
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const [form, setForm] = useState({
-    name: "",
+    firstName: "",
+    lastName: "",
     phone: "",
     email: "",
     note: "",
@@ -104,7 +105,7 @@ export function TenantForm({
     </Pressable>
   );
   function review() {
-    if (!form.name.trim() || !form.phone.trim() || !room) {
+    if (!form.firstName.trim() || !form.phone.trim() || !room) {
       setError("กรุณากรอกชื่อ เบอร์โทร และเลือกห้องที่เช่า");
       return;
     }
@@ -137,7 +138,14 @@ export function TenantForm({
         await createAgentTenant({
           leadId: lead.id,
           rentRoomId: room.id,
-          ...form,
+          name: [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(" "),
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          phone: form.phone,
+          email: form.email,
+          note: form.note,
+          identityNumber: form.identityNumber,
+          nationality: form.nationality,
         }),
       );
     } catch (e) {
@@ -220,7 +228,10 @@ export function TenantForm({
                       if (lead?.id !== l.id) {
                         setLead(l);
                         setForm({
-                          name: l.name,
+                          firstName: l.firstName || l.name.trim().split(/\s+/)[0] || "",
+                          lastName:
+                            l.lastName ||
+                            l.name.trim().split(/\s+/).slice(1).join(" "),
                           phone: l.phone,
                           email: l.email || "",
                           note: "",
@@ -274,7 +285,8 @@ export function TenantForm({
             </Text>
             {(
               [
-                ["name", "ชื่อ–นามสกุล *", "ชื่อที่ใช้ในสัญญา"],
+                ["firstName", "ชื่อ *", "ชื่อ"],
+                ["lastName", "นามสกุล", "ไม่บังคับ"],
                 ["phone", "เบอร์โทร *", "เบอร์โทรที่ติดต่อได้"],
                 ["email", "อีเมล", "name@example.com"],
                 [
@@ -380,7 +392,8 @@ export function TenantForm({
             {(
               [
                 ["Lead ต้นทาง", lead?.name],
-                ["ชื่อผู้เช่า", form.name],
+                ["ชื่อ", form.firstName],
+                ["นามสกุล", form.lastName || "ไม่ระบุ"],
                 ["เบอร์โทร", form.phone],
                 ["อีเมล", form.email || "ไม่ระบุ"],
                 [

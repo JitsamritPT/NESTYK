@@ -7,8 +7,8 @@ import { MobileButton, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/na
 import { fetchAgentContractTypes, fetchAgentRoomTypes } from '../lib/agent-listings-api';
 import { createAgentLead, updateAgentLead, fetchAgentVisaTypes } from '../lib/agent-leads-api';
 
-type TextKey = 'name' | 'phone' | 'nationality' | 'budgetMin' | 'budgetMax' | 'preferredLocation' | 'moveInPlan' | 'occupation' | 'occupantCount';
-const empty: Record<TextKey, string> = { name: '', phone: '', nationality: '', budgetMin: '', budgetMax: '', preferredLocation: '', moveInPlan: '', occupation: '', occupantCount: '' };
+type TextKey = 'firstName' | 'lastName' | 'phone' | 'nationality' | 'budgetMin' | 'budgetMax' | 'preferredLocation' | 'moveInPlan' | 'occupation' | 'occupantCount';
+const empty: Record<TextKey, string> = { firstName: '', lastName: '', phone: '', nationality: '', budgetMin: '', budgetMax: '', preferredLocation: '', moveInPlan: '', occupation: '', occupantCount: '' };
 export function CreateLeadForm({ initialLead, onSaved, onBusy }: { initialLead?: AgentLead; onSaved: (lead: AgentLead) => void; onBusy: (busy: boolean) => void }) {
   const { t } = useLocale(); const c = t.agent.leads; const { theme } = useMobileTheme();
   const [province, setProvince] = useState(initialLead?.province || '');
@@ -42,7 +42,7 @@ export function CreateLeadForm({ initialLead, onSaved, onBusy }: { initialLead?:
   const roomLabel = (code: string) => t.masters.roomTypes[code as keyof typeof t.masters.roomTypes] || code;
   const months = (n: number) => t.agent.createRoom.contractMonths.replace('{months}', String(n));
   const field = (key: TextKey, maxLength: number, numeric = false) => <View onLayout={(e) => { offsets.current[key] = e.nativeEvent.layout.y; }} key={key}><MobileInput
-    label={key === 'preferredLocation' ? c.locationNotes : c[key]} value={form[key]} required={key === 'name' || key === 'phone'} editable={!busy} maxLength={maxLength}
+    label={key === 'preferredLocation' ? c.locationNotes : c[key]} value={form[key]} required={key === 'firstName' || key === 'phone'} editable={!busy} maxLength={maxLength}
     keyboardType={key === 'phone' ? 'phone-pad' : numeric ? 'decimal-pad' : 'default'}
     error={errors[key]} helperText={key === 'moveInPlan' ? c.moveInHint : undefined}
     onChangeText={(value) => { setForm((current) => ({ ...current, [key]: value })); setErrors((current) => ({ ...current, [key]: '' })); }}
@@ -56,9 +56,10 @@ export function CreateLeadForm({ initialLead, onSaved, onBusy }: { initialLead?:
   const submit = async () => {
     if (lock.current || mapResolving) return;
     const next: Record<string, string> = {};
-    if (!form.name.trim()) next.name = c.required;
+    if (!form.firstName.trim()) next.firstName = c.required;
     if (!form.phone.trim()) next.phone = c.required;
-    const body: CreateLeadInput = { province: province || null, locations: !locationChanged ? initialLead?.locations ?? [] : [], locationPlaceId: null, locationName: null, latitude: null, longitude: null, radiusKm: null, ...pin, name: form.name.trim(), phone: form.phone.trim(), ...choices, desiredRoomTypeId: roomType, visaTypeId: visaType, leaseDurationMonths: leaseMonths };
+    const fullName = [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(' ');
+    const body: CreateLeadInput = { province: province || null, locations: !locationChanged ? initialLead?.locations ?? [] : [], locationPlaceId: null, locationName: null, latitude: null, longitude: null, radiusKm: null, ...pin, name: fullName, firstName: form.firstName.trim(), lastName: form.lastName.trim(), phone: form.phone.trim(), ...choices, desiredRoomTypeId: roomType, visaTypeId: visaType, leaseDurationMonths: leaseMonths };
     for (const key of ['nationality', 'preferredLocation', 'moveInPlan', 'occupation'] as const) body[key] = form[key].trim() || null;
     for (const key of ['budgetMin', 'budgetMax', 'occupantCount'] as const) {
       const value = form[key].trim(); const n = Number(value);
@@ -80,7 +81,7 @@ export function CreateLeadForm({ initialLead, onSaved, onBusy }: { initialLead?:
       <Text style={[styles.title, { color: theme.textHeading }]}>{initialLead ? 'แก้ไข Lead' : c.create}</Text>
       <Text style={{ color: theme.textSecondary }}>{c.optionalHint}</Text>
       <Text style={[styles.heading, { color: theme.textHeading }]}>{c.profile}</Text>
-      {field('name', 255)}{field('phone', 50)}{field('nationality', 120)}
+      {field('firstName', 255)}{field('lastName', 255)}{field('phone', 50)}{field('nationality', 120)}
       {field('occupation', 255)}
       {chips('visaType', visaType, [{ id: null, text: c.unknown }, ...visas.map((item) => ({ id: item.id, text: visaLabel(item.code) }))], setVisaType)}
       <Text style={[styles.heading, { color: theme.textHeading }]}>{c.requirements}</Text>

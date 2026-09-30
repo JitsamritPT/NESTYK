@@ -5,6 +5,8 @@ const LIMITS: Record<keyof CommissionConfirmationInput, number> = {
   documentNo: 40,
   issueDate: 10,
   landlordName: 80,
+  landlordFirstName: 80,
+  landlordLastName: 80,
   landlordNationality: 40,
   landlordId: 40,
   agentName: 80,
@@ -15,6 +17,8 @@ const LIMITS: Record<keyof CommissionConfirmationInput, number> = {
   unitNo: 40,
   propertyAddress: 180,
   tenantName: 80,
+  tenantFirstName: 80,
+  tenantLastName: 80,
   tenantNationality: 40,
   tenantIdentity: 40,
   leasePeriod: 40,
@@ -62,6 +66,16 @@ export function validateCommissionConfirmation(
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new BadRequestException("ข้อมูลเอกสารไม่ถูกต้อง");
   const obj = input as Record<string, unknown>;
+  for (const [firstKey, lastKey, nameKey] of [
+    ["landlordFirstName", "landlordLastName", "landlordName"],
+    ["tenantFirstName", "tenantLastName", "tenantName"],
+  ] as const) {
+    const first = typeof obj[firstKey] === "string" ? obj[firstKey].trim() : "";
+    const last = typeof obj[lastKey] === "string" ? obj[lastKey].trim() : "";
+    if (first) obj[nameKey] = [first, last].filter(Boolean).join(" ");
+    if (obj[firstKey] == null) obj[firstKey] = "";
+    if (obj[lastKey] == null) obj[lastKey] = "";
+  }
   const result = {} as CommissionConfirmationInput;
   for (const [key, limit] of Object.entries(LIMITS) as Array<
     [keyof CommissionConfirmationInput, number]
