@@ -131,3 +131,25 @@ test('list paginates distinct room IDs and uses all normalized prices', async ()
   assert.ok(calls.some(([name, value]) => name === 'offset' && value === 20));
   assert.ok(calls.some(([name, sql, params]) => name === 'andWhere' && params?.q === '%test%'));
 });
+
+test('list cards expose room coordinates, falling back to the building pin', async () => {
+  const qb = {};
+  for (const name of ['leftJoin','where','andWhere','select','addSelect','groupBy','orderBy','addOrderBy','offset','limit']) qb[name] = () => qb;
+  qb.clone = () => qb;
+  qb.getCount = async () => 3;
+  qb.getRawMany = async () => [{ id: 1 }, { id: 2 }, { id: 3 }];
+  const rows = [
+    { ...room, id: 1, latitude: '13.7370000', longitude: '100.5600000', property: { id: 1, latitude: '1', longitude: '1' } },
+    { ...room, id: 2, latitude: null, longitude: null, property: { id: 2, latitude: '13.7200000', longitude: '100.5500000' } },
+    { ...room, id: 3, latitude: '13.7', longitude: null, property: { id: 3, latitude: null, longitude: null } },
+  ];
+  rows[0].room_type = { code: 'studio', bedroom_count: 0 };
+  rows[1].room_type = null;
+  rows[0].available_from_date = '2026-10-15';
+  rows[1].available_from_date = null;
+  const service = new AgentListingsService({ createQueryBuilder: () => qb, find: async () => rows });
+  const { items } = await service.listMine(7, {});
+  assert.deepEqual(items.map((i) => [i.latitude, i.longitude]), [[13.737, 100.56], [13.72, 100.55], [null, null]]);
+  assert.deepEqual(items.slice(0, 2).map((i) => i.roomTypeCode), ['studio', null]);
+  assert.deepEqual(items.slice(0, 2).map((i) => i.availableFromDate), ['2026-10-15', null]);
+});

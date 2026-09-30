@@ -1,5 +1,4 @@
-import { LeadMapLocationPicker, type LeadMapPin } from './LeadMapLocationPicker';
-import { LeadLocationPicker } from './LeadLocationPicker';
+import { LeadLocationsField } from './LeadLocationsField';
 import { LeadSelectField } from './LeadSelectField';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -12,7 +11,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import type { AgentLead, CreateLeadInput } from '@nestyk/types';
+import type { AgentLead, CreateLeadInput, LeadPinInput } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
 import { MoveInDateField } from '@nestyk/feature-listing';
 import {
@@ -44,7 +43,8 @@ type TextKey =
   | 'occupantCount'
   | 'notes';
 
-type FormTab = 'profile' | 'matching';
+export type LeadFormTab = 'profile' | 'matching';
+type FormTab = LeadFormTab;
 
 const empty: Record<TextKey, string> = {
   name: '',
@@ -65,10 +65,12 @@ const NOTES_MAX = 500;
 
 export function CreateLeadForm({
   initialLead,
+  initialTab = 'profile',
   onSaved,
   onBusy,
 }: {
   initialLead?: AgentLead;
+  initialTab?: FormTab;
   onSaved: (lead: AgentLead) => void;
   onBusy: (busy: boolean) => void;
 }) {
@@ -76,23 +78,17 @@ export function CreateLeadForm({
   const c = t.agent.leads;
   const { theme } = useMobileTheme();
   const agent = tokens.colors.roles.agent;
-  const [tab, setTab] = useState<FormTab>('profile');
+  const [tab, setTab] = useState<FormTab>(initialTab);
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [province, setProvince] = useState(initialLead?.province || '');
-  const [locations, setLocations] = useState(initialLead?.locations ?? []);
-  const [pin, setPin] = useState<LeadMapPin | null>(
-    initialLead?.latitude != null && initialLead.longitude != null
-      ? {
-          latitude: initialLead.latitude,
-          longitude: initialLead.longitude,
-          radiusKm: initialLead.radiusKm ?? 3,
-          locationName: initialLead.locationName || '',
-          locationPlaceId: initialLead.locationPlaceId || '',
-          locations: initialLead.locations,
-        }
-      : null,
+  const [pins, setPins] = useState<LeadPinInput[]>(
+    () => initialLead?.pins.map(({ rank: _rank, ...pin }) => pin) ?? [],
   );
-  const [mapResolving, setMapResolving] = useState(false);
+  const [radiusKm, setRadiusKm] = useState(initialLead?.radiusKm ?? 3);
+  /** Leads saved before pins keep their province/areas until the agent pins a location. */
+  const legacyLabel =
+    initialLead && !initialLead.pins.length && initialLead.province
+      ? [initialLead.province, initialLead.locations.join(', ')].filter(Boolean).join(' · ')
+      : null;
   const [form, setForm] = useState<Record<TextKey, string>>(
     () =>
       Object.fromEntries(
@@ -174,7 +170,7 @@ export function CreateLeadForm({
     form.budgetMax.trim() !== '' &&
     Number.isFinite(matchingBudget) &&
     matchingBudget > 0 &&
-    !!province;
+    pins.length > 0;
 
   const setField = (key: TextKey, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -356,19 +352,15 @@ export function CreateLeadForm({
   };
 
   const submit = async () => {
-    if (lock.current || mapResolving) return;
+    if (lock.current) return;
     const next: Record<string, string> = {};
     if (!form.name.trim()) next.name = c.required;
     if (!form.phone.trim()) next.phone = c.required;
     const body: CreateLeadInput = {
-      province: province || null,
-      locations: pin ? pin.locations : locations,
-      locationPlaceId: null,
-      locationName: null,
-      latitude: null,
-      longitude: null,
-      radiusKm: null,
-      ...(pin ?? {}),
+      pins,
+      radiusKm: pins.length ? radiusKm : null,
+      province: initialLead?.province ?? null,
+      locations: initialLead?.locations ?? [],
       name: form.name.trim(),
       phone: form.phone.trim(),
       ...choices,
@@ -572,17 +564,13 @@ export function CreateLeadForm({
         icon: 'coins',
         numeric: true,
       })}
-      <LeadLocationPicker
-        layout="row"
-        province={province}
-        locations={locations}
+      <LeadLocationsField
+        pins={pins}
+        radiusKm={radiusKm}
+        legacyLabel={legacyLabel}
         disabled={busy}
-        markRequired={false}
-        onChange={(nextProvince, nextLocations) => {
-          setProvince(nextProvince);
-          setLocations(nextLocations);
-          setPin(null);
-        }}
+        onChange={setPins}
+        onRadiusChange={setRadiusKm}
       />
       <View style={styles.row2}>
         <LeadSelectField<number>
@@ -632,25 +620,6 @@ export function CreateLeadForm({
         multiline: true,
         counter: true,
       })}
-      <View style={styles.group}>
-        <View style={styles.careLabelRow}>
-          <MobileIcon name="map-pin" size={15} color={theme.textHeading} />
-          <Text style={[styles.fieldLabel, { color: theme.textHeading }]}>{c.mapOptional}</Text>
-        </View>
-        <LeadMapLocationPicker
-          pin={pin}
-          province={province}
-          disabled={busy}
-          onResolving={setMapResolving}
-          onChange={(value, nextProvince) => {
-            setPin(value);
-            if (value) {
-              setLocations(value.locations);
-              if (nextProvince) setProvince(nextProvince);
-            }
-          }}
-        />
-      </View>
     </Animated.View>
   );
 
@@ -695,7 +664,7 @@ export function CreateLeadForm({
         <MobileButton
           onPress={submit}
           isLoading={busy}
-          disabled={busy || mapResolving}
+          disabled={busy}
           style={styles.saveButton}
         >
           <View style={styles.saveInner}>

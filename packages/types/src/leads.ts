@@ -1,10 +1,28 @@
+/** Max ranked search pins per lead. */
+export const LEAD_MAX_PINS = 3;
+
+/** One ranked search pin — rank 1 is the lead's top-priority area. */
+export type LeadPin = {
+  rank: number;
+  placeId: string | null;
+  name: string;
+  latitude: number;
+  longitude: number;
+  province: string;
+  district: string | null;
+};
+
+/** Pin as sent by the client; rank follows array order. */
+export type LeadPinInput = Omit<LeadPin, 'rank'> & { rank?: number };
+
 export type CreateLeadInput = {
-  locationPlaceId?: string | null;
-  locationName?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
+  /** Ordered by priority (index 0 = rank 1), up to {@link LEAD_MAX_PINS}. */
+  pins?: LeadPinInput[];
+  /** Search radius shared by every pin (1, 3 or 5 km). */
   radiusKm?: number | null;
+  /** Derived from pin rank 1 when pins exist; legacy value otherwise. */
   province?: string | null;
+  /** Derived from pin districts when pins exist; legacy value otherwise. */
   locations?: string[];
   name: string;
   phone: string;
@@ -36,8 +54,9 @@ export type AgentLeadsSort =
   | 'status_asc'
   | 'status_desc';
 
-export type AgentLead = Required<Omit<CreateLeadInput, 'budgetMin' | 'budgetMax' | 'province'>> & {
+export type AgentLead = Required<Omit<CreateLeadInput, 'budgetMin' | 'budgetMax' | 'province' | 'pins'>> & {
   province: string | null;
+  pins: LeadPin[];
   id: number; budgetMin: number | null; budgetMax: number | null;
   desiredRoomTypeCode: string | null; visaTypeCode: string | null;
   status: LeadStatus; lostReason: string | null; createdAt: string;

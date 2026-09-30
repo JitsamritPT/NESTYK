@@ -28,6 +28,16 @@ function normalizeSort(raw: string | undefined): ListingsSort {
   return 'updated_desc';
 }
 
+/** Room pin, falling back to its building; null unless both parts are valid numbers. */
+function roomCoordinates(room: RentRoomEntity): { latitude: number | null; longitude: number | null } {
+  for (const source of [room, room.property]) {
+    const latitude = source?.latitude == null ? NaN : Number(source.latitude);
+    const longitude = source?.longitude == null ? NaN : Number(source.longitude);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) return { latitude, longitude };
+  }
+  return { latitude: null, longitude: null };
+}
+
 function layoutValue(room: RentRoomEntity, code: string): string | null {
   return room.layout_values?.find((row) => row.layout?.code === code)?.value?.trim() ?? null;
 }
@@ -228,11 +238,14 @@ export class AgentListingsService {
             : null,
           prices: roomPrices(room),
           coverMediaUrl: cover?.media_url ?? null,
+          roomTypeCode: room.room_type?.code ?? null,
+          availableFromDate: room.available_from_date ?? null,
           bedroomCount:
             layoutValue(room, 'bedroom') ??
             (room.room_type?.bedroom_count != null ? String(room.room_type.bedroom_count) : null),
           roomSizeSqm: layoutValue(room, 'room_size'),
           floor: layoutValue(room, 'floor'),
+          ...roomCoordinates(room),
           updatedAt: room.updated_at?.toISOString?.() ?? null,
         };
       }),

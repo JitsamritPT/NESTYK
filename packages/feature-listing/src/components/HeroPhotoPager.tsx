@@ -41,9 +41,12 @@ function PagerSlot({ active }: { active: boolean }) {
 export function HeroPhotoPager({
   index,
   total,
+  bottom,
 }: {
   index: number;
   total: number;
+  /** Distance from the hero's bottom edge; defaults to clearing the overlapping summary card. */
+  bottom?: number;
 }) {
   const slotCount = Math.min(MAX_SLOTS, Math.max(total, 0));
   const start = useMemo(
@@ -55,7 +58,7 @@ export function HeroPhotoPager({
   if (total <= 1) return null;
 
   return (
-    <View style={styles.wrap} pointerEvents="none">
+    <View style={[styles.wrap, bottom != null && { bottom }]} pointerEvents="none">
       <View style={styles.slots}>
         {Array.from({ length: slotCount }, (_, slot) => (
           <PagerSlot key={slot} active={slot === activeSlot} />

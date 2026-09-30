@@ -1,10 +1,14 @@
 import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
-import { CreateLeadForm } from '../components/CreateLeadForm';
+import { CreateLeadForm, type LeadFormTab } from '../components/CreateLeadForm';
+import { AgentLeadDetailBody } from '../components/AgentLeadDetailBody';
+import { LeadFullInfoBody } from '../components/LeadFullInfoBody';
+import { LeadMatchedRoomBody } from '../components/LeadMatchedRoomBody';
+import type { LeadRoomMatch } from '../lib/lead-match-preview';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Alert, BackHandler } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, SlideInRight } from 'react-native-reanimated';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { useLocale } from '@nestyk/i18n';
@@ -26,7 +30,7 @@ import {
   getDefaultTabForRole,
   tokens,
 } from '@nestyk/ui/native';
-import { UserRole } from '@nestyk/types';
+import { UserRole, type AgentLead } from '@nestyk/types';
 import {
   MobileCreateListingWizardBody,
   MobileAgentDashboardBody,
@@ -76,6 +80,12 @@ function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t'])
       return t.agent.leads.title;
     case 'createLead':
       return t.agent.leads.create;
+    case 'leadDetail':
+      return t.mobile.tabs.leadDetail;
+    case 'leadInfo':
+      return t.mobile.tabs.leadInfo;
+    case 'leadRoom':
+      return t.mobile.tabs.leadRoom;
     case 'clients':
       return t.mobile.screens.clients;
     case 'more':
@@ -129,6 +139,14 @@ export default function AppHomeScreen() {
   const [secondaryReturnTab, setSecondaryReturnTab] = useState<MobileAppTab | null>(null);
   const createListingBackRef = useRef<(() => boolean) | null>(null);
   const [createListingHeaderTitle, setCreateListingHeaderTitle] = useState('');
+  const [activeLead, setActiveLead] = useState<AgentLead | null>(null);
+  /** Set while `createLead` edits `activeLead` instead of creating a new lead. */
+  const [leadEdit, setLeadEdit] = useState<{ tab: LeadFormTab; returnTab: MobileAppTab } | null>(null);
+  /** Room opened from a lead's matched rooms; its detail closes back to `returnTab`. */
+  const [roomFocus, setRoomFocus] = useState<{ id: number; returnTab: MobileAppTab } | null>(null);
+  const [activeMatch, setActiveMatch] = useState<LeadRoomMatch | null>(null);
+  /** Bumped by the header "⋯" on lead pages; the body opens its own actions sheet. */
+  const [leadMenuRequest, setLeadMenuRequest] = useState(0);
 
   const unreadCount = [...notifications, ...messages].filter((n) => n.unread).length;
 
@@ -187,8 +205,55 @@ export default function AppHomeScreen() {
     if (tab !== 'listingLead') setLeadsWorkFilter(null);
     if (tab !== 'clients') setClientsWorkFilter(null);
     setSecondaryReturnTab(null);
+    setLeadEdit(null);
+    setRoomFocus(null);
     setActiveTab(tab);
   };
+
+  const openLeadDetail = useCallback((lead: AgentLead) => {
+    setActiveLead(lead);
+    setActiveTab('leadDetail');
+  }, []);
+
+  const openLeadEdit = useCallback(
+    (tab: LeadFormTab) => {
+      setLeadEdit({ tab, returnTab: activeTab });
+      setActiveTab('createLead');
+    },
+    [activeTab],
+  );
+
+  const openFocusedRoom = useCallback(
+    (id: number) => {
+      setRoomFocus({ id, returnTab: activeTab });
+      setActiveTab('listingRoom');
+    },
+    [activeTab],
+  );
+
+  const closeFocusedRoom = useCallback(() => {
+    if (!roomFocus) return;
+    setRoomFocus(null);
+    setActiveTab(roomFocus.returnTab);
+  }, [roomFocus]);
+
+  const openLeadMatch = useCallback((match: LeadRoomMatch) => {
+    setActiveMatch(match);
+    setActiveTab('leadRoom');
+  }, []);
+
+  const goBackFromLead = useCallback(() => {
+    setActiveTab(activeTab === 'leadInfo' || activeTab === 'leadRoom' ? 'leadDetail' : 'listingLead');
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'leadDetail' && activeTab !== 'leadInfo' && activeTab !== 'leadRoom') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      goBackFromLead();
+      return true;
+    });
+    return () => sub.remove();
+  }, [activeTab, goBackFromLead]);
 
   const openCreateListing = useCallback(() => {
     if (activeTab !== 'createListing') {
@@ -201,6 +266,7 @@ export default function AppHomeScreen() {
     if (activeTab !== 'createLead') {
       setSecondaryReturnTab(activeTab);
     }
+    setLeadEdit(null);
     setLeadsWorkFilter(null);
     setActiveTab('createLead');
   }, [activeTab]);
@@ -244,8 +310,13 @@ export default function AppHomeScreen() {
 
   const handleCreateLeadBack = useCallback(() => {
     if (createLeadBusy) return;
+    if (leadEdit) {
+      setLeadEdit(null);
+      setActiveTab(leadEdit.returnTab);
+      return;
+    }
     goBackFromSecondary();
-  }, [createLeadBusy, goBackFromSecondary]);
+  }, [createLeadBusy, goBackFromSecondary, leadEdit]);
 
   useEffect(() => {
     if (activeTab !== 'createLead') {
@@ -324,6 +395,9 @@ export default function AppHomeScreen() {
     'services',
     'createListing',
     'createLead',
+    'leadDetail',
+    'leadInfo',
+    'leadRoom',
   ];
 
   useEffect(() => {
@@ -349,7 +423,9 @@ export default function AppHomeScreen() {
 
     if (agentSectionTabs.includes(activeTab)) {
       const isCreateLead = activeTab === 'createLead';
-      const isSecondary = activeTab === 'createListing' || isCreateLead;
+      const isLeadPage = activeTab === 'leadDetail' || activeTab === 'leadInfo' || activeTab === 'leadRoom';
+      const hasLeadMenu = activeTab === 'leadDetail' || activeTab === 'leadRoom';
+      const isSecondary = activeTab === 'createListing' || isCreateLead || isLeadPage;
       const showSearch =
         !isSecondary &&
         activeTab === 'clients';
@@ -359,10 +435,14 @@ export default function AppHomeScreen() {
         <MobileSectionHeader
           title={
             isCreateLead
-              ? t.agent.leads.create
-              : isSecondary
-                ? createListingHeaderTitle || t.agent.listings.addRoom
-                : getScreenTitle(activeTab, t)
+              ? leadEdit
+                ? t.agent.leads.editLead
+                : t.agent.leads.create
+              : isLeadPage
+                ? getScreenTitle(activeTab, t)
+                : isSecondary
+                  ? createListingHeaderTitle || t.agent.listings.addRoom
+                  : getScreenTitle(activeTab, t)
           }
           workspaceLabel={isSecondary ? undefined : workspace}
           accentColor={accent}
@@ -371,11 +451,25 @@ export default function AppHomeScreen() {
           onBackPress={
             isCreateLead
               ? handleCreateLeadBack
-              : isSecondary
-                ? handleCreateListingBack
-                : undefined
+              : isLeadPage
+                ? goBackFromLead
+                : isSecondary
+                  ? handleCreateListingBack
+                  : undefined
           }
           backDisabled={isCreateLead && createLeadBusy}
+          onActionPress={
+            activeTab === 'leadInfo' && activeLead
+              ? () => openLeadEdit('profile')
+              : hasLeadMenu
+                ? () => setLeadMenuRequest((n) => n + 1)
+                : undefined
+          }
+          actionLabel={
+            activeTab === 'leadInfo' ? t.agent.leads.editLead : hasLeadMenu ? t.agent.leads.moreActions : undefined
+          }
+          actionIcon={activeTab === 'leadInfo' ? 'pencil' : hasLeadMenu ? 'dots-vertical' : undefined}
+          actionVariant={activeTab === 'leadInfo' || hasLeadMenu ? 'icon' : undefined}
           onAddPress={
             !isSecondary && activeTab === 'listingRoom'
               ? openCreateListing
@@ -713,8 +807,48 @@ export default function AppHomeScreen() {
             workFilter={leadsWorkFilter}
             reloadToken={leadsReloadToken}
             onReloadSettled={finishPageRefresh}
+            onOpenLead={openLeadDetail}
           />
         </View>
+      );
+    }
+
+    if (activeTab === 'leadDetail' && activeLead) {
+      return (
+        <Animated.View entering={SlideInRight.duration(200)} style={styles.bodyContainer}>
+          <AgentLeadDetailBody
+            lead={activeLead}
+            onLeadChange={setActiveLead}
+            onOpenInfo={() => setActiveTab('leadInfo')}
+            onEditMatching={() => openLeadEdit('matching')}
+            onOpenMatch={openLeadMatch}
+            menuRequest={leadMenuRequest}
+          />
+        </Animated.View>
+      );
+    }
+
+    if (activeTab === 'leadRoom' && activeLead && activeMatch) {
+      return (
+        <Animated.View entering={SlideInRight.duration(200)} style={styles.bodyContainer}>
+          <LeadMatchedRoomBody
+            lead={activeLead}
+            match={activeMatch}
+            onOpenRoom={openFocusedRoom}
+            menuRequest={leadMenuRequest}
+          />
+        </Animated.View>
+      );
+    }
+
+    if (activeTab === 'leadInfo' && activeLead) {
+      return (
+        <Animated.View
+          entering={SlideInRight.duration(200)}
+          style={[styles.wizardBody, styles.fullBleedBody]}
+        >
+          <LeadFullInfoBody lead={activeLead} />
+        </Animated.View>
       );
     }
 
@@ -866,6 +1000,8 @@ export default function AppHomeScreen() {
             onCreate={openCreateListing}
             reloadToken={roomsReloadToken}
             onReloadSettled={finishPageRefresh}
+            focusRoomId={roomFocus?.id ?? null}
+            onFocusRoomClosed={closeFocusedRoom}
           />
         </View>
       );
@@ -877,14 +1013,28 @@ export default function AppHomeScreen() {
           entering={FadeIn.duration(150)}
           style={[styles.wizardBody, styles.fullBleedBody]}
         >
-          <CreateLeadForm
-            onBusy={setCreateLeadBusy}
-            onSaved={() => {
-              Alert.alert(t.agent.leads.saved);
-              setSecondaryReturnTab(null);
-              setActiveTab('listingLead');
-            }}
-          />
+          {leadEdit && activeLead ? (
+            <CreateLeadForm
+              key={activeLead.id}
+              initialLead={activeLead}
+              initialTab={leadEdit.tab}
+              onBusy={setCreateLeadBusy}
+              onSaved={(lead) => {
+                setActiveLead(lead);
+                setLeadEdit(null);
+                setActiveTab(leadEdit.returnTab);
+              }}
+            />
+          ) : (
+            <CreateLeadForm
+              onBusy={setCreateLeadBusy}
+              onSaved={() => {
+                Alert.alert(t.agent.leads.saved);
+                setSecondaryReturnTab(null);
+                setActiveTab('listingLead');
+              }}
+            />
+          )}
         </Animated.View>
       );
     }
@@ -974,6 +1124,7 @@ export default function AppHomeScreen() {
   const isWizardTab =
     activeTab === 'createListing' ||
     activeTab === 'createLead' ||
+    activeTab === 'leadInfo' ||
     (activeTab === 'listings' && activeRole === 'owner');
 
   return (
@@ -1002,7 +1153,7 @@ export default function AppHomeScreen() {
           )
         }
         bottomBar={
-          activeTab === 'createListing' || activeTab === 'createLead' ? null : <MobileBottomTabBar
+          ['createListing', 'createLead', 'leadDetail', 'leadInfo', 'leadRoom'].includes(activeTab) ? null : <MobileBottomTabBar
             activeRole={activeRole}
             activeTab={activeTab}
             onTabPress={handleTabPress}

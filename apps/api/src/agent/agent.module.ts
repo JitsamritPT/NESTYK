@@ -7,6 +7,7 @@ import { PublicContractSignController } from './contracts/public-contract-sign.c
 import { AgentContractsService } from './contracts/agent-contracts.service';
 import { ContractDocumentStorageService } from './contracts/contract-document-storage.service';
 import { LeadEntity } from '../entities/lead.entity';
+import { LeadLocationEntity } from '../entities/lead-location.entity';
 import { AgentLeadsService } from './leads/agent-leads.service';
 import { AgentLeadsController } from './leads/agent-leads.controller';
 import { RoomPhotoStorageService } from './rooms/room-photo-storage.service';
@@ -53,6 +54,7 @@ import { GeminiModule } from '../gemini/gemini.module';
     GeminiModule,
     TypeOrmModule.forFeature([
       LeadEntity,
+      LeadLocationEntity,
       PropertyEntity,
       MasterPropertyTypeEntity,
       PropertyOwnerEntity,

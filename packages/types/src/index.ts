@@ -4,7 +4,8 @@ export * from './services';
 export * from './contracts';
 export * from './api';
 
-export type { CreateLeadInput, AgentLead, AgentLeadsPage, LeadLocationCatalog, LeadFilters, LeadStatus, AgentLeadsSort } from "./leads";
+export type { CreateLeadInput, AgentLead, AgentLeadsPage, LeadLocationCatalog, LeadFilters, LeadStatus, AgentLeadsSort, LeadPin, LeadPinInput } from "./leads";
+export { LEAD_MAX_PINS } from "./leads";
 export type { NearbyPlace, FacilityOption } from './nearby';
 export * from './agent-contracts';
 export * from './agent-tenants';

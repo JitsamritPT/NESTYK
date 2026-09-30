@@ -1,7 +1,7 @@
 import { AgentRoomEditor } from './AgentRoomEditor';
 import { RoomPriceFilter } from './RoomPriceFilter';
 import { formatPriceSummary, validPriceRange } from './room-price-range';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -33,6 +33,7 @@ import {
   SelectionCheck,
   SelectionChip,
   MobileSectionHeader,
+  ModePageScrollContext,
   tokens,
   useMobileTheme,
 } from '@nestyk/ui/native';
@@ -84,6 +85,8 @@ const ROOM_TYPE_BEDROOMS: Record<string, string | null> = {
   duplex: null,
   penthouse: null,
 };
+
+const PAGE_SIZE = 20;
 
 const SOURCE_FILTER_OPTIONS: Array<{ value: SourceFilter; icon: AppIconName }> = [
   { value: '', icon: 'globe' },
@@ -260,12 +263,18 @@ export function AgentRoomsScreen({
   onReloadSettled,
   searchOpen = false,
   onSearchOpenChange,
+  focusRoomId = null,
+  onFocusRoomClosed,
 }: {
   onCreate: () => void;
   reloadToken?: number;
   onReloadSettled?: (token: number) => void;
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
+  /** Opens this room's detail on mount (e.g. from a lead's matched rooms). */
+  focusRoomId?: number | null;
+  /** Called when the focused room's detail closes, so the caller can navigate back. */
+  onFocusRoomClosed?: () => void;
 }) {
   const { t, locale } = useLocale();
   const { theme } = useMobileTheme();
@@ -287,12 +296,16 @@ export function AgentRoomsScreen({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const [moreAttempt, setMoreAttempt] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [gateOpen, setGateOpen] = useState(false);
   const [modalReady, setModalReady] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(focusRoomId);
+  const focusOpenRef = useRef(focusRoomId != null);
   const [sharePreviewing, setSharePreviewing] = useState(false);
   const [room, setRoom] = useState<AgentRoomDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -321,7 +334,11 @@ export function AgentRoomsScreen({
 
   useEffect(() => {
     if (selected === null) setSharePreviewing(false);
-  }, [selected]);
+    if (selected === null && focusOpenRef.current) {
+      focusOpenRef.current = false;
+      onFocusRoomClosed?.();
+    }
+  }, [selected, onFocusRoomClosed]);
 
   useEffect(() => {
     if (!editing) setEditHeaderTitle('');
@@ -334,14 +351,32 @@ export function AgentRoomsScreen({
     }
   }, [searchOpen]);
 
+  const lastReloadRef = useRef({ reloadToken, refresh });
   useEffect(() => {
+    const reloaded =
+      lastReloadRef.current.reloadToken !== reloadToken || lastReloadRef.current.refresh !== refresh;
+    lastReloadRef.current = { reloadToken, refresh };
+    if (reloaded && page !== 1) {
+      setLoadingMore(false);
+      setPage(1);
+      return;
+    }
     let cancelled = false;
+    const append = page > 1;
     // Full-screen loader only on first open — search/filter keeps the list visible.
     if (!gateOpenRef.current) setLoading(true);
-    setError(null);
+    if (append) {
+      setLoadingMore(true);
+      setMoreError(null);
+    } else {
+      setError(null);
+      setLoadingMore(false);
+      setMoreError(null);
+    }
     const timer = setTimeout(() => {
       fetchMyAgentListings({
         page,
+        limit: PAGE_SIZE,
         q: query.trim(),
         visibility: filters.visibility || undefined,
         roomStatus: filters.roomStatus || undefined,
@@ -355,24 +390,43 @@ export function AgentRoomsScreen({
       })
         .then((result) => {
           if (cancelled) return;
-          setItems(result.items);
-          setTotal(result.total);
-          if (page > 1 && !result.items.length) setPage(Math.max(1, Math.ceil(result.total / 20)));
+          setItems((prev) => {
+            if (!append) return result.items;
+            const seen = new Set(prev.map((item) => item.id));
+            return [...prev, ...result.items.filter((item) => !seen.has(item.id))];
+          });
+          // An empty later page means rows were removed meanwhile — stop paging.
+          setTotal(append && !result.items.length ? (page - 1) * PAGE_SIZE : result.total);
         })
         .catch((err) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : String(err);
+          if (append) setMoreError(message);
+          else setError(message);
         })
         .finally(() => {
           if (cancelled) return;
           setLoading(false);
-          if (reloadToken) onReloadSettled?.(reloadToken);
+          setLoadingMore(false);
+          if (reloadToken && !append) onReloadSettled?.(reloadToken);
         });
-    }, 250);
+    }, append ? 0 : 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, filters, page, sort, refresh, reloadToken, onReloadSettled]);
+  }, [query, filters, page, sort, refresh, reloadToken, onReloadSettled, moreAttempt]);
+
+  const hasMore = items.length < total;
+  const loadMoreRef = useRef(() => {});
+  loadMoreRef.current = () => {
+    if (loading || loadingMore || moreError || error || !hasMore) return;
+    if (items.length < page * PAGE_SIZE) return;
+    setLoadingMore(true);
+    setPage((n) => n + 1);
+  };
+  const pageScroll = useContext(ModePageScrollContext);
+  useEffect(() => pageScroll?.onEndReached(() => loadMoreRef.current()), [pageScroll]);
 
   useEffect(() => {
     if (selected === null) return;
@@ -736,25 +790,22 @@ export function AgentRoomsScreen({
         onCreatePress={onCreate}
       />
 
-      {!error && total > 20 ? (
-        <View style={styles.pager}>
-          <MobileButton
-            variant="outline"
-            disabled={loading || page <= 1}
-            onPress={() => setPage((n) => n - 1)}
-          >
-            {copy.previous}
-          </MobileButton>
-          <Text style={{ color: theme.textHeading }}>
-            {page} / {Math.ceil(total / 20)}
-          </Text>
-          <MobileButton
-            variant="outline"
-            disabled={loading || page * 20 >= total}
-            onPress={() => setPage((n) => n + 1)}
-          >
-            {copy.next}
-          </MobileButton>
+      {!error && items.length > 0 ? (
+        <View style={styles.listFooter} accessibilityLiveRegion="polite">
+          {moreError ? (
+            <>
+              <Text style={[styles.listFooterText, { color: theme.textSecondary }]}>{moreError}</Text>
+              <MobileButton variant="outline" onPress={() => setMoreAttempt((n) => n + 1)}>
+                {copy.retry}
+              </MobileButton>
+            </>
+          ) : loadingMore || hasMore ? (
+            <ActivityIndicator color={tokens.colors.primary} />
+          ) : total > PAGE_SIZE ? (
+            <Text style={[styles.listFooterText, { color: theme.textSecondary }]}>
+              {copy.allLoaded.replace('{count}', String(total))}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -1361,11 +1412,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 4,
   },
-  pager: {
-    flexDirection: 'row',
-    gap: 12,
+  listFooter: {
+    minHeight: 56,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  listFooterText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   sheetHeader: {
     flexDirection: 'row',

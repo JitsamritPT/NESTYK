@@ -43,11 +43,14 @@ CREATE TABLE IF NOT EXISTS leads (
   budget_max         DECIMAL(12, 2) NULL,
   other_contacts     JSONB        NOT NULL DEFAULT '[]'::jsonb,
   nationality VARCHAR(120) NULL,
+  -- Legacy single pin (superseded by lead_locations; no longer written, drop later)
   location_place_id VARCHAR(255) NULL,
   location_name VARCHAR(500) NULL,
   latitude DOUBLE PRECISION NULL,
   longitude DOUBLE PRECISION NULL,
+  -- Search radius (1/3/5 km) shared by every lead_locations pin
   radius_km SMALLINT NULL,
+  -- province = rank-1 pin province; locations = pin districts (list filter only)
   province VARCHAR(120) NULL,
   locations TEXT[] NOT NULL DEFAULT '{}',
   preferred_location VARCHAR(500) NULL,
@@ -69,6 +72,7 @@ CREATE TABLE IF NOT EXISTS leads (
   updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
   CONSTRAINT chk_leads_lease_duration CHECK (lease_duration_months IS NULL OR lease_duration_months > 0),
   CONSTRAINT chk_leads_occupant_count CHECK (occupant_count IS NULL OR occupant_count > 0),
+  CONSTRAINT chk_leads_radius_km CHECK (radius_km IS NULL OR radius_km IN (1, 3, 5)),
   CONSTRAINT chk_leads_budget CHECK (
     (budget_min IS NULL OR (budget_min >= 0 AND budget_min <> 'NaN'::numeric)) AND
     (budget_max IS NULL OR (budget_max > 0 AND budget_max <> 'NaN'::numeric)) AND
@@ -90,9 +94,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_leads_one_booked_per_room
   ON leads (rent_room_id)
   WHERE status = 'booked';
 
+-- Ranked search pins (max 3, rank 1 = top priority) — see matching.md §2.1 / §3.1
+CREATE TABLE IF NOT EXISTS lead_locations (
+  id         SERIAL PRIMARY KEY,
+  lead_id    INT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+  rank       SMALLINT NOT NULL,
+  place_id   VARCHAR(255) NULL,
+  name       VARCHAR(500) NOT NULL,
+  latitude   DOUBLE PRECISION NOT NULL,
+  longitude  DOUBLE PRECISION NOT NULL,
+  province   VARCHAR(120) NOT NULL,
+  district   VARCHAR(255) NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT chk_lead_locations_rank CHECK (rank BETWEEN 1 AND 3),
+  CONSTRAINT chk_lead_locations_lat CHECK (latitude BETWEEN -90 AND 90),
+  CONSTRAINT chk_lead_locations_lng CHECK (longitude BETWEEN -180 AND 180),
+  CONSTRAINT uq_lead_locations_rank UNIQUE (lead_id, rank)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lead_locations_lat_lng ON lead_locations (latitude, longitude);
+
 COMMIT;
 
 -- tenant_id FK added in contracts/schema.sql after tenants table exists
 
 -- Existing databases: also apply migrations/20260908-room-seeker-preferences.sql,
 -- migrations/20260908-lead-profile.sql, and migrations/20260908-master-visa-types.sql.
+-- Ranked pins: apps/api/migrations/20260924-lead-locations.sql (node apps/api/scripts/apply-lead-locations.cjs).

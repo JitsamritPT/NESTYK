@@ -1,6 +1,10 @@
 const { test }=require('node:test');const assert=require('node:assert/strict');const ts=require('typescript');require('reflect-metadata');
 require.extensions['.ts']=(module,filename)=>module._compile(ts.transpileModule(require('node:fs').readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true,emitDecoratorMetadata:true,esModuleInterop:true},fileName:filename}).outputText,filename);
 const {AgentLeadsService,validateLead,normalizeLeadSort}=require('../src/agent/leads/agent-leads.service.ts');const {AgentLeadsController}=require('../src/agent/leads/agent-leads.controller.ts');const {AuthService}=require('../src/auth/auth.service.ts');const {Module}=require('@nestjs/common');const {NestFactory}=require('@nestjs/core');
+// Fake transaction: pin writes land on the lead row returned by rowById.
+const withTx=(repo,rowById)=>{const pinRepo={delete:async({lead_id})=>{const r=rowById(lead_id);if(r)r.pins=[];},insert:async list=>{const r=rowById(list[0].lead_id);if(r)r.pins=list.map(p=>({...p}));}};repo.manager={...(repo.manager||{}),transaction:async fn=>fn({getRepository:e=>e.name==='LeadLocationEntity'?pinRepo:repo})};return repo;};
+const asok={rank:1,placeId:'test-place',name:'BTS Asok',latitude:13.737,longitude:100.56,province:'กรุงเทพมหานคร',district:'วัฒนา'};
+const klongtoei={rank:2,placeId:null,name:'Klong Toei Market',latitude:13.722,longitude:100.557,province:'กรุงเทพมหานคร',district:'คลองเตย'};
 test('lead validation requires name/phone and preserves unknown versus false',()=>{
  const value=validateLead({province:'กรุงเทพมหานคร',name:'  A  ',phone:' 123 ',hasPets:false});assert.equal(value.name,'A');assert.equal(value.hasPets,false);assert.equal(value.usesCar,null);
  for(const patch of [{province:'กรุงเทพมหานคร',name:''},{phone:5},{budgetMin:-1},{budgetMax:Infinity},{budgetMin:200,budgetMax:100},{budgetMax:0},{occupantCount:0},{leaseDurationMonths:1.5},{visaTypeId:0},{hasPets:'false'},{nationality:[]},{budgetMax:1.111},{notes:'x'.repeat(501)},{notes:5}])assert.throws(()=>validateLead({province:'กรุงเทพมหานคร',name:'A',phone:'123',...patch}));
@@ -10,6 +14,7 @@ test('lead HTTP API saves profile, rejects invalid catalogs and scopes reads to 
  process.env.ALLOW_DEV_AUTH='true';const saved=[];
  const repo={create:b=>({...b}),save:async b=>{if(b.id){const idx=saved.findIndex(row=>row.id===b.id);if(idx>=0){saved[idx]={...saved[idx],...b};return saved[idx];}}const row={...b,id:saved.length+1,created_at:new Date(),desired_room_type:b.desired_room_type_id?{code:'studio'}:null,visa_type:b.visa_type_id?{code:'tourist'}:null};saved.push(row);return row;},findOne:async({where})=>saved.find(row=>row.id===where.id&&row.created_by_user_id===where.created_by_user_id)||null};
  const catalog={findOne:async({where})=>where.id===1||where.term_months===12?{id:1,code:'tourist',term_months:12,is_active:true}:null,find:async()=>[{id:1,code:'tourist'}]};
+ withTx(repo,id=>saved.find(row=>row.id===id));
  const service=new AgentLeadsService(repo,catalog,catalog,catalog);
  service.locationCatalog=async()=>[{name:'กรุงเทพมหานคร',nameEn:'Bangkok',locations:['วัฒนา','คลองเตย']}];
  class TestModule{};Module({controllers:[AgentLeadsController],providers:[{provide:AgentLeadsService,useValue:service},{provide:AuthService,useValue:{findBySupabaseUserId:async id=>({id:Number(id)}),loadUserWithRoles:async id=>({id,roleNames:id===8?['guest']:['agent']})}}]})(TestModule);
@@ -26,7 +31,7 @@ test('lead HTTP API saves profile, rejects invalid catalogs and scopes reads to 
  const provinceOnly=await post({province:'เชียงใหม่',name:'Province only',phone:'123'});assert.equal(provinceOnly.status,201);assert.deepEqual((await provinceOnly.json()).locations,[]);saved.length=0;
  const visas=await fetch(base+'/api/v1/agent/leads/visa-types',{headers:headers(7)});assert.equal(visas.status,200);assert.equal((await visas.json())[0].code,'tourist');
  assert.equal((await fetch(base+'/api/v1/agent/leads/visa-types',{headers:headers(8)})).status,403);
- const input={locationName:'BTS Asok',locationPlaceId:'test-place',latitude:13.737,longitude:100.56,radiusKm:3,locations:['วัฒนา','คลองเตย'],province:'กรุงเทพมหานคร',name:'Test lead',phone:'TEST',nationality:'Test',budgetMin:10000,budgetMax:15000,preferredLocation:'Test location',moveInPlan:'Next month',hasPets:false,occupation:'Test occupation',visaTypeId:1,leaseDurationMonths:12,usesCar:true,occupantCount:2,isSmoker:false,desiredRoomTypeId:1,notes:'Call after 6pm'};
+ const input={pins:[asok,klongtoei],radiusKm:3,locations:['วัฒนา','คลองเตย'],province:'กรุงเทพมหานคร',name:'Test lead',phone:'TEST',nationality:'Test',budgetMin:10000,budgetMax:15000,preferredLocation:'Test location',moveInPlan:'Next month',hasPets:false,occupation:'Test occupation',visaTypeId:1,leaseDurationMonths:12,usesCar:true,occupantCount:2,isSmoker:false,desiredRoomTypeId:1,notes:'Call after 6pm'};
  const response=await post({...input,created_by_user_id:9,status:'booked'});assert.equal(response.status,201);const lead=await response.json();for(const [key,value]of Object.entries(input))assert.deepEqual(lead[key],value,key);assert.equal(lead.visaTypeCode,'tourist');assert.equal(lead.status,'new');assert.equal(saved[0].created_by_user_id,7);assert.equal(saved[0].rent_room_id,null);
  assert.equal((await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(9)})).status,404);
  const firstView=await fetch(base+'/api/v1/agent/leads/'+lead.id,{headers:headers(7)});assert.equal(firstView.status,200);const opened=await firstView.json();assert.equal(opened.status,'new');assert.equal(saved[0].status,'new');
@@ -98,15 +103,18 @@ test('location catalog normalizes property provinces and deduplicates districts'
  assert.deepEqual(catalog.find(p=>p.name==='ภูเก็ต').locations,[]);
 });
 
-test('optional map pin requires complete valid coordinates, name and supported radius',()=>{
- const base={province:'Bangkok',name:'A',phone:'123'};
- const pin={locationName:'BTS Asok',locationPlaceId:'abc',latitude:13.737,longitude:100.56,radiusKm:3};
- assert.equal(validateLead(base).latitude,null);
- assert.equal(validateLead({name:'A',phone:'123'}).province,null);
- assert.throws(()=>validateLead({...base,...pin,province:null}));
- assert.equal(validateLead({...base,...pin}).radiusKm,3);
- for(const patch of [{latitude:91},{latitude:NaN},{longitude:-181},{longitude:Infinity},{radiusKm:2},{radiusKm:'3'},{longitude:null},{locationName:''},{latitude:undefined}]) assert.throws(()=>validateLead({...base,...pin,...patch}));
- assert.throws(()=>validateLead({...base,locationName:'orphan'}));
+test('ranked pins derive province/areas, need a shared radius and must be distinct valid locations',()=>{
+ const base={name:'A',phone:'123'};
+ assert.deepEqual(validateLead(base).pins,[]);
+ assert.equal(validateLead({...base,radiusKm:3}).radiusKm,null);
+ const pinned=validateLead({...base,province:'เชียงใหม่',locations:['ignored'],radiusKm:5,pins:[{...klongtoei,rank:9,province:'Bangkok',district:'เขตคลองเตย'},asok]});
+ assert.deepEqual(pinned.pins.map(p=>p.rank),[1,2]);
+ assert.equal(pinned.pins[0].province,'กรุงเทพมหานคร');
+ assert.equal(pinned.province,'กรุงเทพมหานคร');
+ assert.deepEqual(pinned.locations,['คลองเตย','วัฒนา']);
+ assert.equal(pinned.radiusKm,5);
+ const pin={name:'P',latitude:13.7,longitude:100.5,province:'Bangkok'};
+ for(const patch of [{pins:[pin]},{pins:[pin],radiusKm:2},{pins:'x',radiusKm:3},{pins:[pin,{...pin,latitude:13.8},{...pin,latitude:13.9},{...pin,latitude:14}],radiusKm:3},{pins:[{...pin,latitude:91}],radiusKm:3},{pins:[{...pin,longitude:NaN}],radiusKm:3},{pins:[{...pin,name:' '}],radiusKm:3},{pins:[{...pin,province:'Tokyo'}],radiusKm:3},{pins:[pin,{...pin}],radiusKm:3},{pins:[{...pin,placeId:'a'},{...pin,latitude:13.8,placeId:'a'}],radiusKm:3},{radiusKm:4}]) assert.throws(()=>validateLead({...base,...patch}),undefined,JSON.stringify(patch));
 });
 
 test('editing lead updates allowed fields, preserves booking links, and rejects cross-agent writes', async () => {
@@ -116,7 +124,7 @@ test('editing lead updates allowed fields, preserves booking links, and rejects 
     findOne: async ({where}) => where.id === row.id && where.created_by_user_id === row.created_by_user_id ? {...row} : null,
     update: async (where, patch) => { assert.deepEqual(where, {id: 41, created_by_user_id: 7}); assert.equal(patch.status, undefined); assert.equal(patch.tenant_id, undefined); assert.equal(patch.created_by_user_id, undefined); Object.assign(row, patch); writes++; },
   };
-  const service = new AgentLeadsService(repository, {}, {}, {});
+  const service = new AgentLeadsService(withTx(repository, () => row), {}, {}, {});
   const updated = await service.update(7, 41, {name: 'After', budgetMin: 0, notes: '  Prefers LINE  ', status: 'new', tenant_id: null, created_by_user_id: 99});
   assert.equal(updated.notes, 'Prefers LINE'); assert.equal(row.notes, 'Prefers LINE');
   assert.equal(updated.name, 'After'); assert.equal(updated.phone, '0812345678'); assert.equal(updated.hasPets, false); assert.equal(updated.budgetMin, 0);
@@ -127,9 +135,15 @@ test('editing lead updates allowed fields, preserves booking links, and rejects 
   assert.equal(writes, 1);
 });
 
-test('editing can explicitly clear map coordinates and nullable preferences', async () => {
-  const row = {id: 1, created_by_user_id: 7, name:'Lead',phone:'0812345678',status:'inprogress',province:'กรุงเทพมหานคร',locations:['วัฒนา'],location_name:'Asok',location_place_id:'pin',latitude:13.7,longitude:100.5,radius_km:3,has_pets:true,created_at:new Date()};
-  const service = new AgentLeadsService({findOne:async()=>({...row}),update:async(_,patch)=>Object.assign(row,patch)}, {}, {}, {});
-  await service.update(7,1,{province:null,locations:[],locationName:null,locationPlaceId:null,latitude:null,longitude:null,radiusKm:null,hasPets:null});
-  assert.equal(row.latitude,null); assert.equal(row.location_name,null); assert.deepEqual(row.locations,[]); assert.equal(row.has_pets,null);
+test('editing keeps pins on partial updates, reorders them, and can clear them', async () => {
+  const row = {id: 1, created_by_user_id: 7, name:'Lead',phone:'0812345678',status:'inprogress',province:'กรุงเทพมหานคร',locations:['วัฒนา','คลองเตย'],radius_km:3,has_pets:true,created_at:new Date(),
+    pins:[{lead_id:1,rank:2,place_id:null,name:klongtoei.name,latitude:klongtoei.latitude,longitude:klongtoei.longitude,province:klongtoei.province,district:klongtoei.district},{lead_id:1,rank:1,place_id:'test-place',name:asok.name,latitude:asok.latitude,longitude:asok.longitude,province:asok.province,district:asok.district}]};
+  const service = new AgentLeadsService(withTx({findOne:async()=>({...row}),update:async(_,patch)=>Object.assign(row,patch)}, () => row), {}, {}, {});
+  const kept = await service.update(7,1,{name:'Renamed'});
+  assert.deepEqual(kept.pins.map(p=>p.name),['BTS Asok','Klong Toei Market']);
+  const reordered = await service.update(7,1,{pins:[klongtoei,asok]});
+  assert.deepEqual(reordered.pins.map(p=>[p.rank,p.name]),[[1,'Klong Toei Market'],[2,'BTS Asok']]);
+  assert.deepEqual(row.locations,['คลองเตย','วัฒนา']);
+  await service.update(7,1,{pins:[],province:null,locations:[],radiusKm:null,hasPets:null});
+  assert.deepEqual(row.pins,[]); assert.equal(row.radius_km,null); assert.equal(row.province,null); assert.deepEqual(row.locations,[]); assert.equal(row.has_pets,null);
 });

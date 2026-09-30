@@ -25,11 +25,16 @@ export type AgentListingCard = {
     name: string;
     phone: string;
   } | null;
-  prices: Array<{ contractTypeId?: number; contractTypeCode: string; price: number; advanceRentMonths?: number; depositMonths?: number }>;
+  prices: Array<{ contractTypeId?: number; contractTypeCode: string; termMonths?: number | null; price: number; advanceRentMonths?: number; depositMonths?: number }>;
   coverMediaUrl: string | null;
+  roomTypeCode?: string | null;
+  availableFromDate?: string | null;
   bedroomCount?: string | null;
   roomSizeSqm?: string | null;
   floor?: string | null;
+  /** Room pin, falling back to the building pin. */
+  latitude?: number | null;
+  longitude?: number | null;
   updatedAt?: string | null;
 };
 
@@ -54,6 +59,8 @@ export type CreateRoomResponse = {
 
 export async function fetchMyAgentListings(query: {
   page?: number;
+  /** 1–50, default 20. */
+  limit?: number;
   q?: string;
   visibility?: string;
   roomStatus?: string;
@@ -66,7 +73,7 @@ export async function fetchMyAgentListings(query: {
   maxPrice?: string;
 } = {}): Promise<AgentListingsResponse> {
   await ensureAgentSession();
-  const params = new URLSearchParams({ page: String(query.page ?? 1), limit: '20' });
+  const params = new URLSearchParams({ page: String(query.page ?? 1), limit: String(query.limit ?? 20) });
   if (query.q) params.set('q', query.q);
   if (query.visibility) params.set('visibility', query.visibility);
   if (query.roomStatus) params.set('roomStatus', query.roomStatus);

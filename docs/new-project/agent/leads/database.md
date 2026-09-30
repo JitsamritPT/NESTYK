@@ -98,7 +98,17 @@ Apply [location migration](./migrations/20260910-lead-locations.sql) before depl
 
 List filters: `province`, `locations` (JSON string array), and `includeUnspecified=true`. Multiple areas use OR matching; unspecified areas are included only within the selected province. All filters apply before pagination. Legacy leads without a province remain visible in the unfiltered list and text search.
 
-### Google Maps preference pin
+### Ranked search pins (current)
+Apply `apps/api/migrations/20260924-lead-locations.sql` (`node apps/api/scripts/apply-lead-locations.cjs --check`, then without `--check`) before deploying the API. It creates `lead_locations` and backfills each existing single pin as rank 1.
+
+- A lead has 0–3 pins in `lead_locations` (`rank` 1–3, unique per lead). The API accepts `pins` as an ordered array; rank = array position. Each pin needs a name, valid coordinates and a Thai province; duplicate `placeId` or identical coordinates are rejected.
+- `radius_km` on `leads` (1, 3 or 5) is shared by all pins and required when pins exist; it is NULL otherwise.
+- With pins, `leads.province` = rank-1 pin province and `leads.locations` = the pins' districts, so the province/area list filters keep working. Without pins, the legacy `province`/`locations` values are kept as-is (the form shows them as "not pinned yet").
+- Create/update write the lead row and replace its pins in one transaction. Responses return `pins` sorted by rank.
+- The single-pin columns below (`location_place_id`, `location_name`, `latitude`, `longitude`) are no longer written; drop them after the backfill is verified.
+- Matching readiness and distance scoring: see [matching.md](./matching.md) §2.1 / §3.1.
+
+### Google Maps preference pin (legacy, superseded by ranked pins)
 Apply [map migration](./migrations/20260910-lead-map.sql) after the province migration. Optional fields: `location_place_id`, `location_name`, `latitude`, `longitude`, `radius_km` (1, 3, or 5). A pin must have a name, both coordinates and radius; otherwise all map fields are NULL. Existing province and free-text data remain intact.
 
 The form reuses Agent Places autocomplete/details. Map taps use the authenticated `/agent/places/reverse` endpoint (Google Geocoding API) to resolve the new province; failures preserve the previous pin. The Google backend key must enable Geocoding API as well as Places API; the existing frontend Maps key renders the interactive map. Radius is straight-line distance, not travel time. The automatically resolved district is saved in `locations` so existing area filters continue to work, and the catalog also includes the current agent's saved areas.

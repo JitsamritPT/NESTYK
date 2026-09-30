@@ -58,6 +58,10 @@ AND created_by_user_id = :currentAgentId
       },
       "prices": [{ "contractTypeCode": "monthly_12", "price": 12000 }],
       "coverMediaUrl": "https://...",
+      "latitude": 13.737,
+      "longitude": 100.56,
+      "roomTypeCode": "studio",
+      "availableFromDate": "2026-10-15",
       "leadCount": 3
     }
   ],
@@ -68,6 +72,12 @@ AND created_by_user_id = :currentAgentId
 ```
 
 `leadCount` optional — aggregate จาก `leads` ที่ `rent_room_id = id`
+
+`latitude` / `longitude` — พิกัดห้อง ถ้าไม่มีใช้พิกัดตึก (`property`); `null` เมื่อไม่มีทั้งคู่ ใช้คำนวณผล matching เบื้องต้นฝั่ง client (`limit` สูงสุด 50)
+
+`roomTypeCode` — `master_room_types.code` ของห้อง หรือ `null` ใช้เทียบประเภทห้องในผล matching
+
+`availableFromDate` — วันที่ห้องว่าง (`YYYY-MM-DD`) ใช้เทียบวันย้ายเข้าในผล matching
 
 ---
 

@@ -57,6 +57,7 @@ import { RentRoomDocumentEntity } from './rent-room-document.entity';
 import { RoomLayoutValueEntity } from './room-layout-value.entity';
 import { RoomFacilityEntity } from './room-facility.entity';
 import { LeadEntity } from './lead.entity';
+import { LeadLocationEntity } from './lead-location.entity';
 import { TenantEntity } from './tenant.entity';
 import { RoomTenancyEntity } from './room-tenancy.entity';
 import { LeaseContractEntity } from './lease-contract.entity';
@@ -91,6 +92,7 @@ export const ALL_ENTITIES = [
   RoomLayoutValueEntity,
   RoomFacilityEntity,
   LeadEntity,
+  LeadLocationEntity,
   TenantEntity,
   RoomTenancyEntity,
   LeaseContractEntity,

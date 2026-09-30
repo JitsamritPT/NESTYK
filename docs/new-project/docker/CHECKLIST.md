@@ -7,7 +7,8 @@
 - [ ] มีตาราง: `users`, `master_roles`, `user_roles`, `rent_rooms`, `room_medias`, `leads`, `tenants`, `lease_contracts`
 - [ ] `./docs/new-project/docker/seed-dev-user.sh` → user `admin@jitsamrit.com` + roles
 - [ ] `./docs/new-project/docker/seed-agent-demo.sh` → 10 scout rooms + 6 leads (agent)
-- [ ] `./docs/new-project/docker/seed-agent-photos.sh` → รูป demo ใน bucket `property-images` + `room_medias`
+- [ ] (ทางเลือก) `./docs/new-project/docker/seed-agent-demo-extra.sh` → +20 ห้องกรอกครบ + 3 ลีดมีหมุด
+- [ ] `./docs/new-project/docker/seed-agent-photos.sh` → รูป demo ใน bucket `property-images` + `room_medias` (`DEMO_PHOTOS_MISSING_ONLY=1` = เฉพาะห้องที่ยังไม่มีรูป)
 - [ ] รีสตาร์ท API หลังแก้ `.env.api`
 - [ ] root `.env` สำหรับ front: `EXPO_PUBLIC_USE_DEV_AUTH=true` + `EXPO_PUBLIC_DEV_LOGIN_*`
 - [ ] Consumer app: Sign In ด้วย `admin@jitsamrit.com` / `Jitsamrit2026` → sync → เปิด Listings เห็นรูป

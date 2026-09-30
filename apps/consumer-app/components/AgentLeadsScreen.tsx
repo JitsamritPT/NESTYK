@@ -1,17 +1,6 @@
 import { LeadLocationPicker } from './LeadLocationPicker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  Pressable,
-  Modal,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Platform,
-  ScrollView,
-} from 'react-native';
-import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context';
+import { View, Text, Pressable, StyleSheet, Platform, ScrollView } from 'react-native';
 import type { AgentLead, AgentLeadsSort } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
 import {
@@ -20,20 +9,18 @@ import {
   MobileButton,
   MobileCompactListRow,
   MobileIcon,
-  MobileInput,
   MobileListSearchRow,
   MobileListToolbar,
   MobileScoreRing,
-  MobileSectionHeader,
   SelectionCheck,
   STATUS_PILL_TONES,
   tokens,
   useMobileTheme,
 } from '@nestyk/ui/native';
-import { getAgentLead, listAgentLeads, markAgentLeadInProgress, markAgentLeadLost } from '../lib/agent-leads-api';
-import { mockLeadMatch } from '../lib/lead-match-mock';
-import { CreateLeadForm } from './CreateLeadForm';
-import { AgentLeadDetailBody, LeadStatusBadge, leadAvatarInitials, leadStatusTone } from './AgentLeadDetailBody';
+import { listAgentLeads } from '../lib/agent-leads-api';
+import type { AgentListingCard } from '../lib/agent-listings-api';
+import { leadMatchReady, loadMatchRoomPool, summarizeLeadMatch } from '../lib/lead-match-preview';
+import { LeadStatusBadge, leadAvatarInitials, leadStatusTone } from './AgentLeadDetailBody';
 
 type LocationDraft = {
   province: string;
@@ -47,48 +34,76 @@ const EMPTY_DRAFT: LocationDraft = {
   includeUnspecified: false,
 };
 
+type ListMemory = LocationDraft & {
+  query: string;
+  sort: AgentLeadsSort;
+  page: number;
+  items: AgentLead[];
+  total: number;
+};
+
+/** The shell remounts tab bodies, so list state survives opening a lead and coming back. */
+let listMemory: ListMemory | null = null;
+let lastPoolReloadToken = 0;
+
 export function AgentLeadsScreen({
   workFilter = null,
   reloadToken,
   onReloadSettled,
+  onOpenLead,
 }: {
   /** Soft filter chip from dashboard action required. */
   workFilter?: 'lead_follow_up' | null;
   /** Shell pull-to-refresh (MobileModePage). Bump to reload list screens. */
   reloadToken?: number;
   onReloadSettled?: (token: number) => void;
+  onOpenLead: (lead: AgentLead) => void;
 }) {
   const { t } = useLocale();
   const c = t.agent.leads;
   const dash = t.agent.dashboard;
   const { theme } = useMobileTheme();
   const agentColor = tokens.colors.roles.agent;
-  const [editing, setEditing] = useState(false);
+  const memory = listMemory;
   const [activeWorkFilter, setActiveWorkFilter] = useState(workFilter);
-  const [busy, setBusy] = useState(false);
-  const [selected, setSelected] = useState<AgentLead | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [items, setItems] = useState<AgentLead[]>([]);
-  const [total, setTotal] = useState(0);
-  const [province, setProvince] = useState('');
-  const [locations, setLocations] = useState<string[]>([]);
-  const [includeUnspecified, setIncludeUnspecified] = useState(false);
-  const [query, setQuery] = useState('');
+  const [items, setItems] = useState<AgentLead[]>(memory?.items ?? []);
+  const [total, setTotal] = useState(memory?.total ?? 0);
+  const [province, setProvince] = useState(memory?.province ?? '');
+  const [locations, setLocations] = useState<string[]>(memory?.locations ?? []);
+  const [includeUnspecified, setIncludeUnspecified] = useState(memory?.includeUnspecified ?? false);
+  const [query, setQuery] = useState(memory?.query ?? '');
   const [filterOpen, setFilterOpen] = useState(false);
   const [draft, setDraft] = useState<LocationDraft>(EMPTY_DRAFT);
-  const [statusBusy, setStatusBusy] = useState(false);
-  const [lostSheetOpen, setLostSheetOpen] = useState(false);
-  const [lostReasonDraft, setLostReasonDraft] = useState('');
   const [sortOpen, setSortOpen] = useState(false);
-  const [sort, setSort] = useState<AgentLeadsSort>('created_desc');
-  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<AgentLeadsSort>(memory?.sort ?? 'created_desc');
+  const [page, setPage] = useState(memory?.page ?? 1);
   const [refresh, setRefresh] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!memory);
   const [error, setError] = useState<string | null>(null);
-  const [gateOpen, setGateOpen] = useState(false);
+  const [gateOpen, setGateOpen] = useState(!!memory);
+  const [roomPool, setRoomPool] = useState<AgentListingCard[] | null>(null);
   const gateOpenRef = useRef(gateOpen);
   gateOpenRef.current = gateOpen;
+
+  useEffect(() => {
+    listMemory = { query, sort, page, province, locations, includeUnspecified, items, total };
+  }, [query, sort, page, province, locations, includeUnspecified, items, total]);
+
+  useEffect(() => {
+    let active = true;
+    const force = !!reloadToken && reloadToken !== lastPoolReloadToken;
+    if (reloadToken) lastPoolReloadToken = reloadToken;
+    loadMatchRoomPool(force)
+      .then((rooms) => {
+        if (active) setRoomPool(rooms);
+      })
+      .catch(() => {
+        if (active) setRoomPool(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [reloadToken]);
 
   const filterBadge = useMemo(() => {
     let n = 0;
@@ -217,76 +232,12 @@ export function AgentLeadsScreen({
 
   const locationLine = (lead: AgentLead) => {
     const place =
+      lead.pins[0]?.name ||
       lead.province ||
-      lead.locationName ||
       (lead.locations?.length ? lead.locations[0] : null) ||
       lead.preferredLocation;
     const type = roomType(lead);
     return [place, type].filter(Boolean).join(' · ') || null;
-  };
-
-  const openLead = async (lead: AgentLead) => {
-    setSelected(lead);
-    setDetailLoading(true);
-    setDetailError(null);
-    try {
-      const latest = await getAgentLead(lead.id);
-      setSelected(latest);
-      setItems((current) => current.map((item) => (item.id === latest.id ? latest : item)));
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-
-  const closeModal = () => {
-    if (busy || statusBusy) return;
-    if (editing) {
-      setEditing(false);
-      return;
-    }
-    setSelected(null);
-    setDetailError(null);
-    setDetailLoading(false);
-    setLostSheetOpen(false);
-    setLostReasonDraft('');
-  };
-
-  const applyLeadUpdate = (lead: AgentLead) => {
-    setSelected(lead);
-    setItems((current) => current.map((item) => (item.id === lead.id ? lead : item)));
-  };
-
-  const handleMarkInProgress = async () => {
-    if (!selected || statusBusy) return;
-    setStatusBusy(true);
-    try {
-      applyLeadUpdate(await markAgentLeadInProgress(selected.id));
-    } catch (err) {
-      Alert.alert(c.loadError, err instanceof Error ? err.message : String(err));
-    } finally {
-      setStatusBusy(false);
-    }
-  };
-
-  const handleSubmitLost = async () => {
-    if (!selected || statusBusy) return;
-    const reason = lostReasonDraft.trim();
-    if (!reason) {
-      Alert.alert(c.lostReasonRequired);
-      return;
-    }
-    setStatusBusy(true);
-    try {
-      applyLeadUpdate(await markAgentLeadLost(selected.id, reason));
-      setLostSheetOpen(false);
-      setLostReasonDraft('');
-    } catch (err) {
-      Alert.alert(c.loadError, err instanceof Error ? err.message : String(err));
-    } finally {
-      setStatusBusy(false);
-    }
   };
 
   return (
@@ -396,7 +347,8 @@ export function AgentLeadsScreen({
             <View style={styles.list}>
               {items.map((lead) => {
                 const tone = STATUS_PILL_TONES[leadStatusTone(lead.status)];
-                const match = mockLeadMatch(lead);
+                const match = summarizeLeadMatch(lead, roomPool);
+                const needsInfo = !leadMatchReady(lead);
                 return (
                   <MobileCompactListRow
                     key={lead.id}
@@ -418,16 +370,18 @@ export function AgentLeadsScreen({
                     aside={
                       <MobileScoreRing
                         value={match?.score ?? null}
-                        label={match ? c.matchLabel : c.matchNeedsInfo}
+                        label={match ? c.matchLabel : needsInfo ? c.matchNeedsInfo : undefined}
                         accessibilityLabel={
                           match
-                            ? c.matchScoreA11y.replace('{score}', String(match.score))
-                            : c.matchNeedsInfo
+                            ? c.matchScoreA11y.replace('{score}', String(match.score ?? 0))
+                            : needsInfo
+                              ? c.matchNeedsInfo
+                              : undefined
                         }
                       />
                     }
                     accessibilityLabel={`${c.details}: ${lead.name}`}
-                    onPress={() => void openLead(lead)}
+                    onPress={() => onOpenLead(lead)}
                   />
                 );
               })}
@@ -585,118 +539,6 @@ export function AgentLeadsScreen({
         </View>
       </MobileBottomSheet>
 
-      <Modal
-        visible={selected != null}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={closeModal}
-      >
-        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-          <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-            <View style={[styles.modalHeader, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-              <MobileSectionHeader
-                title={editing ? c.editLead : selected?.name?.trim() || c.details}
-                leading="back"
-                backDisabled={busy}
-                onBackPress={() => {
-                  if (!busy) closeModal();
-                }}
-                onActionPress={selected && !editing ? () => setEditing(true) : undefined}
-                actionLabel={selected && !editing ? c.editLead : undefined}
-                actionDisabled={busy || detailLoading || !!detailError}
-              />
-            </View>
-            {editing && selected ? (
-              <CreateLeadForm
-                key={selected.id}
-                initialLead={selected}
-                onBusy={setBusy}
-                onSaved={(lead) => {
-                  setSelected(lead);
-                  setEditing(false);
-                  setDetailError(null);
-                  setItems((current) => current.map((item) => (item.id === lead.id ? lead : item)));
-                  setRefresh((n) => n + 1);
-                }}
-              />
-            ) : selected ? (
-              <>
-                {detailError ? (
-                  <View
-                    style={[
-                      styles.detailBanner,
-                      { borderColor: theme.border, backgroundColor: theme.surface },
-                    ]}
-                  >
-                    <Text style={{ color: theme.textHeading }}>{c.loadError}</Text>
-                    <Text style={{ color: theme.textSecondary }}>{detailError}</Text>
-                    <MobileButton onPress={() => void openLead(selected)}>{c.retry}</MobileButton>
-                  </View>
-                ) : null}
-                {detailLoading ? <ActivityIndicator style={{ marginTop: 8 }} color={agentColor} /> : null}
-                <AgentLeadDetailBody
-                  lead={selected}
-                  statusBusy={statusBusy}
-                  onMarkInProgress={
-                    selected.status === 'new' || selected.status === 'lost'
-                      ? () => void handleMarkInProgress()
-                      : undefined
-                  }
-                  onMarkLost={
-                    selected.status === 'new' || selected.status === 'inprogress'
-                      ? () => {
-                          setLostReasonDraft(selected.lostReason ?? '');
-                          setLostSheetOpen(true);
-                        }
-                      : undefined
-                  }
-                />
-              </>
-            ) : null}
-          </SafeAreaView>
-        </SafeAreaProvider>
-      </Modal>
-
-      <MobileBottomSheet
-        visible={lostSheetOpen}
-        onClose={() => {
-          if (!statusBusy) {
-            setLostSheetOpen(false);
-            setLostReasonDraft('');
-          }
-        }}
-        avoidKeyboard
-        maxHeight="70%"
-      >
-        <View style={styles.sheetHeader}>
-          <Text style={[styles.sheetTitle, { color: theme.textHeading }]}>{c.markLost}</Text>
-          <Pressable
-            onPress={() => {
-              if (!statusBusy) {
-                setLostSheetOpen(false);
-                setLostReasonDraft('');
-              }
-            }}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={t.common.cancel}
-          >
-            <MobileIcon name="close" size={22} color={theme.textHeading} />
-          </Pressable>
-        </View>
-        <View style={styles.lostSheetBody}>
-          <Text style={[styles.bodyText, { color: theme.textSecondary }]}>{c.lostReasonHint}</Text>
-          <MobileInput
-            value={lostReasonDraft}
-            onChangeText={setLostReasonDraft}
-            placeholder={c.lostReasonPlaceholder}
-            editable={!statusBusy}
-          />
-          <MobileButton onPress={() => void handleSubmitLost()} disabled={statusBusy} isLoading={statusBusy}>
-            {c.confirmLost}
-          </MobileButton>
-        </View>
-      </MobileBottomSheet>
     </View>
   );
 }
@@ -713,22 +555,6 @@ const styles = StyleSheet.create({
   menu: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   card: { borderWidth: 1, borderRadius: 16, padding: 18, gap: 8 },
   bodyText: { fontFamily: tokens.typography.native.body, fontSize: 14, lineHeight: 22 },
-  modalHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    flexShrink: 0,
-    zIndex: 1,
-  },
-  detailBanner: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-  },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -825,12 +651,6 @@ const styles = StyleSheet.create({
   sheetBody: {
     paddingHorizontal: 20,
     paddingTop: 4,
-  },
-  lostSheetBody: {
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 12,
-    gap: 14,
   },
   checkboxRow: {
     minHeight: 44,

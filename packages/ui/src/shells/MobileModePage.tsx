@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Extrapolation,
   interpolate,
+  runOnJS,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
@@ -28,7 +29,12 @@ export type ModePageScrollApi = {
     target: React.RefObject<RNView | null> | RNView | null,
     options?: { offset?: number; animated?: boolean },
   ) => void;
+  /** Called when the page is scrolled near its end (infinite lists). Returns an unsubscribe. */
+  onEndReached: (handler: () => void) => () => void;
 };
+
+/** Distance from the bottom (px) that counts as "near the end". */
+const END_REACHED_THRESHOLD = 480;
 
 export const ModePageScrollContext = React.createContext<ModePageScrollApi | null>(null);
 
@@ -57,6 +63,20 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
   const { theme } = useMobileTheme();
   const scrollY = useSharedValue(0);
   const scrollRef = useRef<Animated.ScrollView>(null);
+  const endHandlerRef = useRef<(() => void) | null>(null);
+  const viewportHeight = useRef(0);
+  const contentHeight = useRef(0);
+  const nearEnd = useSharedValue(false);
+
+  const fireEndReached = useCallback(() => endHandlerRef.current?.(), []);
+  // Content that grows (or starts) short of the viewport never scrolls, so re-check on size changes.
+  const checkNearEnd = useCallback(() => {
+    if (!viewportHeight.current || !contentHeight.current) return;
+    if (scrollY.value + viewportHeight.current >= contentHeight.current - END_REACHED_THRESHOLD) {
+      fireEndReached();
+    }
+  }, [fireEndReached, scrollY]);
+
   const scrollApi = useMemo<ModePageScrollApi>(
     () => ({
       scrollTo: (options) => {
@@ -85,6 +105,12 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
           },
         );
       },
+      onEndReached: (handler) => {
+        endHandlerRef.current = handler;
+        return () => {
+          if (endHandlerRef.current === handler) endHandlerRef.current = null;
+        };
+      },
     }),
     [],
   );
@@ -92,6 +118,13 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
   const onScroll = useAnimatedScrollHandler({
     onScroll: (event) => {
       scrollY.value = event.contentOffset.y;
+      const near =
+        event.contentOffset.y + event.layoutMeasurement.height >=
+        event.contentSize.height - END_REACHED_THRESHOLD;
+      if (near !== nearEnd.value) {
+        nearEnd.value = near;
+        if (near) runOnJS(fireEndReached)();
+      }
     },
   });
 
@@ -178,13 +211,24 @@ export const MobileModePage: React.FC<MobileModePageProps> = ({
       <View style={[styles.body, { backgroundColor: theme.background }]}>
         <Animated.ScrollView
           ref={scrollRef}
-          contentContainerStyle={[styles.scrollContent, { paddingTop: 8 }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: 8, paddingBottom: bottomBar ? 16 : 16 + insets.bottom },
+          ]}
           contentInsetAdjustmentBehavior="never"
           alwaysBounceVertical={Boolean(onRefresh)}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           onScroll={onScroll}
           scrollEventThrottle={16}
+          onLayout={(e) => {
+            viewportHeight.current = e.nativeEvent.layout.height;
+            checkNearEnd();
+          }}
+          onContentSizeChange={(_w, h) => {
+            contentHeight.current = h;
+            checkNearEnd();
+          }}
           refreshControl={
             onRefresh ? (
               <RefreshControl

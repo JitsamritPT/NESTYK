@@ -53,6 +53,9 @@ export type AppIconName =
   | 'funnel'
   | 'lock'
   | 'plus'
+  | 'pencil'
+  | 'info'
+  | 'file-text'
   // Amenity catalog (RoomFacilitiesEditor)
   | 'couch'
   | 'armchair'

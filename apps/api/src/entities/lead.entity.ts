@@ -1,10 +1,11 @@
-import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { SerialTimestampEntity } from './base.entity';
 import { RentRoomEntity } from './rent-room.entity';
 import { UserEntity } from './user.entity';
 import { MasterRoomTypeEntity } from './master-room-type.entity';
 import { MasterVisaTypeEntity } from './master-visa-type.entity';
 import { TenantEntity } from './tenant.entity';
+import { LeadLocationEntity } from './lead-location.entity';
 
 export type LeadContactChannel = { channel: string; value: string };
 
@@ -36,14 +37,19 @@ export class LeadEntity extends SerialTimestampEntity {
   @Column({ type: 'varchar', length: 500, nullable: true })
   location_name: string | null;
 
+  /** Legacy single pin — superseded by `pins` (lead_locations); no longer written. */
   @Column({ type: 'double precision', nullable: true })
   latitude: number | null;
 
   @Column({ type: 'double precision', nullable: true })
   longitude: number | null;
 
+  /** Search radius shared by every pin in `pins`. */
   @Column({ type: 'smallint', nullable: true })
   radius_km: number | null;
+
+  @OneToMany(() => LeadLocationEntity, (pin) => pin.lead)
+  pins: LeadLocationEntity[];
 
   @Column({ type: 'varchar', length: 120, nullable: true })
   province: string | null;

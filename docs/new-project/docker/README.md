@@ -17,10 +17,15 @@ Deploy later by swapping `.env.api` URL/keys to the cloud project — same code 
 ./docs/new-project/docker/apply-schema.sh
 ./docs/new-project/docker/seed-dev-user.sh
 ./docs/new-project/docker/seed-agent-demo.sh
+./docs/new-project/docker/seed-agent-demo-extra.sh   # (ทางเลือก) +20 ห้องเต็มรูปแบบ + 3 ลีดมีหมุด
 
 # 3) Demo photos → Storage + room_medias
 ./docs/new-project/docker/seed-agent-photos.sh
+# เฉพาะห้องที่ยังไม่มีรูป (เช่น หลัง seed-agent-demo-extra.sh)
+DEMO_PHOTOS_MISSING_ONLY=1 ./docs/new-project/docker/seed-agent-photos.sh
 ```
+
+> รัน `seed-agent-demo.sh` ซ้ำจะลบห้อง `demo-agent-*` ทั้งหมด รวมห้อง 11–30 — ให้รัน `seed-agent-demo-extra.sh` ใหม่ตามหลัง
 
 Connection แอป (ตรงกับ root `.env.api`):
 
@@ -62,5 +67,6 @@ Schema อยู่ที่ `public` ตาม blueprint (ไม่ใช้ `N
 | [apply-schema.sh](./apply-schema.sh) | Apply schemas + migrations บน `supabase_db_NESTYK` |
 | [seed-dev-user.sql](./seed-dev-user.sql) / [.sh](./seed-dev-user.sh) | Seed sample admin profile |
 | [seed-agent-demo.sql](./seed-agent-demo.sql) / [.sh](./seed-agent-demo.sh) | Seed **10** scout rooms + 6 leads |
-| [seed-agent-photos.mjs](./seed-agent-photos.mjs) / [.sh](./seed-agent-photos.sh) | อัปโหลดรูป mock → `property-images` + `room_medias` |
+| [seed-agent-demo-extra.sql](./seed-agent-demo-extra.sql) / [.sh](./seed-agent-demo-extra.sh) | +**20** ห้องกรอกครบ (`demo-agent-11..30`: ราคา 12/6/3 เดือน, layout, facilities) + 3 ลีดมีหมุด — ครอบคลุมเคส matching |
+| [seed-agent-photos.mjs](./seed-agent-photos.mjs) / [.sh](./seed-agent-photos.sh) | อัปโหลดรูป mock → `property-images` + `room_medias` (`DEMO_PHOTOS_MISSING_ONLY=1` = เฉพาะห้องที่ยังไม่มีรูป) |
 | root `supabase/config.toml` | Config สำหรับ Supabase CLI local stack |

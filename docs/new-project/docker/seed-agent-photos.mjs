@@ -53,6 +53,8 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
 const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 const BUCKET = process.env.SUPABASE_BUCKET_PROPERTIES || 'property-images';
 const PHOTOS_PER_ROOM = Number(process.env.DEMO_PHOTOS_PER_ROOM || 5);
+/** Skip rooms that already have photos instead of replacing them. */
+const MISSING_ONLY = process.env.DEMO_PHOTOS_MISSING_ONLY === '1';
 
 /** Unsplash apartment / condo interiors — free for demo seeding */
 const DEMO_PHOTO_URLS = [
@@ -160,12 +162,18 @@ async function main() {
   }
 
   const roomsRes = await db.query(
-    `SELECT id, room_id FROM rent_rooms
-     WHERE created_by_user_id = $1 AND room_id LIKE 'demo-agent-%'
-     ORDER BY id ASC`,
-    [agentId],
+    `SELECT r.id, r.room_id FROM rent_rooms r
+     WHERE r.created_by_user_id = $1 AND r.room_id LIKE 'demo-agent-%'
+       AND ($2::boolean = FALSE OR NOT EXISTS (SELECT 1 FROM room_medias m WHERE m.rent_id = r.id))
+     ORDER BY r.id ASC`,
+    [agentId, MISSING_ONLY],
   );
   if (!roomsRes.rows.length) {
+    if (MISSING_ONLY) {
+      console.log('Every demo room already has photos — nothing to do.');
+      await db.end();
+      return;
+    }
     console.error('No demo rooms — run seed-agent-demo.sh first');
     process.exit(1);
   }
