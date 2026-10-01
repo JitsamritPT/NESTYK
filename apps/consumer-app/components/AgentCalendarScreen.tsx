@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
-import { Calendar } from 'react-native-calendars';
+import { Calendar, type DateData } from 'react-native-calendars';
 import { useLocale } from '@nestyk/i18n';
 import { MobileButton, MobileIcon, tokens, useMobileTheme } from '@nestyk/ui/native';
 import {
@@ -39,9 +39,9 @@ export function AgentCalendarScreen({ events, onAdd, selectedDate, onSelectDate,
   const kinds: CalendarEventKind[] = ['viewing', 'followUp', 'contract'];
   const daily = events.filter(event => event.date === selectedDate).sort((a, b) => a.time.localeCompare(b.time));
   const markedDates = useMemo(() => {
-    const marks: Record<string, { marked?: boolean; dotColor?: string; selected?: boolean; selectedColor?: string; selectedTextColor?: string }> = {};
-    events.forEach(event => { marks[event.date] = { marked: true, dotColor: tokens.colors.selectionMark }; });
-    marks[selectedDate] = { ...marks[selectedDate], selected: true, selectedColor: tokens.colors.brand[500], selectedTextColor: tokens.colors.onBrand, dotColor: tokens.colors.onBrand };
+    const marks: Record<string, { marked?: boolean; selected?: boolean }> = {};
+    events.forEach(event => { marks[event.date] = { marked: true }; });
+    marks[selectedDate] = { ...marks[selectedDate], selected: true };
     return marks;
   }, [events, selectedDate]);
   const heading = { color: theme.screenTitle };
@@ -80,6 +80,51 @@ export function AgentCalendarScreen({ events, onAdd, selectedDate, onSelectDate,
           firstDay={1}
           hideExtraDays
           markedDates={markedDates}
+          dayComponent={({ date, state, marking, onPress, accessibilityLabel }: {
+            date?: DateData;
+            state?: string;
+            marking?: { selected?: boolean; marked?: boolean };
+            onPress?: (date: DateData) => void;
+            accessibilityLabel?: string;
+          }) => {
+            if (!date) return null;
+            const selected = !!marking?.selected;
+            const today = date.dateString === calendarDateKey(new Date());
+            const disabled = state === 'disabled';
+            const eventCount = events.filter(event => event.date === date.dateString).length;
+            return (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected, disabled }}
+                accessibilityLabel={[
+                  accessibilityLabel || date.dateString,
+                  eventCount ? copy.eventCount.replace('{count}', String(eventCount)) : '',
+                ].filter(Boolean).join(', ')}
+                disabled={disabled}
+                onPress={() => onPress?.(date)}
+                style={({ pressed }) => [styles.day, {
+                  backgroundColor: selected ? tokens.colors.brand[500] : 'transparent',
+                  borderColor: today && !selected ? theme.textSecondary : 'transparent',
+                  opacity: pressed ? 0.65 : disabled ? 0.4 : 1,
+                }]}
+              >
+                <Text style={[styles.dayNumber, {
+                  color: selected ? tokens.colors.onBrand : theme.textHeading,
+                  fontFamily: selected || today ? tokens.typography.native.bodyBold : tokens.typography.native.body,
+                }]}>{date.day}</Text>
+                {eventCount > 0 && (
+                  <View pointerEvents="none" style={[styles.dayBadge, {
+                    backgroundColor: selected ? tokens.colors.primary : tokens.colors.brand[100],
+                    borderColor: theme.card,
+                  }]}>
+                    <Text style={[styles.dayBadgeText, {
+                      color: selected ? tokens.colors.white : tokens.colors.onBrand,
+                    }]}>{eventCount > 99 ? '99+' : eventCount}</Text>
+                  </View>
+                )}
+              </Pressable>
+            );
+          }}
           onDayPress={day => { onSelectDate(day.dateString); setSaved(false); }}
           customHeader={() => (
             <View>
@@ -171,6 +216,10 @@ const styles = StyleSheet.create({
   body: { gap: 14, paddingBottom: 16 },
   notice: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 10 },
   calendar: { borderWidth: 1, borderRadius: 16, padding: 8, overflow: 'hidden' },
+  day: { width: 40, maxWidth: '100%', height: 44, borderRadius: 13, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  dayNumber: { fontSize: 14, lineHeight: 22, textAlign: 'center' },
+  dayBadge: { position: 'absolute', top: -5, right: -5, minWidth: 20, height: 20, paddingHorizontal: 3, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  dayBadgeText: { fontFamily: tokens.typography.native.bodyBold, fontSize: 10, lineHeight: 14, textAlign: 'center' },
   monthRow: { flexDirection: 'row', alignItems: 'center', paddingLeft: 8 },
   iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   weekdays: { flexDirection: 'row', paddingVertical: 8 },

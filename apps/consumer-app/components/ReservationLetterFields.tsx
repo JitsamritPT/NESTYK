@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { MobileInput, useMobileTheme } from "@nestyk/ui/native";
+import { MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { ReservationLetterInput } from "@nestyk/types";
 import { searchOwnerUsers } from "../lib/agent-contracts-api";
 
@@ -91,7 +91,10 @@ export function reservationLetterFieldErrors(
     !/^\d{4}-\d{2}-\d{2}$/.test(value.issueDate.trim())
   )
     errors.issueDate = "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)";
-  if (value.termFrom.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(value.termFrom.trim()))
+  if (
+    value.termFrom.trim() &&
+    !/^\d{4}-\d{2}-\d{2}$/.test(value.termFrom.trim())
+  )
     errors.termFrom = "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)";
   if (value.termTo.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(value.termTo.trim()))
     errors.termTo = "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)";
@@ -122,9 +125,24 @@ type PartyField = {
 const TENANT_FIELDS: PartyField[] = [
   { key: "tenantFirstName", label: "ชื่อผู้จอง", required: true, locked: true },
   { key: "tenantLastName", label: "นามสกุลผู้จอง", locked: true },
-  { key: "tenantPhone", label: "เบอร์ติดต่อผู้จอง", required: true, locked: true },
-  { key: "tenantEmail", label: "อีเมลผู้จอง", email: true, required: true, locked: true },
-  { key: "tenantId", label: "เลขบัตร / พาสปอร์ต / นิติบุคคล ผู้จอง", locked: true },
+  {
+    key: "tenantPhone",
+    label: "เบอร์ติดต่อผู้จอง",
+    required: true,
+    locked: true,
+  },
+  {
+    key: "tenantEmail",
+    label: "อีเมลผู้จอง",
+    email: true,
+    required: true,
+    locked: true,
+  },
+  {
+    key: "tenantId",
+    label: "เลขบัตร / พาสปอร์ต / นิติบุคคล ผู้จอง",
+    locked: true,
+  },
   { key: "tenantNationality", label: "สัญชาติผู้จอง", locked: true },
 ];
 
@@ -132,7 +150,12 @@ const LANDLORD_FIELDS: PartyField[] = [
   { key: "landlordFirstName", label: "ชื่อผู้ให้เช่า", required: true },
   { key: "landlordLastName", label: "นามสกุลผู้ให้เช่า" },
   { key: "landlordPhone", label: "เบอร์ติดต่อผู้ให้เช่า", required: true },
-  { key: "landlordEmail", label: "อีเมลผู้ให้เช่า", email: true, required: true },
+  {
+    key: "landlordEmail",
+    label: "อีเมลผู้ให้เช่า",
+    email: true,
+    required: true,
+  },
   { key: "landlordId", label: "เลขบัตร / พาสปอร์ต / นิติบุคคล ผู้ให้เช่า" },
   { key: "landlordNationality", label: "สัญชาติผู้ให้เช่า" },
 ];
@@ -184,10 +207,6 @@ const SECTIONS: Array<{
         required: true,
         placeholder: "5000",
       },
-      {
-        key: "reservationWords",
-        label: "ตัวอักษรเงินจอง (เว้นว่างให้ระบบใส่)",
-      },
       { key: "balanceDue", label: "คงเหลือ (บาท)" },
       { key: "payee", label: "ผู้รับเงิน" },
       { key: "bankAccount", label: "ธนาคาร ชื่อและเลขบัญชี" },
@@ -199,21 +218,60 @@ const SECTIONS: Array<{
 ];
 
 const PAYMENT_OPTIONS: Array<{
-  value: "" | "transfer" | "cash" | "credit";
+  value: "transfer" | "cash" | "credit";
   label: string;
 }> = [
-  { value: "", label: "ไม่ระบุ" },
   { value: "transfer", label: "โอน" },
   { value: "cash", label: "เงินสด" },
   { value: "credit", label: "บัตรเครดิต" },
 ];
+
+const THAI_DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
+
+function readThaiNumber(n: number): string {
+  if (n >= 1000000)
+    return (
+      readThaiNumber(Math.floor(n / 1000000)) +
+      "ล้าน" +
+      (n % 1000000 === 1 ? "เอ็ด" : n % 1000000 ? readThaiNumber(n % 1000000) : "")
+    );
+  const chars = String(n).split("").map(Number);
+  return chars
+    .map((digit, index) => {
+      const pos = chars.length - index - 1;
+      if (!digit) return "";
+      if (pos === 1) return (digit === 1 ? "" : digit === 2 ? "ยี่" : THAI_DIGITS[digit]) + "สิบ";
+      return (
+        (pos === 0 && digit === 1 && n > 10 ? "เอ็ด" : THAI_DIGITS[digit]) +
+        ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"][pos]
+      );
+    })
+    .join("");
+}
+
+/** Same wording the reservation PDF stamps into the amount blanks. */
+function bahtWords(raw: string) {
+  const clean = raw.replace(/[,\s]/g, "").trim();
+  if (!clean || !/^\d+(\.\d+)?$/.test(clean)) return "";
+  const cents = Math.round(Number(clean) * 100);
+  if (!Number.isFinite(cents)) return "";
+  return (
+    (Math.floor(cents / 100) ? readThaiNumber(Math.floor(cents / 100)) : "ศูนย์") +
+    "บาท" +
+    (cents % 100 ? readThaiNumber(cents % 100) + "สตางค์" : "ถ้วน")
+  );
+}
 
 export function ReservationLetterFields({
   value,
   onChange,
   disabled,
   errors,
+  step = 0,
+  onStepChange,
 }: {
+  step?: number;
+  onStepChange?: (step: number) => void;
   value: ReservationLetterInput;
   onChange: (next: ReservationLetterInput) => void;
   disabled?: boolean;
@@ -222,7 +280,6 @@ export function ReservationLetterFields({
   const { theme } = useMobileTheme();
   const title = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
-  const [party, setParty] = useState<"tenant" | "landlord">("landlord");
   const [ownerQuery, setOwnerQuery] = useState("");
   const [ownerHits, setOwnerHits] = useState<
     Array<{
@@ -237,7 +294,7 @@ export function ReservationLetterFields({
     }>
   >([]);
   const [ownerSearchError, setOwnerSearchError] = useState("");
-  const [landlordOpen, setLandlordOpen] = useState(false);
+  const [landlordOpen, setLandlordOpen] = useState(!!value.landlordFirstName);
   const searchSeq = useRef(0);
   const set = (key: TextKey, text: string) => {
     const next = { ...value, [key]: text };
@@ -247,20 +304,23 @@ export function ReservationLetterFields({
         .filter(Boolean)
         .join(" ");
       if (!value.payee || value.payee === value.landlordName) next.payee = full;
-      if (!value.landlordSignName || value.landlordSignName === value.landlordName)
+      if (
+        !value.landlordSignName ||
+        value.landlordSignName === value.landlordName
+      )
         next.landlordSignName = full;
       next.landlordName = full;
     }
     onChange(next);
   };
   useEffect(() => {
+    const seq = ++searchSeq.current;
     const q = ownerQuery.trim();
     if (q.length < 1) {
       setOwnerHits([]);
       setOwnerSearchError("");
       return;
     }
-    const seq = ++searchSeq.current;
     const timer = setTimeout(() => {
       void searchOwnerUsers(q)
         .then((rows) => {
@@ -276,7 +336,10 @@ export function ReservationLetterFields({
           }
         });
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      searchSeq.current++;
+    };
   }, [ownerQuery]);
   const pickOwner = (owner: {
     name: string;
@@ -297,7 +360,10 @@ export function ReservationLetterFields({
       landlordId: owner.identityNumber,
       landlordNationality: owner.nationality,
       landlordSignName: owner.name,
-      payee: !value.payee || value.payee === value.landlordName ? owner.name : value.payee,
+      payee:
+        !value.payee || value.payee === value.landlordName
+          ? owner.name
+          : value.payee,
     });
     setLandlordOpen(true);
     setOwnerQuery("");
@@ -314,273 +380,448 @@ export function ReservationLetterFields({
       landlordId: "",
       landlordNationality: "",
       landlordSignName:
-        value.landlordSignName === value.landlordName ? "" : value.landlordSignName,
+        value.landlordSignName === value.landlordName
+          ? ""
+          : value.landlordSignName,
       payee: value.payee === value.landlordName ? "" : value.payee,
     });
     setLandlordOpen(true);
     setOwnerQuery("");
     setOwnerHits([]);
   };
-  const partyFields = party === "tenant" ? TENANT_FIELDS : LANDLORD_FIELDS;
-  const partyHasError = (fields: PartyField[]) =>
-    fields.some((field) => !!errors?.[field.key]);
   useEffect(() => {
-    if (!errors) return;
-    const tenantError = partyHasError(TENANT_FIELDS);
-    const landlordError = partyHasError(LANDLORD_FIELDS);
-    if (party === "tenant" && landlordError && !tenantError) setParty("landlord");
-    if (party === "landlord" && tenantError && !landlordError) setParty("tenant");
-  }, [errors, party]);
+    if (value.landlordFirstName || errors?.landlordFirstName)
+      setLandlordOpen(true);
+  }, [value.landlordFirstName, errors?.landlordFirstName]);
 
   const renderField = (field: PartyField) => (
-    <MobileInput
+    <View
       key={field.key}
-      label={field.label}
-      required={field.required}
-      error={errors?.[field.key]}
-      value={value[field.key]}
-      onChangeText={(text) => set(field.key, text)}
-      placeholder={field.placeholder}
-      editable={!disabled && !field.locked}
-      multiline={field.multiline}
-      keyboardType={field.email ? "email-address" : "default"}
-      autoCapitalize={field.email ? "none" : "sentences"}
-    />
+      style={{
+        flexGrow: 1,
+        flexBasis:
+          field.multiline || field.email || field.key.endsWith("Id")
+            ? "100%"
+            : "45%",
+        minWidth: 130,
+      }}
+    >
+      <MobileInput
+        label={field.label}
+        accessibilityLabel={field.label}
+        required={field.required}
+        error={errors?.[field.key]}
+        value={value[field.key]}
+        onChangeText={(text) => set(field.key, text)}
+        placeholder={field.placeholder}
+        editable={!disabled && !field.locked}
+        multiline={field.multiline}
+        keyboardType={
+          field.email
+            ? "email-address"
+            : /Phone$/.test(field.key)
+              ? "phone-pad"
+              : /Amount$|Months$|monthlyRent|reservationPayment|balanceDue|^area$|^beds$|^baths$/.test(
+                    field.key,
+                  )
+                ? "decimal-pad"
+                : "default"
+        }
+        autoCapitalize={field.email ? "none" : "sentences"}
+        style={{ borderRadius: 12 }}
+      />
+    </View>
   );
-  const tab = (id: "tenant" | "landlord", label: string, fields: PartyField[]) => {
-    const selected = party === id;
-    const hasError = partyHasError(fields);
-    return (
-      <Pressable
-        key={id}
-        accessibilityRole="button"
-        accessibilityState={{ selected }}
-        disabled={disabled}
-        onPress={() => setParty(id)}
-        style={{
-          flex: 1,
-          minHeight: 44,
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: 999,
-          borderWidth: 1,
-          borderColor: selected ? "#F8B615" : hasError ? "#DC2626" : theme.border,
-          backgroundColor: selected ? "#FFFBEB" : theme.background,
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 14,
-            lineHeight: 21,
-            color: hasError && !selected ? "#DC2626" : theme.textHeading,
-            fontWeight: selected ? "600" : "400",
-          }}
-        >
-          {label}
-        </Text>
-      </Pressable>
-    );
+  const fields = (items: PartyField[]) => (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+      {items.map(renderField)}
+    </View>
+  );
+  const heading = {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    color: theme.textHeading,
   };
-
-  return (
-    <View style={{ gap: 16 }}>
+  const card = (
+    label: string,
+    children: React.ReactNode,
+    editStep?: number,
+  ) => (
+    <View
+      style={{
+        gap: 14,
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: theme.border,
+        backgroundColor: theme.surface,
+      }}
+    >
       <View
         style={{
-          gap: 10,
-          padding: 14,
-          borderRadius: 16,
-          borderWidth: 1,
-          borderColor: theme.border,
-          backgroundColor: theme.surface,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
         }}
       >
-        <Text style={{ fontSize: 16, lineHeight: 24, fontWeight: "600", color: theme.textHeading }}>
-          01 คู่สัญญา
-        </Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {tab("landlord", "ผู้ให้เช่า", LANDLORD_FIELDS)}
-          {tab("tenant", "ผู้จอง", TENANT_FIELDS)}
-        </View>
-        {party === "tenant" ? (
-          <Text style={{ fontSize: 13, lineHeight: 20, color: theme.textSecondary }}>
-            ดึงจากข้อมูลผู้เช่า แก้ไขไม่ได้
-          </Text>
-        ) : (
-          <>
-            <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-end" }}>
-              <View style={{ flex: 1 }}>
-                <MobileInput
-                  label="ค้นหาผู้ให้เช่า"
-                  value={ownerQuery}
-                  onChangeText={setOwnerQuery}
-                  placeholder="ชื่อ อีเมล หรือเบอร์"
-                  editable={!disabled}
-                />
-              </View>
+        <Text style={heading}>{label}</Text>
+        {editStep !== undefined && (
+          <Pressable
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`แก้ไข${label}`}
+            onPress={() => onStepChange?.(editStep)}
+            style={{
+              minHeight: 44,
+              justifyContent: "center",
+              paddingHorizontal: 8,
+            }}
+          >
+            <Text style={{ color: theme.textSecondary }}>แก้ไข</Text>
+          </Pressable>
+        )}
+      </View>
+      {children}
+    </View>
+  );
+  const amount = (raw: string) => {
+    if (!raw.trim()) return "ยังไม่ระบุ";
+    const number = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(number)
+      ? `${number.toLocaleString("th-TH")} บาท`
+      : raw;
+  };
+  const row = (label: string, text: string) => (
+    <View
+      key={label}
+      style={{ flexDirection: "row", gap: 12, justifyContent: "space-between" }}
+    >
+      <Text style={{ ...muted, flex: 1, lineHeight: 22 }}>{label}</Text>
+      <Text style={{ ...title, flex: 1, textAlign: "right", lineHeight: 22 }}>
+        {text || "ยังไม่ระบุ"}
+      </Text>
+    </View>
+  );
+  const chips = (children: React.ReactNode) => (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+      {children}
+    </View>
+  );
+  const chipStyle = (selected: boolean) => ({
+    minHeight: 44,
+    justifyContent: "center" as const,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: selected ? tokens.colors.brand[500] : theme.border,
+    backgroundColor: selected ? tokens.colors.brand[50] : theme.background,
+  });
+  const propertyFields = SECTIONS[0].fields;
+  const paymentFields = SECTIONS[1].fields;
+  return (
+    <View style={{ gap: 16 }}>
+      {step === 0 && (
+        <>
+          {card(
+            "ข้อมูลผู้จอง",
+            <>
+              <Text style={muted}>ดึงจากข้อมูลผู้เช่า · แก้ไขไม่ได้</Text>
+              {fields(TENANT_FIELDS)}
+            </>,
+          )}
+          {card(
+            "ผู้ให้เช่า",
+            <>
+              <MobileInput
+                label="ค้นหาผู้ให้เช่า"
+                value={ownerQuery}
+                onChangeText={setOwnerQuery}
+                placeholder="ชื่อ อีเมล หรือเบอร์"
+                editable={!disabled}
+              />
               <Pressable
                 accessibilityRole="button"
                 disabled={disabled}
                 onPress={addLandlord}
-                style={{
-                  minHeight: 44,
-                  justifyContent: "center",
-                  borderRadius: 12,
-                  backgroundColor: "#F8B615",
-                  paddingHorizontal: 12,
-                  marginBottom: 2,
-                }}
+                style={chipStyle(false)}
               >
-                <Text style={{ fontSize: 14, lineHeight: 21, fontWeight: "600", color: "#211E1E" }}>
-                  + เพิ่มผู้ให้เช่า
-                </Text>
+                <Text style={title}>+ เพิ่มผู้ให้เช่า</Text>
               </Pressable>
-            </View>
-            {ownerSearchError ? (
-              <Text style={{ fontSize: 13, lineHeight: 20, color: "#DC2626" }}>{ownerSearchError}</Text>
-            ) : null}
-            {!landlordOpen && errors?.landlordFirstName ? (
-              <Text style={{ fontSize: 13, lineHeight: 20, color: "#DC2626" }}>
-                เลือกผู้ให้เช่าจากผลค้นหา หรือกดเพิ่มผู้ให้เช่า
-              </Text>
-            ) : null}
-            {ownerHits.map((owner) => (
-              <Pressable
-                key={owner.id}
-                accessibilityRole="button"
-                disabled={disabled}
-                onPress={() => pickOwner(owner)}
-                style={{
-                  paddingVertical: 8,
-                  paddingHorizontal: 12,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  backgroundColor: theme.background,
-                }}
-              >
-                <Text style={{ fontSize: 14, lineHeight: 21, color: theme.textHeading }}>{owner.name}</Text>
-                <Text style={{ fontSize: 13, lineHeight: 20, color: theme.textSecondary }}>
-                  {[owner.email, owner.phone].filter(Boolean).join(" · ")}
+              {!!ownerSearchError && (
+                <Text style={{ color: tokens.colors.error }}>
+                  {ownerSearchError}
                 </Text>
-              </Pressable>
-            ))}
-          </>
-        )}
-        {party === "landlord" && !landlordOpen ? null : partyFields.map(renderField)}
-      </View>
-      <View
-        style={{
-          gap: 10,
-          padding: 14,
-          borderRadius: 16,
-          borderWidth: 1,
-          borderColor: theme.border,
-          backgroundColor: theme.surface,
-        }}
-      >
-        <Text style={{ fontSize: 16, lineHeight: 24, fontWeight: "600", color: theme.textHeading }}>
-          ผู้ประสานงาน
-        </Text>
-        {AGENT_FIELDS.map(renderField)}
-      </View>
-      {SECTIONS.map((section) => (
-        <View
-          key={section.title}
-          style={{
-            gap: 10,
-            padding: 14,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: theme.border,
-            backgroundColor: theme.surface,
-          }}
-        >
-          <Text
-            style={[
-              {
-                fontSize: 16,
-                lineHeight: 24,
-                fontWeight: "600",
-              },
-              title,
-            ]}
-          >
-            {section.title}
+              )}
+              {ownerHits.map((owner) => (
+                <Pressable
+                  key={owner.id}
+                  accessibilityRole="button"
+                  disabled={disabled}
+                  onPress={() => pickOwner(owner)}
+                  style={chipStyle(false)}
+                >
+                  <Text style={title}>{owner.name}</Text>
+                  <Text style={muted}>
+                    {[owner.email, owner.phone].filter(Boolean).join(" · ")}
+                  </Text>
+                </Pressable>
+              ))}
+              {landlordOpen ? (
+                fields(LANDLORD_FIELDS)
+              ) : (
+                <Text style={muted}>
+                  เลือกจากผลค้นหา หรือเพิ่มผู้ให้เช่าใหม่
+                </Text>
+              )}
+            </>,
+          )}
+          {card("ผู้ประสานงาน", fields(AGENT_FIELDS))}
+        </>
+      )}
+      {step === 1 && (
+        <>
+          <Text style={{ ...muted, lineHeight: 22 }}>
+            เลขเอกสาร: {value.documentNo || "ระบบกำหนด"} · วันที่จอง:{" "}
+            {reservationIssueDate(value.issueDate)}
           </Text>
-          {section.fields.map(renderField)}
-          {section.title.startsWith("03") ? (
+          {card(
+            "ข้อมูลทรัพย์สิน",
+            fields(
+              propertyFields
+                .slice(0, 7)
+                .map((field) => ({
+                  ...field,
+                  label:
+                    field.key === "beds"
+                      ? "ห้องนอน"
+                      : field.key === "baths"
+                        ? "ห้องน้ำ"
+                        : field.label,
+                })),
+            ),
+          )}
+          {card("ระยะเวลาการเช่า", fields(propertyFields.slice(7)))}
+        </>
+      )}
+      {step === 2 && (
+        <>
+          {card(
+            "ค่าเช่ารายเดือน",
             <>
-              <Text style={[{ fontSize: 14, lineHeight: 21 }, title]}>
-                นำไปหัก
+              {fields(paymentFields.slice(0, 1))}
+              <Text style={{ ...muted, lineHeight: 22 }}>
+                ({bahtWords(value.monthlyRent) || "……………………บาทถ้วน"})
               </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {(
+            </>,
+          )}
+          {card(
+            "ค่าเช่าล่วงหน้า",
+            <>
+              {fields(paymentFields.slice(1, 3))}
+              <Text style={{ ...muted, lineHeight: 22 }}>* ใส่วันจอง</Text>
+            </>,
+          )}
+          {card(
+            "เงินประกัน",
+            <>
+              {fields(paymentFields.slice(3, 5))}
+              <Text style={{ ...muted, lineHeight: 22 }}>* ใส่วันทำสัญญา</Text>
+            </>,
+          )}
+          {card(
+            "เงินจอง",
+            <>
+              {fields(paymentFields.slice(5, 6))}
+              <Text style={{ ...muted, lineHeight: 22 }}>
+                ตัวอักษร {bahtWords(value.reservationPayment) || "……………………"}
+              </Text>
+              <Text style={title}>นำไปหัก</Text>
+              {chips(
+                (
                   [
                     ["applyToAdvance", "ค่าเช่าล่วงหน้า"],
                     ["applyToDeposit", "เงินประกัน"],
                   ] as const
-                ).map(([key, label]) => {
-                  const selected = value[key];
-                  return (
-                    <Pressable
-                      key={key}
-                      disabled={disabled}
-                      onPress={() => onChange({ ...value, [key]: !selected })}
+                ).map(([key, label]) => (
+                  <Pressable
+                    key={key}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: value[key] }}
+                    disabled={disabled}
+                    onPress={() => onChange({ ...value, [key]: !value[key] })}
+                    style={chipStyle(value[key])}
+                  >
+                    <Text
                       style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: 999,
-                        borderWidth: 1,
-                        borderColor: selected ? "#F8B615" : theme.border,
-                        backgroundColor: selected ? "#FFFBEB" : theme.background,
+                        color: value[key]
+                          ? tokens.colors.onBrand
+                          : theme.textHeading,
+                        lineHeight: 22,
                       }}
                     >
-                      <Text style={[{ fontSize: 13, lineHeight: 19 }, title]}>
-                        {selected ? "✓ " : ""}
-                        {label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text style={[{ fontSize: 14, lineHeight: 21 }, title]}>
-                วิธีชำระ
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {PAYMENT_OPTIONS.map((option) => {
-                  const selected = value.paymentMethod === option.value;
-                  return (
-                    <Pressable
-                      key={option.value || "none"}
-                      disabled={disabled}
-                      onPress={() =>
-                        onChange({ ...value, paymentMethod: option.value })
-                      }
+                      {value[key] ? "✓ " : "□ "}
+                      {label}
+                    </Text>
+                  </Pressable>
+                )),
+              )}
+              {fields([paymentFields[6]])}
+            </>,
+          )}
+          {card("ผู้รับเงิน", fields(paymentFields.slice(7, 8)))}
+          {card(
+            "ช่องทางชำระ",
+            <>
+              {chips(
+                PAYMENT_OPTIONS.map((option) => (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{
+                      checked: value.paymentMethod === option.value,
+                    }}
+                    disabled={disabled}
+                    onPress={() =>
+                      onChange({
+                        ...value,
+                        paymentMethod:
+                          value.paymentMethod === option.value ? "" : option.value,
+                      })
+                    }
+                    style={chipStyle(value.paymentMethod === option.value)}
+                  >
+                    <Text
                       style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        borderRadius: 999,
-                        borderWidth: 1,
-                        borderColor: selected ? "#F8B615" : theme.border,
-                        backgroundColor: selected ? "#FFFBEB" : theme.background,
+                        color:
+                          value.paymentMethod === option.value
+                            ? tokens.colors.onBrand
+                            : theme.textHeading,
+                        lineHeight: 22,
                       }}
                     >
-                      <Text style={[{ fontSize: 13, lineHeight: 19 }, title]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Text style={[{ fontSize: 12, lineHeight: 18 }, muted]}>
-                เงื่อนไขการจองและคืนเงินอยู่ในแม่แบบ PDF แล้ว
-              </Text>
-            </>
-          ) : null}
-        </View>
-      ))}
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                )),
+              )}
+              {fields(
+                paymentFields.slice(8, 9).map((field) => ({
+                  ...field,
+                  label: "ธนาคาร ชื่อและเลขบัญชี",
+                  multiline: true,
+                })),
+              )}
+            </>,
+          )}
+        </>
+      )}
+      {step === 3 && (
+        <>
+          {card(
+            "คู่สัญญา",
+            <>
+              {row(
+                "ผู้จอง",
+                [value.tenantFirstName, value.tenantLastName]
+                  .filter(Boolean)
+                  .join(" ") || value.tenantName,
+              )}
+              {row(
+                "ติดต่อผู้จอง",
+                [value.tenantPhone, value.tenantEmail]
+                  .filter(Boolean)
+                  .join("\n"),
+              )}
+              {row(
+                "ผู้ให้เช่า",
+                value.landlordName ||
+                  [value.landlordFirstName, value.landlordLastName]
+                    .filter(Boolean)
+                    .join(" "),
+              )}
+              {row(
+                "ติดต่อผู้ให้เช่า",
+                [value.landlordPhone, value.landlordEmail]
+                  .filter(Boolean)
+                  .join("\n"),
+              )}
+              {row(
+                "ผู้ประสานงาน",
+                [value.agentName, value.companyName, value.agentPhone]
+                  .filter(Boolean)
+                  .join("\n"),
+              )}
+            </>,
+            0,
+          )}
+          {card(
+            "ห้องและสัญญา",
+            <>
+              {row("โครงการ", value.project)}
+              {row("ที่อยู่", value.address)}
+              {row(
+                "ห้อง / ชั้น",
+                [value.unitNo, value.floor].filter(Boolean).join(" / "),
+              )}
+              {row(
+                "พื้นที่ / นอน / น้ำ",
+                [
+                  value.area ? `${value.area} ตร.ม.` : "—",
+                  value.beds || "—",
+                  value.baths || "—",
+                ].join(" / "),
+              )}
+              {row(
+                "ระยะเวลา",
+                value.termMonths ? `${value.termMonths} เดือน` : "",
+              )}
+              {row("วันที่เข้าอยู่", value.termFrom)}
+              {row("วันสิ้นสุด", value.termTo)}
+            </>,
+            1,
+          )}
+          {card(
+            "จำนวนเงิน",
+            <>
+              {row("ค่าเช่ารายเดือน", amount(value.monthlyRent))}
+              {row(
+                `ค่าเช่าล่วงหน้า${value.advanceMonths ? ` (${value.advanceMonths} เดือน)` : ""}`,
+                amount(value.advanceAmount),
+              )}
+              {row(
+                `เงินประกัน${value.depositMonths ? ` (${value.depositMonths} เดือน)` : ""}`,
+                amount(value.depositAmount),
+              )}
+              {row("เงินจอง", amount(value.reservationPayment))}
+              {row(
+                "นำไปหัก",
+                [
+                  value.applyToAdvance && "ค่าเช่าล่วงหน้า",
+                  value.applyToDeposit && "เงินประกัน",
+                ]
+                  .filter(Boolean)
+                  .join(" / "),
+              )}
+              {row("ยอดคงเหลือ", amount(value.balanceDue))}
+              {row(
+                "วิธีชำระ",
+                PAYMENT_OPTIONS.find(
+                  (option) => option.value === value.paymentMethod,
+                )?.label || value.paymentMethod,
+              )}
+              {row("ผู้รับเงิน", value.payee)}
+              {row("บัญชีรับเงิน", value.bankAccount)}
+            </>,
+            2,
+          )}
+          {card("ชื่อใต้ลายเซ็น", fields(paymentFields.slice(9)))}
+          <Text style={{ ...muted, lineHeight: 20 }}>
+            เงื่อนไขการจองและคืนเงินอยู่ในแม่แบบ PDF แล้ว
+          </Text>
+        </>
+      )}
     </View>
   );
 }

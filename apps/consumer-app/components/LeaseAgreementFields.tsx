@@ -1,6 +1,6 @@
 import React from "react";
-import { Text, View } from "react-native";
-import { MobileInput, useMobileTheme } from "@nestyk/ui/native";
+import { Pressable, Text, View } from "react-native";
+import { MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { LeaseAgreementInput } from "@nestyk/types";
 
 type TextField = Exclude<
@@ -106,10 +106,7 @@ export function leaseAgreementFieldErrors(
     if (!String(value[key] ?? "").trim()) errors[key] = REQUIRED_MESSAGE;
   }
   for (const key of ["issueDate", "termFrom", "termTo"] as const) {
-    if (
-      value[key].trim() &&
-      !/^\d{4}-\d{2}-\d{2}$/.test(value[key].trim())
-    )
+    if (value[key].trim() && !/^\d{4}-\d{2}-\d{2}$/.test(value[key].trim()))
       errors[key] = "รูปแบบวันที่ไม่ถูกต้อง (YYYY-MM-DD)";
   }
   if (
@@ -203,73 +200,466 @@ const FIELDS: Array<{
   },
 ];
 
+/** Maps existing validation errors back to the section where they can be corrected. */
+export function leaseAgreementFieldStep(key: string): number {
+  if (
+    key === "issueDate" ||
+    key.startsWith("landlord") ||
+    key.startsWith("tenant")
+  )
+    return 0;
+  if (
+    [
+      "propertyType",
+      "project",
+      "houseNo",
+      "propertyAddress",
+      "roomType",
+      "floor",
+      "area",
+      "termMonths",
+      "termFrom",
+      "termTo",
+    ].includes(key)
+  )
+    return 1;
+  if (["additionalTerms", "agentContact", "witnessSignName"].includes(key))
+    return 3;
+  return 2;
+}
+
 export function LeaseAgreementFields({
   value,
   onChange,
   disabled,
   errors,
+  step,
+  onStepChange,
 }: {
   value: LeaseAgreementInput;
   onChange: (next: LeaseAgreementInput) => void;
   disabled?: boolean;
   errors?: Partial<Record<TextField, string>>;
+  step?: number;
+  onStepChange?: (step: number) => void;
 }) {
   const { theme } = useMobileTheme();
-  return (
+  const body = {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    color: theme.textHeading,
+  };
+  const renderFields = (keys: TextField[]) => (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+      {keys.map((key) => {
+        const field = FIELDS.find((item) => item.key === key)!;
+        const wide =
+          field.multiline ||
+          /Email$|Id$|Words$/.test(key) ||
+          [
+            "project",
+            "propertyType",
+            "monthlyRent",
+            "accountNo",
+            "issueDate",
+            "otherInitialPayment",
+          ].includes(key);
+        return (
+          <View
+            key={key}
+            style={{
+              flexGrow: 1,
+              flexBasis: wide ? "100%" : "45%",
+              minWidth: 130,
+              justifyContent: "flex-end",
+            }}
+          >
+            <MobileInput
+              label={field.label}
+              accessibilityLabel={field.label}
+              required={field.required}
+              error={errors?.[field.key]}
+              value={value[field.key]}
+              onChangeText={(text) => {
+                const next = { ...value, [field.key]: text };
+                if (
+                  field.key === "landlordFirstName" ||
+                  field.key === "landlordLastName"
+                ) {
+                  const full = [next.landlordFirstName, next.landlordLastName]
+                    .map((part) => part.trim())
+                    .filter(Boolean)
+                    .join(" ");
+                  next.landlordName = full;
+                  next.landlordSignName = full;
+                }
+                if (
+                  field.key === "tenantFirstName" ||
+                  field.key === "tenantLastName"
+                ) {
+                  const full = [next.tenantFirstName, next.tenantLastName]
+                    .map((part) => part.trim())
+                    .filter(Boolean)
+                    .join(" ");
+                  next.tenantName = full;
+                  next.tenantSignName = full;
+                }
+                if (
+                  field.key === "agentContact" &&
+                  !value.witnessSignName.trim()
+                )
+                  next.witnessSignName = text;
+                onChange(next);
+              }}
+              placeholder={field.placeholder}
+              editable={!disabled}
+              multiline={field.multiline}
+              autoCapitalize={key.endsWith("Email") ? "none" : "sentences"}
+              keyboardType={
+                key.endsWith("Email")
+                  ? "email-address"
+                  : key.endsWith("Phone")
+                    ? "phone-pad"
+                    : /Months$|Amount$/.test(key) ||
+                        [
+                          "area",
+                          "monthlyRent",
+                          "latePenalty",
+                          "rentDueDay",
+                          "graceDay",
+                        ].includes(key)
+                      ? "decimal-pad"
+                      : "default"
+              }
+              style={{ borderRadius: 12 }}
+            />
+          </View>
+        );
+      })}
+    </View>
+  );
+  const card = (
+    title: string,
+    children: React.ReactNode,
+    editStep?: number,
+  ) => (
     <View
       style={{
-        gap: 10,
-        padding: 14,
+        padding: 16,
+        gap: 14,
         borderRadius: 16,
         borderWidth: 1,
         borderColor: theme.border,
         backgroundColor: theme.surface,
       }}
     >
-      <Text
+      <View
         style={{
-          fontSize: 16,
-          lineHeight: 24,
-          fontWeight: "600",
-          color: theme.textHeading,
+          flexDirection: "row",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 8,
         }}
       >
-        รายละเอียดสัญญาเช่า
-      </Text>
-      {FIELDS.map((field) => (
-        <MobileInput
-          key={field.key}
-          label={field.label}
-          required={field.required}
-          error={errors?.[field.key]}
-          value={value[field.key]}
-          onChangeText={(text) => {
-            const next = { ...value, [field.key]: text };
-            if (field.key === "landlordFirstName" || field.key === "landlordLastName") {
-              const full = [next.landlordFirstName, next.landlordLastName]
-                .map((part) => part.trim())
-                .filter(Boolean)
-                .join(" ");
-              next.landlordName = full;
-              next.landlordSignName = full;
-            }
-            if (field.key === "tenantFirstName" || field.key === "tenantLastName") {
-              const full = [next.tenantFirstName, next.tenantLastName]
-                .map((part) => part.trim())
-                .filter(Boolean)
-                .join(" ");
-              next.tenantName = full;
-              next.tenantSignName = full;
-            }
-            if (field.key === "agentContact" && !value.witnessSignName.trim())
-              next.witnessSignName = text;
-            onChange(next);
+        <Text
+          accessibilityRole="header"
+          style={{
+            ...body,
+            fontFamily: tokens.typography.native.headingTh,
+            fontSize: 16,
+            lineHeight: 24,
+            flex: 1,
           }}
-          placeholder={field.placeholder}
-          editable={!disabled}
-          multiline={field.multiline}
-        />
-      ))}
+        >
+          {title}
+        </Text>
+        {editStep !== undefined && onStepChange && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`แก้ไข${title}`}
+            disabled={disabled}
+            onPress={() => onStepChange(editStep)}
+            style={{
+              minHeight: 44,
+              justifyContent: "center",
+              paddingHorizontal: 8,
+            }}
+          >
+            <Text style={{ ...body, color: theme.textSecondary }}>แก้ไข</Text>
+          </Pressable>
+        )}
+      </View>
+      {children}
+    </View>
+  );
+  const row = (label: string, text: string) => (
+    <View key={label} style={{ flexDirection: "row", gap: 12 }}>
+      <Text style={{ ...body, color: theme.textSecondary, flex: 1 }}>
+        {label}
+      </Text>
+      <Text style={{ ...body, flex: 1, textAlign: "right" }}>
+        {text || "ยังไม่ระบุ"}
+      </Text>
+    </View>
+  );
+  const amount = (text: string) => {
+    const number = Number(text.replace(/,/g, ""));
+    return text.trim() && Number.isFinite(number)
+      ? `${number.toLocaleString("th-TH")} บาท`
+      : text;
+  };
+  const dateLabel = (text: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const date = new Date(`${text}T00:00:00`);
+    return Number.isNaN(date.getTime())
+      ? text
+      : date.toLocaleDateString("th-TH", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        });
+  };
+  const shown = (index: number) => step === undefined || step === index;
+  return (
+    <View style={{ gap: 16 }}>
+      {shown(0) && (
+        <>
+          {card("ข้อมูลเอกสาร", renderFields(["issueDate"]))}
+          {card(
+            "ผู้ให้เช่า",
+            renderFields([
+              "landlordFirstName",
+              "landlordLastName",
+              "landlordNationality",
+              "landlordId",
+              "landlordAddress",
+              "landlordPhone",
+              "landlordEmail",
+            ]),
+          )}
+          {card(
+            "ผู้เช่า",
+            renderFields([
+              "tenantFirstName",
+              "tenantLastName",
+              "tenantNationality",
+              "tenantId",
+              "tenantAddress",
+              "tenantPhone",
+              "tenantEmail",
+            ]),
+          )}
+        </>
+      )}
+      {shown(1) && (
+        <>
+          {card(
+            "ทรัพย์สินที่เช่า",
+            renderFields([
+              "propertyType",
+              "project",
+              "houseNo",
+              "propertyAddress",
+              "roomType",
+              "floor",
+              "area",
+            ]),
+          )}
+          {card(
+            "ระยะเวลาการเช่า",
+            <>
+              {renderFields(["termMonths", "termFrom", "termTo"])}
+              {!!value.termFrom &&
+                !!value.termTo &&
+                !errors?.termFrom &&
+                !errors?.termTo && (
+                  <View
+                    style={{
+                      backgroundColor: tokens.colors.brand[50],
+                      padding: 12,
+                      borderRadius: 12,
+                    }}
+                  >
+                    <Text style={{ ...body, color: tokens.colors.onBrand }}>
+                      {[
+                        value.termMonths ? `${value.termMonths} เดือน` : "",
+                        `${dateLabel(value.termFrom)} – ${dateLabel(value.termTo)}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </Text>
+                  </View>
+                )}
+            </>,
+          )}
+        </>
+      )}
+      {shown(2) && (
+        <>
+          {card(
+            "ค่าเช่ารายเดือน",
+            renderFields(["monthlyRent", "monthlyRentWords"]),
+          )}
+          {card(
+            "กำหนดชำระและเบี้ยปรับ",
+            renderFields([
+              "rentDueDay",
+              "graceDay",
+              "latePenalty",
+              "latePenaltyWords",
+            ]),
+          )}
+          {card(
+            "บัญชีรับชำระ",
+            renderFields([
+              "bankName",
+              "accountName",
+              "accountNo",
+              "otherPaymentMethod",
+            ]),
+          )}
+          {card(
+            "ค่าใช้จ่ายแรกเข้า",
+            renderFields([
+              "advanceMonths",
+              "advanceAmount",
+              "depositMonths",
+              "depositAmount",
+              "otherInitialPayment",
+            ]),
+          )}
+        </>
+      )}
+      {shown(3) && (
+        <>
+          {card("ข้อตกลงเพิ่มเติม", renderFields(["additionalTerms"]))}
+          {card("ผู้ประสานงาน / พยาน", renderFields(["agentContact"]))}
+          {step === 3 && (
+            <>
+              {card(
+                "คู่สัญญา",
+                <>
+                  {row("วันที่ออกเอกสาร", dateLabel(value.issueDate))}
+                  {row(
+                    "ผู้ให้เช่า",
+                    value.landlordName ||
+                      [value.landlordFirstName, value.landlordLastName]
+                        .filter(Boolean)
+                        .join(" "),
+                  )}
+                  {row(
+                    "ติดต่อผู้ให้เช่า",
+                    [value.landlordPhone, value.landlordEmail]
+                      .filter(Boolean)
+                      .join("\n"),
+                  )}
+                  {row(
+                    "ผู้เช่า",
+                    value.tenantName ||
+                      [value.tenantFirstName, value.tenantLastName]
+                        .filter(Boolean)
+                        .join(" "),
+                  )}
+                  {row(
+                    "ติดต่อผู้เช่า",
+                    [value.tenantPhone, value.tenantEmail]
+                      .filter(Boolean)
+                      .join("\n"),
+                  )}
+                </>,
+                0,
+              )}
+              {card(
+                "ห้องและระยะเวลา",
+                <>
+                  {row(
+                    "ทรัพย์สิน",
+                    [value.propertyType, value.project]
+                      .filter(Boolean)
+                      .join(" · "),
+                  )}
+                  {row("บ้านเลขที่ / ห้อง", value.houseNo)}
+                  {row("ที่อยู่ทรัพย์สิน", value.propertyAddress)}
+                  {row("ประเภทห้อง", value.roomType)}
+                  {row("ชั้น", value.floor)}
+                  {row("ขนาดห้อง", value.area ? `${value.area} ตร.ม.` : "")}
+                  {row(
+                    "ระยะเวลาเช่า",
+                    value.termMonths ? `${value.termMonths} เดือน` : "",
+                  )}
+                  {row("เริ่มวันที่", dateLabel(value.termFrom))}
+                  {row("สิ้นสุดวันที่", dateLabel(value.termTo))}
+                </>,
+                1,
+              )}
+              {card(
+                "ค่าเช่าและการชำระ",
+                <>
+                  {row("ค่าเช่ารายเดือน", amount(value.monthlyRent))}
+                  {row(
+                    "กำหนดชำระ",
+                    value.rentDueDay
+                      ? `วันที่ ${value.rentDueDay} ของเดือน`
+                      : "",
+                  )}
+                  {row("ผ่อนผันถึงวันที่", value.graceDay)}
+                  {row("เบี้ยปรับต่อวัน", amount(value.latePenalty))}
+                  {row(
+                    "ค่าเช่าล่วงหน้า",
+                    [
+                      amount(value.advanceAmount),
+                      value.advanceMonths
+                        ? `(${value.advanceMonths} เดือน)`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" "),
+                  )}
+                  {row(
+                    "เงินประกัน",
+                    [
+                      amount(value.depositAmount),
+                      value.depositMonths
+                        ? `(${value.depositMonths} เดือน)`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" "),
+                  )}
+                  {row("รายการแรกเข้าอื่น", value.otherInitialPayment)}
+                  {row(
+                    "บัญชีรับชำระ",
+                    [value.bankName, value.accountName, value.accountNo]
+                      .filter(Boolean)
+                      .join("\n"),
+                  )}
+                  {row("ช่องทางชำระอื่น", value.otherPaymentMethod)}
+                </>,
+                2,
+              )}
+              {card(
+                "ชื่อผู้ลงนาม",
+                <>
+                  {row("ผู้ให้เช่า", value.landlordSignName)}
+                  {row("ผู้เช่า", value.tenantSignName)}
+                  {row("พยาน", value.witnessSignName)}
+                  <Text
+                    style={{
+                      ...body,
+                      color: theme.textSecondary,
+                      fontSize: 12,
+                      lineHeight: 18,
+                    }}
+                  >
+                    อ้างอิงจากข้อมูลคู่สัญญาและพยาน
+                  </Text>
+                </>,
+              )}
+            </>
+          )}
+        </>
+      )}
     </View>
   );
 }
