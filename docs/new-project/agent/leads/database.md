@@ -63,7 +63,7 @@ Only name and phone are mandatory. Existing budget fields and desired room type 
 
 | User field | Database column | Format |
 |---|---|---|
-| ชื่อ * | name | required text |
+| ชื่อ * / นามสกุล | first_name / last_name | given name required, surname optional (`20260930-lead-tenant-given-names.sql`). `name` is stored as "first last" for search and display; clients that send only `name` get it split on the first space |
 | เบอร์ติดต่อ * | phone | required; app sends E.164 (`+66812345678`) from a country picker. API normalizes any "+" value to E.164 and rejects malformed ones; values without "+" are legacy text kept as typed |
 | อีเมล | email | optional, valid address |
 | ช่องทางติดต่ออื่น | other_contacts | up to 5 `{channel, value}` (LINE, WhatsApp, WeChat, Facebook, Telegram, อื่นๆ) |

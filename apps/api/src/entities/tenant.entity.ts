@@ -11,6 +11,12 @@ export class TenantEntity extends SerialTimestampEntity {
   @Column({ type: 'varchar', length: 255 })
   name: string;
 
+  @Column({ type: 'varchar', length: 255, default: '' })
+  first_name: string;
+
+  @Column({ type: 'varchar', length: 255, default: '' })
+  last_name: string;
+
   @Column({ type: 'varchar', length: 50 })
   phone: string;
 
@@ -19,6 +25,12 @@ export class TenantEntity extends SerialTimestampEntity {
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   note: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  identity_number: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  nationality: string | null;
 
   @Column({ type: 'int', nullable: true })
   user_id: number | null;

@@ -29,7 +29,8 @@ Query: `rentRoomId`, `status`, `q` (name/phone), `sort`, `page`, `limit`
 ```json
 {
   "rentRoomId": 42,
-  "name": "สมหญิง ใจดี",
+  "firstName": "สมหญิง",
+  "lastName": "ใจดี",
   "phone": "0898765432",
   "email": "somying@email.com",
   "otherContacts": [{ "channel": "line", "value": "@somying" }],

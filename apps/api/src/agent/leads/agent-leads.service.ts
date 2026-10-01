@@ -114,10 +114,10 @@ export function validateLead(input: unknown): CreateLeadInput {
     if ((result.locations as string[]).some((v) => !v || v === '-')) throw new BadRequestException('Invalid locations');
     if (locations.length > 0 && !result.province) throw new BadRequestException('A valid province is required for a location');
   }
-  const textFields = { name: 255, phone: 50, nationality: 120, preferredLocation: 500, moveInPlan: 255, occupation: 255, notes: 500 };
+  const textFields = { firstName: 255, lastName: 255, phone: 50, nationality: 120, preferredLocation: 500, moveInPlan: 255, occupation: 255, notes: 500 };
   for (const [key, max] of Object.entries(textFields)) {
     const value = body[key];
-    const required = key === 'name' || key === 'phone';
+    const required = key === 'phone';
     if (value == null && !required) { result[key] = null; continue; }
     if (typeof value !== 'string' || value.trim().length > max || (required && !value.trim())) throw new BadRequestException(`${key} ${required ? 'is required and ' : ''}must be text up to ${max} characters`);
     result[key] = value.trim() || null;
@@ -130,6 +130,16 @@ export function validateLead(input: unknown): CreateLeadInput {
   }
   result.email = validateEmail(body.email);
   result.otherContacts = validateContacts(body.otherContacts);
+  // Older clients send only `name`; split it so given name / surname stay filled.
+  if (!result.firstName && typeof body.name === 'string' && body.name.trim()) {
+    const parts = body.name.trim().split(/\s+/);
+    result.firstName = parts[0];
+    if (!result.lastName) result.lastName = parts.slice(1).join(' ') || null;
+  }
+  if (typeof result.firstName !== 'string' || !result.firstName) throw new BadRequestException('firstName is required and must be text up to 255 characters');
+  result.lastName = typeof result.lastName === 'string' ? result.lastName : '';
+  result.name = [result.firstName, result.lastName].filter(Boolean).join(' ');
+  if ((result.name as string).length > 255) throw new BadRequestException('First and last name together must be up to 255 characters');
   for (const key of ['hasPets', 'usesCar', 'isSmoker']) {
     if (body[key] != null && typeof body[key] !== 'boolean') throw new BadRequestException(`${key} must be true, false or null`);
     result[key] = body[key] ?? null;
@@ -214,7 +224,14 @@ export class AgentLeadsService {
   async update(agentId: number, id: number, input: unknown) {
     const existing = await this.requireLead(agentId, id);
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Lead data is required');
-    const b = validateLead({ ...toLead(existing), ...input });
+    const patch = input as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...toLead(existing), ...patch };
+    // A renamed lead sent as `name` only must be re-split, not rebuilt from the stored given name.
+    if ('name' in patch && !('firstName' in patch)) {
+      delete merged.firstName;
+      delete merged.lastName;
+    }
+    const b = validateLead(merged);
     await this.validateReferences(b);
     await this.leads.manager.transaction(async (em) => {
       await em.getRepository(LeadEntity).update({ id, created_by_user_id: agentId }, leadColumns(b));
@@ -247,7 +264,7 @@ export class AgentLeadsService {
     if (q) {
       const phoneDigits = phoneSearchDigits(q);
       const phoneSql = phoneDigits.length ? " OR regexp_replace(lead.phone, '\\D', '', 'g') LIKE ANY(CAST(:phoneDigits AS text[]))" : '';
-      qb.andWhere(`(lead.name ILIKE :q OR lead.phone ILIKE :q${phoneSql} OR lead.preferred_location ILIKE :q OR lead.province ILIKE :q OR array_to_string(lead.locations, ', ') ILIKE :q OR EXISTS (SELECT 1 FROM lead_locations pin WHERE pin.lead_id = lead.id AND pin.name ILIKE :q))`, {
+      qb.andWhere(`(lead.name ILIKE :q OR lead.first_name ILIKE :q OR lead.last_name ILIKE :q OR lead.phone ILIKE :q${phoneSql} OR lead.preferred_location ILIKE :q OR lead.province ILIKE :q OR array_to_string(lead.locations, ', ') ILIKE :q OR EXISTS (SELECT 1 FROM lead_locations pin WHERE pin.lead_id = lead.id AND pin.name ILIKE :q))`, {
         q: `%${q.replace(/[\\%_]/g, '\\$&')}%`,
         phoneDigits: phoneDigits.map((d) => `%${d}%`),
       });
@@ -295,7 +312,8 @@ export class AgentLeadsService {
 function leadColumns(b: CreateLeadInput) {
   return {
     radius_km: b.radiusKm ?? null, province: b.province ?? null, locations: b.locations ?? [],
-    name: b.name, phone: b.phone, email: b.email ?? null, other_contacts: b.otherContacts ?? [],
+    name: b.name, first_name: b.firstName ?? '', last_name: b.lastName ?? '',
+    phone: b.phone, email: b.email ?? null, other_contacts: b.otherContacts ?? [],
     nationality: b.nationality ?? null,
     budget_min: b.budgetMin == null ? null : String(b.budgetMin), budget_max: b.budgetMax == null ? null : String(b.budgetMax),
     preferred_location: b.preferredLocation ?? null, move_in_plan: b.moveInPlan ?? null, has_pets: b.hasPets ?? null,
@@ -385,7 +403,8 @@ function toLead(row: LeadEntity) {
   return {
     pins, radiusKm: row.radius_km ?? null,
     province: row.province ?? null, locations: row.locations ?? [],
-    id: row.id, name: row.name, phone: row.phone, email: row.email ?? null,
+    id: row.id, name: row.name, firstName: row.first_name ?? '', lastName: row.last_name ?? '',
+    phone: row.phone, email: row.email ?? null,
     otherContacts: (row.other_contacts ?? []) as LeadContact[], nationality: row.nationality,
     budgetMin: row.budget_min == null ? null : Number(row.budget_min), budgetMax: row.budget_max == null ? null : Number(row.budget_max),
     preferredLocation: row.preferred_location, moveInPlan: row.move_in_plan, hasPets: row.has_pets,

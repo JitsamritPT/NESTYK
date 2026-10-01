@@ -29,10 +29,19 @@ export function financialTotals(
 export function validateFinancialDocument(
   input: unknown,
   kind: FinancialDocumentKind,
+  options?: { paymentMethodOptional?: boolean },
 ): FinancialDocumentInput {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new BadRequestException("ข้อมูลเอกสารไม่ถูกต้อง");
   const obj = input as Record<string, unknown>;
+  const customerFirst =
+    typeof obj.customerFirstName === "string" ? obj.customerFirstName.trim() : "";
+  const customerLast =
+    typeof obj.customerLastName === "string" ? obj.customerLastName.trim() : "";
+  if (customerFirst)
+    obj.customerName = [customerFirst, customerLast].filter(Boolean).join(" ");
+  if (obj.customerFirstName == null) obj.customerFirstName = "";
+  if (obj.customerLastName == null) obj.customerLastName = "";
   const result: Record<string, unknown> = {};
   const limits: Record<string, number> = {
     documentNo: 40,
@@ -40,6 +49,8 @@ export function validateFinancialDocument(
     dueDate: 10,
     reference: 60,
     customerName: 120,
+    customerFirstName: 120,
+    customerLastName: 120,
     customerAddress: 240,
     customerTaxId: 13,
     customerPhone: 40,
@@ -61,7 +72,12 @@ export function validateFinancialDocument(
     "customerAddress",
     "issuerName",
     "issuerAddress",
-    ...(kind === "invoice" ? ["dueDate"] : ["paymentMethod", "receiverName"]),
+    ...(kind === "invoice"
+      ? ["dueDate"]
+      : [
+          ...(options?.paymentMethodOptional ? [] : ["paymentMethod"]),
+          "receiverName",
+        ]),
   ]);
   for (const [key, limit] of Object.entries(limits)) {
     if (obj[key] != null && typeof obj[key] !== "string")
@@ -97,14 +113,13 @@ export function validateFinancialDocument(
       throw new BadRequestException("รูปแบบอีเมลไม่ถูกต้อง");
   if (
     kind === "receipt" &&
-    !["cash", "transfer", "cheque", "other"].includes(
-      String(result.paymentMethod),
-    )
+    result.paymentMethod &&
+    !["cash", "transfer"].includes(String(result.paymentMethod))
   )
     throw new BadRequestException("กรุณาเลือกวิธีชำระเงิน");
   if (
     kind === "receipt" &&
-    result.paymentMethod !== "cash" &&
+    result.paymentMethod === "transfer" &&
     !result.paymentDetails
   )
     throw new BadRequestException("กรุณาระบุรายละเอียดการชำระเงิน");
@@ -177,6 +192,7 @@ export function buildReceiptFromInvoice(
   invoice: FinancialDocumentInput,
   overrides: Partial<FinancialDocumentInput>,
   defaults: { documentNo: string; issueDate: string },
+  options?: { paymentMethodOptional?: boolean },
 ): FinancialDocumentInput {
   return validateFinancialDocument(
     {
@@ -197,6 +213,7 @@ export function buildReceiptFromInvoice(
       vatRate: invoice.vatRate,
     },
     "receipt",
+    options,
   );
 }
 

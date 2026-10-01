@@ -40,10 +40,13 @@ export function TenantForm({
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const [form, setForm] = useState({
-    name: "",
+    firstName: "",
+    lastName: "",
     phone: "",
     email: "",
     note: "",
+    identityNumber: "",
+    nationality: "",
   });
   const title = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
@@ -102,7 +105,7 @@ export function TenantForm({
     </Pressable>
   );
   function review() {
-    if (!form.name.trim() || !form.phone.trim() || !room) {
+    if (!form.firstName.trim() || !form.phone.trim() || !room) {
       setError("กรุณากรอกชื่อ เบอร์โทร และเลือกห้องที่เช่า");
       return;
     }
@@ -135,7 +138,14 @@ export function TenantForm({
         await createAgentTenant({
           leadId: lead.id,
           rentRoomId: room.id,
-          ...form,
+          name: [form.firstName.trim(), form.lastName.trim()].filter(Boolean).join(" "),
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          phone: form.phone,
+          email: form.email,
+          note: form.note,
+          identityNumber: form.identityNumber,
+          nationality: form.nationality,
         }),
       );
     } catch (e) {
@@ -218,10 +228,15 @@ export function TenantForm({
                       if (lead?.id !== l.id) {
                         setLead(l);
                         setForm({
-                          name: l.name,
+                          firstName: l.firstName || l.name.trim().split(/\s+/)[0] || "",
+                          lastName:
+                            l.lastName ||
+                            l.name.trim().split(/\s+/).slice(1).join(" "),
                           phone: l.phone,
                           email: l.email || "",
                           note: "",
+                          identityNumber: "",
+                          nationality: l.nationality || "",
                         });
                       }
                     }}
@@ -270,9 +285,16 @@ export function TenantForm({
             </Text>
             {(
               [
-                ["name", "ชื่อ–นามสกุล *", "ชื่อที่ใช้ในสัญญา"],
+                ["firstName", "ชื่อ *", "ชื่อ"],
+                ["lastName", "นามสกุล", "ไม่บังคับ"],
                 ["phone", "เบอร์โทร *", "เบอร์โทรที่ติดต่อได้"],
                 ["email", "อีเมล", "name@example.com"],
+                [
+                  "identityNumber",
+                  "เลขบัตรประชาชน / พาสปอร์ต",
+                  "เช่น 1-2345-67890-12-3 หรือ A1234567",
+                ],
+                ["nationality", "สัญชาติ", "เช่น ไทย"],
                 ["note", "หมายเหตุ", "ข้อมูลเพิ่มเติมเกี่ยวกับผู้เช่า"],
               ] as const
             ).map(([key, label, placeholder]) => (
@@ -285,7 +307,17 @@ export function TenantForm({
                     setForm((current) => ({ ...current, [key]: value }))
                   }
                   placeholder={placeholder}
-                  maxLength={key === "note" ? 500 : key === "phone" ? 50 : 255}
+                  maxLength={
+                    key === "note"
+                      ? 500
+                      : key === "phone"
+                        ? 50
+                        : key === "identityNumber"
+                          ? 100
+                          : key === "nationality"
+                            ? 120
+                            : 255
+                  }
                   keyboardType={
                     key === "phone"
                       ? "phone-pad"
@@ -293,7 +325,11 @@ export function TenantForm({
                         ? "email-address"
                         : "default"
                   }
-                  autoCapitalize={key === "email" ? "none" : "sentences"}
+                  autoCapitalize={
+                    key === "email" || key === "identityNumber"
+                      ? "none"
+                      : "sentences"
+                  }
                 />
               </View>
             ))}
@@ -356,9 +392,15 @@ export function TenantForm({
             {(
               [
                 ["Lead ต้นทาง", lead?.name],
-                ["ชื่อผู้เช่า", form.name],
+                ["ชื่อ", form.firstName],
+                ["นามสกุล", form.lastName || "ไม่ระบุ"],
                 ["เบอร์โทร", form.phone],
                 ["อีเมล", form.email || "ไม่ระบุ"],
+                [
+                  "เลขบัตรประชาชน / พาสปอร์ต",
+                  form.identityNumber || "ไม่ระบุ",
+                ],
+                ["สัญชาติ", form.nationality || "ไม่ระบุ"],
                 [
                   "ห้องที่เลือก",
                   `${room?.property} · ${room?.room || `#${room?.id}`}`,

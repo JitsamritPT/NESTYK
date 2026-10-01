@@ -189,7 +189,7 @@ test('HTTP document upload requires an agent and forwards the file', async (t) =
 
 test('signed reservation preview requires all signatures and a server generated PDF', async () => {
   const service = new AgentContractsService({});
-  const path = '7/11/generated/reservation_letter/mock-v2/example.pdf';
+  const path = '7/11/generated/reservation_letter/letter-v1/example.pdf';
   const signed = new Map([[path, 'https://signed.example/generated.pdf'], ['7/11/reservation_letter/legacy.pdf', 'https://signed.example/legacy.pdf']]);
   const row = reservationRow({ document_url: path });
   assert.equal(service.serialize(row, signed).reservationLetterStatus, 'awaiting_signatures');
@@ -249,10 +249,6 @@ test('mock preview works before signing, generation stamps three images and pers
     h.row[`${party}_signature_url`] = path;
     h.objects.set(path, { buffer: png });
   }
-  await assert.rejects(() => h.service.reservationPdf(7, 11, true), error =>
-    error.getStatus() === 400 && /ใบแจ้งหนี้|ใบเสร็จ/.test(error.message));
-  h.row.invoice_url = '7/11/invoice/test.pdf';
-  h.row.receipt_url = '7/11/receipt/test.pdf';
   const result = await h.service.reservationPdf(7, 11, true);
   assert.equal(result.reservationLetterStatus, 'ready');
   assert.equal(h.row.status, 'active');

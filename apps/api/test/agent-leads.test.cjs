@@ -195,3 +195,17 @@ test('editing keeps contacts on partial updates and can clear them', async () =>
   await service.update(7,2,{email:null,otherContacts:[]});
   assert.equal(row.email,null); assert.deepEqual(row.other_contacts,[]);
 });
+
+test('given name and surname build the display name, and name-only clients are split',async()=>{
+  const split=validateLead({name:' Somchai  Jai Dee ',phone:'123'});
+  assert.equal(split.firstName,'Somchai'); assert.equal(split.lastName,'Jai Dee'); assert.equal(split.name,'Somchai Jai Dee');
+  const given=validateLead({name:'ignored',firstName:' Taro ',lastName:'',phone:'123'});
+  assert.equal(given.name,'Taro'); assert.equal(given.lastName,'');
+  for(const patch of [{name:'',firstName:''},{firstName:'x'.repeat(256)},{firstName:'x'.repeat(200),lastName:'y'.repeat(60)}]) assert.throws(()=>validateLead({name:'A',phone:'123',...patch}),undefined,JSON.stringify(patch).slice(0,60));
+  const row={id:3,created_by_user_id:7,name:'Somchai Jaidee',first_name:'Somchai',last_name:'Jaidee',phone:'0812345678',status:'new',province:null,locations:[],created_at:new Date(),pins:[]};
+  const service=new AgentLeadsService(withTx({findOne:async()=>({...row}),update:async(_,patch)=>Object.assign(row,patch)},()=>row),{},{},{});
+  const renamed=await service.update(7,3,{name:'Malee Suksan'});
+  assert.equal(renamed.firstName,'Malee'); assert.equal(row.last_name,'Suksan'); assert.equal(row.name,'Malee Suksan');
+  const surname=await service.update(7,3,{lastName:'Rakdee'});
+  assert.equal(surname.name,'Malee Rakdee'); assert.equal(row.first_name,'Malee');
+});

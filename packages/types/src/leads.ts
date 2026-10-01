@@ -30,7 +30,10 @@ export type CreateLeadInput = {
   province?: string | null;
   /** Derived from pin districts when pins exist; legacy value otherwise. */
   locations?: string[];
+  /** Display name; the API rebuilds it from firstName + lastName, or splits it when they are omitted. */
   name: string;
+  firstName?: string;
+  lastName?: string;
   phone: string;
   email?: string | null;
   /** Ordered list, up to {@link LEAD_MAX_CONTACTS}; no duplicate channel + value pairs. */

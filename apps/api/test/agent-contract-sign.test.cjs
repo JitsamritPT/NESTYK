@@ -47,13 +47,14 @@ function row(overrides = {}) {
   };
 }
 
-function serviceFor(current) {
+function serviceFor(current, affected = 1) {
   const qb = {};
   for (const key of ['leftJoinAndSelect', 'where', 'andWhere', 'orderBy']) qb[key] = () => qb;
   qb.getOne = async () => current;
   const updates = [];
   const documents = {
     uploadSignature: async () => ({ path: '7/11/signatures/sig.png' }),
+    remove: async () => undefined,
     signPaths: async (paths) => new Map(paths.filter(Boolean).map((path) => [path, `https://signed.example/${path}`])),
   };
   const db = {
@@ -63,7 +64,8 @@ function serviceFor(current) {
         createQueryBuilder: () => qb,
         update: async (where, patch) => {
           updates.push([where, patch]);
-          Object.assign(current, patch);
+          if (affected) Object.assign(current, patch);
+          return { affected };
         },
       };
     },
@@ -140,4 +142,12 @@ test('HTTP sign requires an agent', async (t) => {
   assert.equal(ok.status, 200);
   assert.equal(received[0].agentId, 7);
   assert.deepEqual(received[0].body.parties, ['agent']);
+});
+
+test('a concurrent edit or cancellation prevents a stale signature from being committed', async () => {
+  const { service, current, updates } = serviceFor(row(), 0);
+  await assert.rejects(() => service.sign(7, 11, { parties: ['owner'], signaturePng }), e => e.getStatus() === 409);
+  assert.equal(current.owner_signed_at, null);
+  assert.equal(updates[0][0].status, 'draft');
+  assert.ok(updates[0][0].data);
 });

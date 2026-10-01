@@ -1,53 +1,21 @@
-# Agent — Calendar (placeholder)
+# Agent — Calendar (UI demo)
 
-| ฟิลด์ | ค่า |
-|-------|-----|
-| สถานะ | `placeholder` — ยังไม่ implement ฟีเจอร์ |
-| โหมด | Agent `/agent` |
-| หน้า | `/agent/calendar` |
-| Role | `agent` |
+เมนู **ปฏิทิน** ใน Consumer App โหมด Agent แสดง UI พร้อมข้อมูลจำลอง ยังไม่มี API หรือฐานข้อมูล
 
-เมนู **Calendar** ใน nav agent — ตอนนี้เป็น **หน้าเปล่า** (empty / coming soon) ยังไม่มี API · DB · business logic
+- ปฏิทินรายเดือน เลื่อนเดือน เลือกวัน และกลับวันนี้
+- นัดดูห้อง ติดตามลูกค้า และเซ็นสัญญา พร้อมสถานะ
+- เริ่มด้วย 3 นัดในวันปัจจุบัน และนัดในวันใกล้เคียง
+- เพิ่มนัดจำลองสำหรับวันที่เลือก ตรวจหัวข้อและเวลา `HH:mm`
+- เก็บรายการ วันที่ เดือน และร่างฟอร์มในหน่วยความจำของหน้าหลัก สลับเมนูแล้วกลับมาได้ รีโหลด/เริ่มแอปใหม่จะรีเซ็ต
+- ใช้ shell เดิม สีเหลืองแบรนด์ และธีมสว่าง/มืด รองรับ TH/EN/ZH/JA
 
-**Prerequisite:** [roles pack](../../roles/README.md)
+## ไฟล์หลัก
 
----
+- `apps/consumer-app/components/AgentCalendarScreen.tsx` — UI body
+- `apps/consumer-app/lib/agent-calendar-demo.ts` — fixtures และวันที่แบบ local
+- `apps/consumer-app/app/index.tsx` — เชื่อมเมนูและเก็บ state
+- `packages/i18n/src/locales/*` — `agent.calendar.*`
 
-## เอกสาร
+หน้า web แยกใน `apps/agent` และ role อื่นไม่ได้เปลี่ยนในงานนี้
 
-| ไฟล์ | อ่านเมื่อ |
-|------|-----------|
-| [flow.md](./flow.md) | placeholder UX, nav, อนาคต |
-| [api.md](./api.md) | ยังไม่มี endpoint |
-
----
-
-## สรุป (ปัจจุบัน)
-
-| ส่วน | สถานะ |
-|------|--------|
-| Route + nav item | ✅ blueprint |
-| หน้า UI | Empty state เท่านั้น |
-| API | ❌ ยังไม่มี |
-| Database | ❌ ยังไม่มี |
-
----
-
-## Navigation (agent)
-
-| ลำดับ | เมนู | Route |
-|------:|------|-------|
-| 1 | Dashboard | `/agent/dashboard` |
-| 2 | Listings | `/agent/listings` |
-| 3 | Create room | `/agent/rooms/create` |
-| 4 | Leads | `/agent/leads` |
-| 5 | **Calendar** | `/agent/calendar` |
-| 6 | Contracts | `/agent/contracts` |
-
----
-
-## อนาคต (ไม่ใช่ scope ตอนนี้)
-
-- นัดดูห้อง / follow-up lead
-- ปฏิทินรวม lead `viewed_at` · สัญญา milestone
-- อาจใช้ lib มาตรฐาน (เช่น `react-native-calendars` — มี pattern ใน `AppDateField`)
+[Flow](./flow.md) · [API](./api.md)

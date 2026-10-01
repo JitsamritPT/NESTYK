@@ -32,7 +32,7 @@ export const ContractSignaturePad = forwardRef<
         autoClear={false}
         imageType="image/png"
         penColor={tokens.colors.primary}
-        backgroundColor="#F8FAFC"
+        backgroundColor="rgba(0,0,0,0)"
         webStyle={webStyle}
         nestedScrollEnabled
         androidLayerType="software"

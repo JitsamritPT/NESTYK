@@ -48,7 +48,8 @@ import {
 } from '../lib/lead-profile-options';
 
 type TextKey =
-  | 'name'
+  | 'firstName'
+  | 'lastName'
   | 'email'
   | 'nationality'
   | 'budgetMin'
@@ -63,7 +64,8 @@ export type LeadFormTab = 'profile' | 'matching';
 type FormTab = LeadFormTab;
 
 const empty: Record<TextKey, string> = {
-  name: '',
+  firstName: '',
+  lastName: '',
   email: '',
   nationality: '',
   budgetMin: '',
@@ -75,7 +77,7 @@ const empty: Record<TextKey, string> = {
   notes: '',
 };
 
-const PROFILE_KEYS = new Set(['name', 'phone', 'email', 'nationality', 'occupation', 'occupantCount', 'notes']);
+const PROFILE_KEYS = new Set(['firstName', 'lastName', 'phone', 'email', 'nationality', 'occupation', 'occupantCount', 'notes']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -109,15 +111,21 @@ export function CreateLeadForm({
     initialLead && !initialLead.pins.length && initialLead.province
       ? [initialLead.province, initialLead.locations.join(', ')].filter(Boolean).join(' · ')
       : null;
-  const [form, setForm] = useState<Record<TextKey, string>>(
-    () =>
-      Object.fromEntries(
-        Object.keys(empty).map((key) => [
-          key,
-          initialLead?.[key as TextKey] == null ? '' : String(initialLead[key as TextKey]),
-        ]),
-      ) as Record<TextKey, string>,
-  );
+  const [form, setForm] = useState<Record<TextKey, string>>(() => {
+    const values = Object.fromEntries(
+      Object.keys(empty).map((key) => [
+        key,
+        initialLead?.[key as TextKey] == null ? '' : String(initialLead[key as TextKey]),
+      ]),
+    ) as Record<TextKey, string>;
+    // Leads saved before the given-name split only have `name`.
+    if (initialLead && !values.firstName && !values.lastName && initialLead.name) {
+      const [first, ...rest] = initialLead.name.trim().split(/\s+/);
+      values.firstName = first ?? '';
+      values.lastName = rest.join(' ');
+    }
+    return values;
+  });
   /** Pre-date-picker leads stored free text (e.g. "Next month"); keep it unless a date is picked. */
   const legacyMoveIn =
     initialLead?.moveInPlan && !ISO_DATE.test(initialLead.moveInPlan) ? initialLead.moveInPlan : '';
@@ -480,7 +488,9 @@ export function CreateLeadForm({
   const submit = async () => {
     if (lock.current) return;
     const next: Record<string, string> = {};
-    if (!form.name.trim()) next.name = c.required;
+    const firstName = form.firstName.trim();
+    const lastName = form.lastName.trim();
+    if (!firstName) next.firstName = c.required;
     const phoneE164 = phoneDraftToE164(phone);
     // Unedited legacy numbers (free text before the picker) save as-is so other edits aren't blocked.
     const phoneValue = phoneE164 ?? (initialLead && samePhoneDraft(phone, initialPhone) ? initialLead.phone : '');
@@ -493,7 +503,9 @@ export function CreateLeadForm({
       radiusKm: pins.length ? radiusKm : null,
       province: initialLead?.province ?? null,
       locations: initialLead?.locations ?? [],
-      name: form.name.trim(),
+      name: [firstName, lastName].filter(Boolean).join(' '),
+      firstName,
+      lastName,
       phone: phoneValue,
       email: email || null,
       otherContacts: contacts.flatMap(({ channel, value }) =>
@@ -556,7 +568,7 @@ export function CreateLeadForm({
     }
   };
 
-  const profileHasError = ['name', 'phone', 'email', 'occupantCount'].some((key) => errors[key]);
+  const profileHasError = ['firstName', 'lastName', 'phone', 'email', 'occupantCount'].some((key) => errors[key]);
   const matchingHasError = ['budgetMin', 'budgetMax'].some((key) => errors[key]);
 
   const tabButton = (value: FormTab, label: string, hasError: boolean) => {
@@ -590,13 +602,22 @@ export function CreateLeadForm({
         <Text style={[styles.requiredLegend, { color: agent }]}>{c.requiredLegend}</Text>
       </View>
 
-      {field('name', {
-        label: c.fullName,
-        maxLength: 255,
-        placeholder: c.namePlaceholder,
-        icon: 'user',
-        required: true,
-      })}
+      <View style={styles.row2}>
+        {field('firstName', {
+          label: c.firstName,
+          maxLength: 255,
+          placeholder: c.firstNamePlaceholder,
+          icon: 'user',
+          required: true,
+          style: styles.rowHalf,
+        })}
+        {field('lastName', {
+          label: c.lastName,
+          maxLength: 255,
+          placeholder: c.lastNamePlaceholder,
+          style: styles.rowHalf,
+        })}
+      </View>
       <PhoneField
         label={c.phone}
         required

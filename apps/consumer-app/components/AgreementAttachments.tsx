@@ -39,18 +39,6 @@ const subjects: Record<AgreementDocumentSubject, string> = {
 
 const EXTRA_SLOTS = [
   {
-    code: "power_of_attorney",
-    label: "มอบอำนาจ / แต่งตั้งนายหน้า",
-    hint: "หนังสือมอบอำนาจหรือเอกสารแต่งตั้งนายหน้า",
-    defaultSubject: "representative" as AgreementDocumentSubject,
-  },
-  {
-    code: "payment_proof",
-    label: "หลักฐานการจ่ายเงิน",
-    hint: "สลิปโอนหรือหลักฐานการชำระเงินจอง",
-    defaultSubject: "tenant" as AgreementDocumentSubject,
-  },
-  {
     code: "other",
     label: "อื่นๆ",
     hint: "เอกสารประกอบเพิ่มเติมตามดีล",
@@ -58,7 +46,36 @@ const EXTRA_SLOTS = [
   },
 ] as const;
 
-type ExtraSlotCode = (typeof EXTRA_SLOTS)[number]["code"];
+const LEASE_EXTRA_SLOTS = [
+  {
+    code: "lease_annex_1",
+    label: "เอกสารแนบท้าย 1",
+    hint: "ไม่บังคับ — แนบเอกสารแนบท้ายสัญญาเช่าฉบับที่ 1",
+    defaultSubject: "property" as AgreementDocumentSubject,
+  },
+  {
+    code: "lease_annex_2",
+    label: "เอกสารแนบท้าย 2",
+    hint: "ไม่บังคับ — แนบเอกสารแนบท้ายสัญญาเช่าฉบับที่ 2",
+    defaultSubject: "property" as AgreementDocumentSubject,
+  },
+] as const;
+
+type ExtraSlot = (typeof EXTRA_SLOTS)[number] | (typeof LEASE_EXTRA_SLOTS)[number];
+type ExtraSlotCode = ExtraSlot["code"];
+
+function extraSlotsFor(formKind?: string | null): ExtraSlot[] {
+  return formKind === "lease"
+    ? [...LEASE_EXTRA_SLOTS, ...EXTRA_SLOTS]
+    : [...EXTRA_SLOTS];
+}
+
+function namedExtraCodes(slots: ExtraSlot[]) {
+  return new Set<string>(
+    slots.filter((slot) => slot.code !== "other").map((slot) => slot.code),
+  );
+}
+
 type Requirement = AgreementAttachmentChecklist["requirements"][number];
 type Sheet =
   | { kind: "pickType"; requirement: Requirement }
@@ -139,10 +156,12 @@ function Chip({
 export function AgreementAttachments({
   contractId,
   refreshKey,
+  formKind,
   onReadinessChange,
 }: {
   contractId: number;
   refreshKey?: string;
+  formKind?: string | null;
   onReadinessChange?: (value: { contractId: number; ready: boolean }) => void;
 }) {
   const { theme } = useMobileTheme();
@@ -159,9 +178,13 @@ export function AgreementAttachments({
   const running = useRef(false);
   const picking = useRef(false);
   const request = useRef(0);
+  const contractIdRef = useRef(contractId);
+  const extraSlots = useMemo(() => extraSlotsFor(formKind), [formKind]);
+  const namedExtras = useMemo(() => namedExtraCodes(extraSlots), [extraSlots]);
   useEffect(() => {
-    onReadinessChange?.({ contractId, ready: !busy && !!state?.readyToSign });
-  }, [contractId, busy, state?.readyToSign, onReadinessChange]);
+    // Keep last known readiness while reloading — do not treat busy/null as "not ready".
+    onReadinessChange?.({ contractId, ready: !!state?.readyToSign });
+  }, [contractId, state?.readyToSign, onReadinessChange]);
   const ink = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
 
@@ -182,16 +205,14 @@ export function AgreementAttachments({
   function docsForExtraSlot(code: ExtraSlotCode) {
     if (code === "other") {
       return extraDocs.filter(
-        (d) =>
-          d.documentTypeCode !== "power_of_attorney" &&
-          d.documentTypeCode !== "payment_proof",
+        (d) => !namedExtras.has(d.documentTypeCode),
       );
     }
     return extraDocs.filter((d) => d.documentTypeCode === code);
   }
 
   function openExtraUpload(slot: ExtraSlotCode) {
-    const meta = EXTRA_SLOTS.find((row) => row.code === slot)!;
+    const meta = extraSlots.find((row) => row.code === slot)!;
     setExtraSubject(meta.defaultSubject);
     setExtraType(slot);
     setSheet({ kind: "extraUpload", slot });
@@ -213,7 +234,10 @@ export function AgreementAttachments({
   }
 
   useEffect(() => {
-    setState(null);
+    const switched = contractIdRef.current !== contractId;
+    contractIdRef.current = contractId;
+    // Only clear checklist when switching contracts; keep prior state across refreshKey reloads.
+    if (switched) setState(null);
     void load();
     return () => {
       request.current++;
@@ -503,7 +527,7 @@ export function AgreementAttachments({
               ? "สร้างเอกสารแล้ว จึงแนบหรือแก้ไขไม่ได้ สามารถเปิดดูไฟล์ที่แนบไว้ได้"
               : "ไม่บังคับ — แนบได้จนกว่าจะกดสร้างเอกสาร"}
           </Text>
-          {EXTRA_SLOTS.map((slot) => {
+          {extraSlots.map((slot) => {
             const files = docsForExtraSlot(slot.code);
             const hasFile = files.length > 0;
             const statusColor = hasFile ? "#198460" : theme.textSecondary;
@@ -654,7 +678,7 @@ export function AgreementAttachments({
         <ScrollView style={s.sheet} contentContainerStyle={{ gap: 12 }}>
           <Text style={[s.sheetTitle, ink]}>
             {sheet?.kind === "extraUpload"
-              ? EXTRA_SLOTS.find((row) => row.code === sheet.slot)?.label ??
+              ? extraSlots.find((row) => row.code === sheet.slot)?.label ??
                 "แนบเอกสารเพิ่ม"
               : "แนบเอกสารเพิ่ม"}
           </Text>
@@ -679,8 +703,7 @@ export function AgreementAttachments({
                   .filter(
                     (t) =>
                       t.code === "other" ||
-                      (t.code !== "power_of_attorney" &&
-                        t.code !== "payment_proof" &&
+                      (!namedExtras.has(t.code) &&
                         t.code !== "ownership_proof"),
                   )
                   .map((t) => (

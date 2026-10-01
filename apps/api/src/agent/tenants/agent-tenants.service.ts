@@ -5,31 +5,31 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { DataSource } from "typeorm";
-import type { AgentTenant, CreateAgentTenant } from "@nestyk/types";
+import type {
+  AgentTenant,
+  CreateAgentTenant,
+  UpdateAgentTenant,
+} from "@nestyk/types";
 import { TenantEntity } from "../../entities/tenant.entity";
 import { LeadEntity } from "../../entities/lead.entity";
 import { RentRoomEntity } from "../../entities/rent-room.entity";
 import { AgentContractsService } from "../contracts/agent-contracts.service";
 
-export function validateTenant(input: unknown): CreateAgentTenant {
+function parseTenantProfile(input: unknown): UpdateAgentTenant {
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new BadRequestException("กรุณาระบุข้อมูลผู้เช่า");
   const b = input as Record<string, unknown>;
-  for (const key of ["leadId", "rentRoomId"])
-    if (
-      !Number.isSafeInteger(b[key]) ||
-      Number(b[key]) < 1 ||
-      Number(b[key]) > 2147483647
-    )
-      throw new BadRequestException("กรุณาเลือก Lead และห้องที่เช่า");
   for (const [key, max] of [
-    ["name", 255],
+    ["firstName", 255],
+    ["lastName", 255],
     ["phone", 50],
     ["email", 255],
     ["note", 500],
+    ["identityNumber", 100],
+    ["nationality", 120],
   ] as const) {
     const v = b[key];
-    const required = key === "name" || key === "phone";
+    const required = key === "phone";
     if (v == null && !required) continue;
     if (
       typeof v !== "string" ||
@@ -50,13 +50,58 @@ export function validateTenant(input: unknown): CreateAgentTenant {
     phone.replace(/\D/g, "").length > 15
   )
     throw new BadRequestException("กรุณาระบุเบอร์โทรที่ถูกต้อง");
+  const identityNumber =
+    typeof b.identityNumber === "string" ? b.identityNumber.trim() : "";
+  if (
+    identityNumber &&
+    !/^[A-Za-z0-9][A-Za-z0-9\s/-]{4,99}$/.test(identityNumber)
+  )
+    throw new BadRequestException(
+      "กรุณาระบุเลขบัตรประชาชนหรือพาสปอร์ตให้ถูกต้อง",
+    );
+  let firstName = typeof b.firstName === "string" ? b.firstName.trim() : "";
+  let lastName = typeof b.lastName === "string" ? b.lastName.trim() : "";
+  if (!firstName && typeof b.name === "string" && b.name.trim()) {
+    const parts = b.name.trim().split(/\s+/);
+    firstName = parts[0] ?? "";
+    lastName = lastName || parts.slice(1).join(" ");
+  }
+  if (!firstName || firstName.length > 255 || lastName.length > 255)
+    throw new BadRequestException(
+      "กรุณาระบุชื่อและเบอร์โทรให้ครบ และตรวจสอบความยาวข้อมูล",
+    );
   return {
-    leadId: Number(b.leadId),
-    rentRoomId: Number(b.rentRoomId),
-    name: String(b.name).trim(),
+    name: [firstName, lastName].filter(Boolean).join(" "),
+    firstName,
+    lastName,
     phone,
     email,
     note: typeof b.note === "string" ? b.note.trim() : "",
+    identityNumber,
+    nationality:
+      typeof b.nationality === "string" ? b.nationality.trim() : "",
+  };
+}
+
+export function validateTenantProfile(input: unknown): UpdateAgentTenant {
+  return parseTenantProfile(input);
+}
+
+export function validateTenant(input: unknown): CreateAgentTenant {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new BadRequestException("กรุณาระบุข้อมูลผู้เช่า");
+  const b = input as Record<string, unknown>;
+  for (const key of ["leadId", "rentRoomId"])
+    if (
+      !Number.isSafeInteger(b[key]) ||
+      Number(b[key]) < 1 ||
+      Number(b[key]) > 2147483647
+    )
+      throw new BadRequestException("กรุณาเลือก Lead และห้องที่เช่า");
+  return {
+    leadId: Number(b.leadId),
+    rentRoomId: Number(b.rentRoomId),
+    ...parseTenantProfile(input),
   };
 }
 
@@ -79,19 +124,37 @@ export class AgentTenantsService {
     t: TenantEntity,
     contracts: AgentTenant["contracts"],
   ): AgentTenant {
+    const property = t.lead?.rent_room?.property;
+    const fullAddress = property
+      ? [
+          property.address,
+          property.subdistrict,
+          property.district,
+          property.province,
+          property.postal_code,
+        ]
+          .map((part) => (typeof part === "string" ? part.trim() : ""))
+          .filter((part) => part && part !== "-")
+          .join(", ") || null
+      : null;
     return {
       id: t.id,
       leadId: t.lead_id,
       name: t.name,
+      firstName: t.first_name ?? "",
+      lastName: t.last_name ?? "",
       phone: t.phone,
       email: t.email,
       note: t.note,
+      identityNumber: t.identity_number ?? null,
+      nationality: t.nationality ?? null,
       createdAt: t.created_at.toISOString(),
       property:
-        t.lead?.rent_room?.property?.name ||
+        property?.name ||
         t.lead?.rent_room?.listing_title ||
         "ยังไม่ระบุห้อง",
       room: t.lead?.rent_room?.room_id || null,
+      fullAddress,
       contracts: contracts.filter((c) => c.tenantId === t.id),
     };
   }
@@ -116,7 +179,7 @@ export class AgentTenantsService {
       .where("lead.created_by_user_id = :agentId", { agentId })
       .andWhere("lead.tenant_id IS NULL")
       .andWhere("lead.status != :lost", { lost: "lost" })
-      .andWhere("(lead.name ILIKE :q OR lead.phone ILIKE :q)", {
+      .andWhere("(lead.name ILIKE :q OR lead.first_name ILIKE :q OR lead.last_name ILIKE :q OR lead.phone ILIKE :q)", {
         q: `%${String(q).slice(0, 255)}%`,
       })
       .orderBy("lead.id", "DESC")
@@ -125,8 +188,11 @@ export class AgentTenantsService {
     return leads.map((l) => ({
       id: l.id,
       name: l.name,
+      firstName: l.first_name ?? "",
+      lastName: l.last_name ?? "",
       phone: l.phone,
       email: l.email,
+      nationality: l.nationality,
     }));
   }
   async roomOptions(agentId: number, q = "") {
@@ -176,9 +242,13 @@ export class AgentTenantsService {
           lead_id: lead.id,
           created_by_user_id: agentId,
           name: b.name,
+          first_name: b.firstName,
+          last_name: b.lastName,
           phone: b.phone,
           email: b.email || null,
           note: b.note || null,
+          identity_number: b.identityNumber || null,
+          nationality: b.nationality || lead.nationality || null,
         }),
       );
       lead.tenant_id = tenant.id;
@@ -187,6 +257,23 @@ export class AgentTenantsService {
       await manager.save(LeadEntity, lead);
       return tenant.id;
     });
+    return this.view(agentId, id);
+  }
+  async update(agentId: number, id: number, input: unknown) {
+    const b = validateTenantProfile(input);
+    const tenant = await this.query(agentId)
+      .andWhere("tenant.id = :id", { id })
+      .getOne();
+    if (!tenant) throw new NotFoundException("ไม่พบผู้เช่า");
+    tenant.name = b.name;
+    tenant.first_name = b.firstName;
+    tenant.last_name = b.lastName;
+    tenant.phone = b.phone;
+    tenant.email = b.email || null;
+    tenant.note = b.note || null;
+    tenant.identity_number = b.identityNumber || null;
+    tenant.nationality = b.nationality || null;
+    await this.db.getRepository(TenantEntity).save(tenant);
     return this.view(agentId, id);
   }
 }

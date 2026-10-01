@@ -25,28 +25,106 @@ test('validates actual calendar dates, financial precision and required fields',
 test('formats standard contract numbers for reservation and lease', () => {
   assert.equal(contractNoPrefix('reservation'), 'RS');
   assert.equal(contractNoPrefix('lease'), 'LS');
+  assert.equal(contractNoPrefix('broker_appointment'), 'BA');
   assert.equal(formatContractNo('LS', 2026, 1), 'LS202600001');
   assert.equal(formatContractNo('RS', 2026, 42), 'RS202600042');
   assert.equal(parseContractSeq('LS202600007'), 7);
   assert.equal(parseContractSeq('EC-11'), null);
   assert.equal(typeof contractYear(), 'number');
 });
-function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0 } = {}) {
+test('broker appointment defaults pick rent matching lead lease duration', () => {
+  const { pickBrokerRentFromRoom } = require('../src/agent/contracts/broker-appointment.ts');
+  assert.deepEqual(
+    pickBrokerRentFromRoom(
+      {
+        price_rows: [
+          { price: '18000', contract_type: { term_months: 12 } },
+          { price: '16000', contract_type: { term_months: 6 } },
+        ],
+      },
+      12,
+    ),
+    { monthlyRent: '18000', leaseMonths: '12' },
+  );
+  assert.deepEqual(
+    pickBrokerRentFromRoom(
+      {
+        price_rows: [
+          { price: '18000', contract_type: { term_months: 12 } },
+          { price: '16000', contract_type: { term_months: 6 } },
+        ],
+      },
+      null,
+    ),
+    { monthlyRent: '16000', leaseMonths: '6' },
+  );
+  assert.deepEqual(pickBrokerRentFromRoom(null, 12), {
+    monthlyRent: '',
+    leaseMonths: '12',
+  });
+});
+test('lease agreement validates required dates and syncs sign names', () => {
+  const {
+    emptyLeaseAgreement,
+    validateLeaseAgreement,
+    pickLeaseRentFromRoom,
+  } = require('../src/agent/contracts/lease-agreement.ts');
+  const base = {
+    ...emptyLeaseAgreement(),
+    issueDate: '2026-10-01',
+    landlordName: 'Owner',
+    tenantName: 'Tenant',
+    project: 'Project',
+    termFrom: '2026-10-01',
+    termTo: '2027-09-30',
+    monthlyRent: '25000',
+    depositAmount: '50000',
+  };
+  const ok = validateLeaseAgreement(base);
+  assert.equal(ok.landlordSignName, 'Owner');
+  assert.equal(ok.tenantSignName, 'Tenant');
+  assert.throws(() => validateLeaseAgreement({ ...base, termTo: '2026-09-01' }));
+  assert.deepEqual(
+    pickLeaseRentFromRoom(
+      {
+        price_rows: [{ price: '20000', contract_type: { term_months: 12 } }],
+        advance_rent_months: 1,
+        deposit_months: 2,
+      },
+      12,
+    ),
+    {
+      monthlyRent: '20000',
+      termMonths: '12',
+      advanceMonths: '1',
+      depositMonths: '2',
+    },
+  );
+});
+const finalizedReservation = {
+  status: 'active',
+  document_url: '7/1/generated/reservation_letter/letter-v1/booked.pdf',
+};
+function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0, draft = null, reservations = [finalizedReservation] } = {}) {
   const saved = []; const calls = []; let rolledBack = false;
   const qb = {};
   for (const key of ['leftJoin', 'where', 'andWhere']) qb[key] = (...args) => { calls.push([key, ...args]); return qb; };
-  qb.getCount = async () => calls.at(-1)?.[1] === "c.status <> 'cancelled'" ? successor : overlap;
+  qb.getCount = async () => calls.some(c => c[1] === "c.previous_agreement_id = :previousId") ? successor : overlap;
+  qb.getMany = async () => reservations;
   const manager = {
     findOne: async (entity, options) => {
       calls.push(['findOne', entity.name, options]);
       assert.equal(options.where.created_by_user_id, 7);
       assert.equal(options.lock.mode, 'pessimistic_write');
-      if (entity === LeaseContractEntity) return previous;
+      if (entity === LeaseContractEntity) return options.where.id === draft?.id ? draft : previous;
       if (entity === LeadEntity) return { id: 1, status, tenant_id: 2, rent_room_id: 3 };
       if (entity === RentRoomEntity) return foreignRoom ? null : { id: 3, property_owner_id: 4, owner_id: 5 };
     },
     findOneBy: async (entity, options) => { if (entity === AgreementTemplateEntity) return { form_kind: previous?.form_kind ?? 'lease' }; if (entity !== TenantEntity) return null; assert.deepEqual(options, { id: 2, lead_id: 1, created_by_user_id: 7 }); return { id: 2, name: 'Original tenant' }; },
-    update: async (_, where, patch) => Object.assign(saved.find(row => row.id === where.id), patch),
+    update: async (entity, where, patch) => {
+      calls.push(['update', entity.name, where, patch]);
+      if (entity === LeaseContractEntity) Object.assign(saved.find(row => row.id === where.id) ?? draft, patch);
+    },
     getRepository: () => ({ createQueryBuilder: () => qb }),
     query: async (sql) => {
       if (String(sql).includes('pg_advisory_xact_lock')) return [];
@@ -56,8 +134,8 @@ function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave
     create: (_, data) => data,
     save: async (entity, data) => { if (failSave && entity !== RoomTenancyEntity) throw Error('database failure'); const row = { id: saved.length + 10, ...data }; saved.push(row); return row; },
   };
-  const service = new AgentContractsService({ getRepository: () => ({ findOneBy: async ({code}) => ({ code, form_kind: code === 'reservation' ? 'reservation' : 'lease' }), findOne: async ({where}) => ({id: 1, version: 1, form_kind: where.agreement_type_code === 'reservation' ? 'reservation' : 'lease', data_schema: {type:'object'}}) }), transaction: async fn => { try { return await fn(manager); } catch (e) { saved.length = 0; rolledBack = true; throw e; } } });
-  service.view = async (agentId, id) => { assert.equal(agentId, 7); return saved.find(c => c.id === id); };
+  const service = new AgentContractsService({ getRepository: (entity) => ({ findOneBy: async ({code, id, created_by_user_id}) => entity === LeaseContractEntity ? (draft?.id === id && created_by_user_id === draft.created_by_user_id ? draft : null) : ({ code, form_kind: code === 'reservation' ? 'reservation' : code === 'broker' ? 'broker_appointment' : 'lease' }), findOne: async ({where}) => ({id: 1, version: 1, form_kind: where.agreement_type_code === 'reservation' ? 'reservation' : where.agreement_type_code === 'broker' ? 'broker_appointment' : 'lease', data_schema: {type:'object'}}) }), transaction: async fn => { try { return await fn(manager); } catch (e) { saved.length = 0; rolledBack = true; throw e; } } });
+  service.view = async (agentId, id) => { assert.equal(agentId, 7); return saved.find(c => c.id === id) ?? draft; };
   return { service, saved, calls, rolledBack: () => rolledBack };
 }
 test('creates tenancy and draft using server-owned identity and locked room', async () => {
@@ -88,7 +166,7 @@ test('HTTP endpoints require authentication and agent role', async t => {
   t.after(() => { if (previous === undefined) delete process.env.ALLOW_DEV_AUTH; else process.env.ALLOW_DEV_AUTH = previous; });
   class TestModule {}
   Module({ controllers: [AgentContractsController], providers: [
-    { provide: AgentContractsService, useValue: { list: async id => [{ agentId: id }], candidates: async () => [], create: async (id, input) => ({ ...validateContract(input), agentId: id }) } },
+    { provide: AgentContractsService, useValue: { list: async id => [{ agentId: id }], candidates: async () => [], create: async (id, input) => ({ ...validateContract(input), agentId: id }), updateDraft: async (agentId, id, input) => ({ agentId, id, ...input }), cancelDraft: async (agentId, id, input) => ({ agentId, id, ...input }), draftTemplate: async (agentId, id) => ({ agentId, id }) } },
     { provide: AuthService, useValue: { findBySupabaseUserId: async id => ({ id: Number(id) }), loadUserWithRoles: async id => ({ id, roleNames: id === 7 ? ['agent'] : ['tenant'] }) } },
   ] })(TestModule);
   const app = await NestFactory.create(TestModule, { logger: false }); await app.listen(0, '127.0.0.1'); t.after(() => app.close());
@@ -99,6 +177,14 @@ test('HTTP endpoints require authentication and agent role', async t => {
   assert.deepEqual(await (await fetch(path, { headers: headers(7) })).json(), [{ agentId: 7 }]);
   assert.equal((await fetch(`${path}/candidates`, { headers: headers(7) })).status, 200);
   assert.equal((await fetch(path, { method: 'POST', headers: headers(7), body: '{}' })).status, 400);
+  for (const endpoint of ['draft', 'cancel-draft']) {
+    const url = `${path}/40/${endpoint}`;
+    assert.equal((await fetch(url, { method: 'POST' })).status, 401);
+    assert.equal((await fetch(url, { method: 'POST', headers: headers(8), body: '{}' })).status, 403);
+    const result = await fetch(url, { method: 'POST', headers: headers(7), body: JSON.stringify({ reason: 'Test' }) });
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), { agentId: 7, id: 40, reason: 'Test' });
+  }
   const created = await fetch(path, { method: 'POST', headers: headers(7), body: JSON.stringify(valid) }); assert.equal(created.status, 201); assert.equal((await created.json()).agentId, 7);
 });
 
@@ -115,12 +201,35 @@ test('reservation drafts persist their master code and booking fee without month
   assert.match(c.contract_no, /^RS\d{4}\d{5}$/);
   assert.ok(f.calls.some(call => call[2]?.start === '2026-10-15' && call[2]?.end === null));
   assert.equal(c.agreement_type_code, 'reservation'); assert.equal(c.reservation_fee, '5000.00'); assert.equal(c.monthly_rent, null); assert.equal(c.deposit, null);
-  assert.ok(f.calls.some(call => call[2]?.isLease === false));
+  assert.ok(f.calls.some(call => call[2]?.formKind === 'reservation'));
 });
-test('lease creation excludes only the same tenant reservation from overlap checks', async () => {
+test('overlap checks only the same form kind so reservation does not block lease or broker', async () => {
   const f = fixture(); await f.service.create(7, valid);
-  const clause = f.calls.find(call => call[1]?.includes?.('agreementType.form_kind'));
-  assert.ok(clause[1].includes('c.tenant_id = :tenantId')); assert.equal(clause[2].isLease, true); assert.equal(clause[2].tenantId, 2);
+  const clause = f.calls.find(call => call[1]?.includes?.('= :formKind') && call[2]?.formKind === 'lease');
+  assert.ok(clause);
+  assert.equal(f.calls.some(call => call[2]?.isLease != null), false);
+});
+test('a new lease requires a generated reservation letter for the same lead and room', async () => {
+  const message = /ต้องสร้างหนังสือจองและออกเอกสารก่อนทำสัญญาเช่า/;
+  for (const reservations of [
+    [],
+    [{ status: 'active', document_url: '7/1/mock/reservation_letter/mock-v2/preview.pdf' }],
+    [{ status: 'cancelled', document_url: finalizedReservation.document_url }],
+    [{ status: 'expired', document_url: finalizedReservation.document_url }],
+    [{ status: 'terminated', document_url: finalizedReservation.document_url }],
+  ]) {
+    const f = fixture({ reservations });
+    await assert.rejects(() => f.service.create(7, valid), message);
+    assert.equal(f.saved.length, 0);
+  }
+  const booked = fixture();
+  const created = await booked.service.create(7, valid);
+  assert.equal(created.status, 'draft');
+});
+test('renewing a lease does not require another reservation letter', async () => {
+  const f = fixture({ previous: original, reservations: [] });
+  const c = await f.service.create(7, { ...valid, previousAgreementId: 20 });
+  assert.equal(c.agreement_kind, 'renewal');
 });
 test('inactive or unknown master type is rejected before transaction', async () => {
   const service = new AgentContractsService({ getRepository: () => ({findOneBy: async () => null}), transaction: () => assert.fail('Must not write') });
@@ -206,4 +315,66 @@ test('invalid template and predecessor IDs are rejected', async () => {
 test('create rejects non-object bodies before loading a template', async () => {
   const f = fixture();
   for (const input of [null, undefined, [], 'lease', 1]) await assert.rejects(()=>f.service.create(7,input), e=>e.getStatus()===400);
+});
+
+function draftRow(patch = {}) {
+  return { id: 40, created_by_user_id: 7, status: 'draft', template_id: 1,
+    agreement_type_code: 'lease', lead_id: 1, tenant_id: 2, rent_room_id: 3,
+    room_tenancy_id: 9, contract_no: 'LS202600040', data: {},
+    root_agreement_id: 40, previous_agreement_id: null, updated_at: new Date(), ...patch };
+}
+test('editing each draft kind preserves identity and tenancy, invalidates documents and revokes invites', async () => {
+  for (const code of ['lease', 'reservation', 'broker']) {
+    const draft = draftRow({ agreement_type_code: code, document_url: 'preview.pdf', invoice_url: 'invoice.pdf' });
+    const f = fixture({ draft });
+    const payload = code === 'reservation' ? { leadId: 1, startDate: '2026-10-01', moveInDate: '2026-10-15', reservationFee: 1000 } : valid;
+    const result = await f.service.updateDraft(7, 40, { ...payload, agreementTypeCode: code, notes: 'Updated' });
+    assert.equal(result.id, 40); assert.equal(result.contract_no, draft.contract_no);
+    assert.equal(result.room_tenancy_id, 9); assert.equal(result.notes, 'Updated');
+    assert.equal(result.document_url, null); assert.equal(result.invoice_url, null);
+    assert.equal(result.status, 'draft'); assert.ok(result.data.draftRevision);
+    assert.equal(f.saved.length, 1);
+    assert.ok(f.calls.some(c => c[0] === 'andWhere' && c[1] === 'c.id <> :editingId' && c[2].editingId === 40));
+    assert.ok(f.calls.some(c => c[0] === 'update' && c[1] === 'AgreementSignInviteEntity' && c[2].agreement_id === 40));
+  }
+});
+test('draft edits reject changed identity, signed/closed drafts and overlaps', async () => {
+  for (const patch of [{ status: 'active' }, { status: 'cancelled' }, { owner_signed_at: new Date() }, { tenant_signature_url: 'sig.png' }]) {
+    const f = fixture({ draft: draftRow(patch) });
+    await assert.rejects(() => f.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease' }));
+    assert.equal(f.saved.length, 0);
+  }
+  for (const patch of [{ leadId: 99 }, { agreementTypeCode: 'reservation' }, { templateId: 9 }, { previousAgreementId: 8 }]) {
+    const f = fixture({ draft: draftRow() });
+    await assert.rejects(() => f.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease', ...patch }));
+  }
+  const f = fixture({ draft: draftRow(), overlap: 1 });
+  await assert.rejects(() => f.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease' }), e => e.getStatus() === 409);
+  const foreign = fixture({ draft: draftRow({ created_by_user_id: 8 }) });
+  await assert.rejects(() => foreign.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease' }), e => e.getStatus() === 404);
+});
+test('cancelling a draft retains identity and records reason while revoking links', async () => {
+  const draft = draftRow(); const f = fixture({ draft });
+  const result = await f.service.cancelDraft(7, 40, { reason: '  Customer changed plans  ' });
+  assert.equal(result.status, 'cancelled'); assert.equal(result.id, 40);
+  assert.equal(result.data.draftCancellation.reason, 'Customer changed plans');
+  assert.equal(result.data.draftCancellation.by, 7);
+  assert.ok(f.calls.some(c => c[0] === 'update' && c[1] === 'AgreementSignInviteEntity'));
+  assert.equal(f.saved.length, 0);
+});
+test('cancellation requires a reason and refuses signed or closed contracts', async () => {
+  for (const reason of ['', ' ', 'x'.repeat(1001), 5]) {
+    await assert.rejects(() => fixture({ draft: draftRow() }).service.cancelDraft(7, 40, { reason }));
+  }
+  for (const patch of [{ owner_signed_at: new Date() }, { status: 'cancelled' }, { status: 'active' }]) {
+    await assert.rejects(() => fixture({ draft: draftRow(patch) }).service.cancelDraft(7, 40, { reason: 'Cancel' }));
+  }
+});
+
+test('stale draft revisions cannot overwrite a newer edit', async () => {
+  const f = fixture({ draft: draftRow({ data: { draftRevision: 'new-version' } }) });
+  await assert.rejects(() => f.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease', expectedDraftRevision: 'old-version' }), e => e.getStatus() === 409);
+  assert.equal(f.saved.length, 0);
+  const result = await f.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease', expectedDraftRevision: 'new-version' });
+  assert.notEqual(result.data.draftRevision, 'new-version');
 });

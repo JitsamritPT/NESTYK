@@ -53,6 +53,8 @@ test('PostgreSQL: migration repeatability, backfill, version pinning, renewal ch
     await db.initialize();
     const service = new AgentContractsService(db);
     const input = {leadId:1,startDate:'2026-01-01',endDate:'2026-12-31',monthlyRent:10000,deposit:20000};
+    const reservation = await service.create(1, { leadId: 1, agreementTypeCode: 'reservation', startDate: '2025-12-01', moveInDate: '2026-01-01', reservationFee: 1000 });
+    await admin.query("UPDATE lease_contracts SET status='active', document_url=$2 WHERE id=$1", [reservation.id, `1/${reservation.id}/generated/reservation_letter/letter-v1/booked.pdf`]);
     const first = await service.create(1,input);
     assert.equal(first.rootAgreementId,first.id); assert.equal(first.templateVersion,1);
     await admin.query("UPDATE lease_contracts SET status='active' WHERE id=$1",[first.id]);

@@ -3,8 +3,9 @@ import type {
   CreateAgentTenant,
   TenantLeadOption,
   TenantRoomOption,
+  UpdateAgentTenant,
 } from "@nestyk/types";
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPatch, apiPost } from "./api";
 import { ensureAgentSession } from "./agent-session";
 export async function listAgentTenants(): Promise<AgentTenant[]> {
   await ensureAgentSession();
@@ -31,4 +32,11 @@ export async function createAgentTenant(
 ): Promise<AgentTenant> {
   await ensureAgentSession();
   return apiPost("/agent/tenants", body);
+}
+export async function updateAgentTenant(
+  id: number,
+  body: UpdateAgentTenant,
+): Promise<AgentTenant> {
+  await ensureAgentSession();
+  return apiPatch(`/agent/tenants/${id}`, body);
 }

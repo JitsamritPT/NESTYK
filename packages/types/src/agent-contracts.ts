@@ -3,7 +3,7 @@ export interface AgreementTemplate {
   agreementTypeCode: string;
   version: number;
   name: string;
-  formKind: "reservation" | "lease";
+  formKind: "reservation" | "lease" | "broker_appointment";
   dataSchema: Record<string, unknown>;
 }
 export interface AgreementType {
@@ -11,7 +11,7 @@ export interface AgreementType {
   nameTh: string;
   nameEn: string;
   icon: string;
-  formKind: "reservation" | "lease";
+  formKind: "reservation" | "lease" | "broker_appointment";
 }
 export type AgentContractStatus =
   | "draft"
@@ -39,7 +39,7 @@ export interface AgentContract {
   tenant: string;
   agreementTypeCode: string;
   agreementTypeName: string;
-  formKind: "reservation" | "lease";
+  formKind: "reservation" | "lease" | "broker_appointment";
   reservationFee: number | null;
   status: AgentContractStatus;
   startDate: string;
@@ -51,6 +51,8 @@ export interface AgentContract {
   notes: string | null;
   ownerSignedAt: string | null;
   tenantSignedAt: string | null;
+  ownerDeliveredAt: string | null;
+  tenantDeliveredAt: string | null;
   agentSignedAt: string | null;
   ownerSignatureUrl: string | null;
   tenantSignatureUrl: string | null;
@@ -58,7 +60,12 @@ export interface AgentContract {
   reservationLetterUrl: string | null;
   reservationLetterStatus:
     "awaiting_signatures" | "ready_to_generate" | "ready" | null;
+  brokerAppointmentUrl: string | null;
+  brokerAppointmentStatus:
+    "awaiting_signatures" | "ready_to_generate" | "ready" | null;
   leaseDocumentUrl: string | null;
+  leaseAgreementStatus:
+    "awaiting_signatures" | "ready_to_generate" | "ready" | null;
   invoiceUrl: string | null;
   receiptUrl: string | null;
 }
@@ -66,7 +73,8 @@ export type AgentContractDocumentKind =
   | "reservation_letter"
   | "lease_agreement"
   | "invoice"
-  | "receipt";
+  | "receipt"
+  | "broker_appointment";
 export type AgentContractSignParty = "owner" | "tenant" | "agent";
 export interface SignAgentContract {
   parties: AgentContractSignParty[];
@@ -76,6 +84,14 @@ export interface ContractSignInvite {
   party: "owner" | "tenant";
   url: string;
   expiresAt: string;
+}
+export interface ContractDelivery {
+  party: "owner" | "tenant";
+  userId: number;
+  deliveredAt: string;
+}
+export interface PartyContract extends AgentContract {
+  myParties: Array<"owner" | "tenant">;
 }
 export interface ContractCandidate {
   leadId: number;
@@ -138,6 +154,8 @@ export interface FinancialDocumentInput {
   dueDate: string;
   reference: string;
   customerName: string;
+  customerFirstName: string;
+  customerLastName: string;
   customerAddress: string;
   customerTaxId: string;
   customerPhone: string;
@@ -154,4 +172,199 @@ export interface FinancialDocumentInput {
   paymentDetails: string;
   receiverName: string;
   notes: string;
+}
+
+/** Invoice created without a reservation letter. A receipt, when present, belongs to this invoice. */
+export interface StandaloneInvoice {
+  id: number;
+  documentNo: string;
+  customerName: string;
+  issueDate: string;
+  total: number;
+  invoiceUrl: string | null;
+  tenantId: number | null;
+  receiptDocumentNo: string | null;
+  receiptUrl: string | null;
+  paymentSlipUrl: string | null;
+}
+
+/** Landlord-to-agent commission confirmation, stamped onto the paper template. */
+export interface CommissionConfirmationInput {
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  landlordFirstName: string;
+  landlordLastName: string;
+  landlordNationality: string;
+  landlordId: string;
+  agentName: string;
+  agentNationality: string;
+  agentId: string;
+  propertyType: string;
+  project: string;
+  unitNo: string;
+  propertyAddress: string;
+  tenantName: string;
+  tenantFirstName: string;
+  tenantLastName: string;
+  tenantNationality: string;
+  tenantIdentity: string;
+  leasePeriod: string;
+  leaseStart: string;
+  leaseEnd: string;
+  monthlyRent: string;
+  agreedCommission: string;
+  bankAccount: string;
+  landlordSignName: string;
+  agentSignName: string;
+  landlordSignDate: string;
+  agentSignDate: string;
+}
+
+export interface CommissionConfirmation {
+  id: number;
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  agentName: string;
+  tenantName: string;
+  tenantId: number | null;
+  pdfUrl: string | null;
+}
+
+/** Fillable fields for residential lease PDF (สัญญาเช่า). */
+export interface LeaseAgreementInput {
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  landlordFirstName: string;
+  landlordLastName: string;
+  landlordNationality: string;
+  landlordId: string;
+  landlordAddress: string;
+  landlordPhone: string;
+  landlordEmail: string;
+  tenantName: string;
+  tenantFirstName: string;
+  tenantLastName: string;
+  tenantNationality: string;
+  tenantId: string;
+  tenantAddress: string;
+  tenantPhone: string;
+  tenantEmail: string;
+  propertyType: string;
+  project: string;
+  houseNo: string;
+  propertyAddress: string;
+  roomType: string;
+  floor: string;
+  area: string;
+  termMonths: string;
+  termFrom: string;
+  termTo: string;
+  monthlyRent: string;
+  monthlyRentWords: string;
+  rentDueDay: string;
+  graceDay: string;
+  latePenalty: string;
+  latePenaltyWords: string;
+  bankName: string;
+  accountName: string;
+  accountNo: string;
+  otherPaymentMethod: string;
+  advanceMonths: string;
+  advanceAmount: string;
+  depositMonths: string;
+  depositAmount: string;
+  otherInitialPayment: string;
+  additionalTerms: string;
+  agentContact: string;
+  landlordSignName: string;
+  tenantSignName: string;
+  witnessSignName: string;
+  /** Optional PNG data URL — not persisted on the contract JSON. */
+  landlordSignaturePng: string;
+  tenantSignaturePng: string;
+}
+
+/** Fillable fields for residential rental reservation PDF (หนังสือจอง). */
+export interface ReservationLetterInput {
+  documentNo: string;
+  issueDate: string;
+  tenantName: string;
+  tenantFirstName: string;
+  tenantLastName: string;
+  tenantPhone: string;
+  tenantEmail: string;
+  tenantId: string;
+  tenantNationality: string;
+  landlordName: string;
+  landlordFirstName: string;
+  landlordLastName: string;
+  landlordPhone: string;
+  landlordEmail: string;
+  landlordId: string;
+  landlordNationality: string;
+  agentName: string;
+  companyName: string;
+  agentPhone: string;
+  project: string;
+  address: string;
+  unitNo: string;
+  floor: string;
+  area: string;
+  beds: string;
+  baths: string;
+  termMonths: string;
+  termFrom: string;
+  termTo: string;
+  monthlyRent: string;
+  advanceMonths: string;
+  advanceAmount: string;
+  depositMonths: string;
+  depositAmount: string;
+  reservationPayment: string;
+  reservationWords: string;
+  /** Apply reservation to advance rent. */
+  applyToAdvance: boolean;
+  /** Apply reservation to security deposit. */
+  applyToDeposit: boolean;
+  balanceDue: string;
+  payee: string;
+  /** transfer | cash | credit | "" */
+  paymentMethod: string;
+  bankAccount: string;
+  tenantSignName: string;
+  landlordSignName: string;
+  agentSignName: string;
+}
+
+/** Fields for generated rental broker appointment PDF (แต่งตั้งนายหน้า). */
+export interface BrokerAppointmentInput {
+  documentNo: string;
+  issueDate: string;
+  landlordName: string;
+  landlordFirstName: string;
+  landlordLastName: string;
+  landlordNationality: string;
+  landlordId: string;
+  landlordAddress: string;
+  landlordPhone: string;
+  brokerCompany: string;
+  brokerContact: string;
+  brokerNationality: string;
+  brokerId: string;
+  brokerPhone: string;
+  brokerAddress: string;
+  propertyLine: string;
+  monthlyRent: string;
+  leaseMonths: string;
+  commissionFee: string;
+  commissionMonths: string;
+  landlordSignName: string;
+  brokerSignName: string;
+  /** Optional PNG data URL for landlord signature image on the PDF. */
+  landlordSignaturePng: string;
+  /** Optional PNG data URL for broker signature image on the PDF. */
+  brokerSignaturePng: string;
 }
