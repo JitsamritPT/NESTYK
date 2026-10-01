@@ -101,11 +101,16 @@ test('lease agreement validates required dates and syncs sign names', () => {
     },
   );
 });
-function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0, draft = null } = {}) {
+const finalizedReservation = {
+  status: 'active',
+  document_url: '7/1/generated/reservation_letter/letter-v1/booked.pdf',
+};
+function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0, draft = null, reservations = [finalizedReservation] } = {}) {
   const saved = []; const calls = []; let rolledBack = false;
   const qb = {};
   for (const key of ['leftJoin', 'where', 'andWhere']) qb[key] = (...args) => { calls.push([key, ...args]); return qb; };
   qb.getCount = async () => calls.some(c => c[1] === "c.previous_agreement_id = :previousId") ? successor : overlap;
+  qb.getMany = async () => reservations;
   const manager = {
     findOne: async (entity, options) => {
       calls.push(['findOne', entity.name, options]);
@@ -200,9 +205,31 @@ test('reservation drafts persist their master code and booking fee without month
 });
 test('overlap checks only the same form kind so reservation does not block lease or broker', async () => {
   const f = fixture(); await f.service.create(7, valid);
-  const clause = f.calls.find(call => call[1]?.includes?.('= :formKind'));
-  assert.ok(clause); assert.equal(clause[2].formKind, 'lease');
+  const clause = f.calls.find(call => call[1]?.includes?.('= :formKind') && call[2]?.formKind === 'lease');
+  assert.ok(clause);
   assert.equal(f.calls.some(call => call[2]?.isLease != null), false);
+});
+test('a new lease requires a generated reservation letter for the same lead and room', async () => {
+  const message = /ต้องสร้างหนังสือจองและออกเอกสารก่อนทำสัญญาเช่า/;
+  for (const reservations of [
+    [],
+    [{ status: 'active', document_url: '7/1/mock/reservation_letter/mock-v2/preview.pdf' }],
+    [{ status: 'cancelled', document_url: finalizedReservation.document_url }],
+    [{ status: 'expired', document_url: finalizedReservation.document_url }],
+    [{ status: 'terminated', document_url: finalizedReservation.document_url }],
+  ]) {
+    const f = fixture({ reservations });
+    await assert.rejects(() => f.service.create(7, valid), message);
+    assert.equal(f.saved.length, 0);
+  }
+  const booked = fixture();
+  const created = await booked.service.create(7, valid);
+  assert.equal(created.status, 'draft');
+});
+test('renewing a lease does not require another reservation letter', async () => {
+  const f = fixture({ previous: original, reservations: [] });
+  const c = await f.service.create(7, { ...valid, previousAgreementId: 20 });
+  assert.equal(c.agreement_kind, 'renewal');
 });
 test('inactive or unknown master type is rejected before transaction', async () => {
   const service = new AgentContractsService({ getRepository: () => ({findOneBy: async () => null}), transaction: () => assert.fail('Must not write') });

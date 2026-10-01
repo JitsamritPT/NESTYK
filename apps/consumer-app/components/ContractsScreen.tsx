@@ -33,8 +33,7 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
-  Platform,
-  Share,
+  Alert,
 } from "react-native";
 import {
   SafeAreaProvider,
@@ -86,7 +85,7 @@ import {
   getAgentContractDraftTemplate,
   uploadAgentContractDocument,
   signAgentContract,
-  createContractSignInvite,
+  deliverAgentContract,
   previewAgentReservation,
   generateAgentReservation,
   previewAgentBrokerAppointment,
@@ -99,6 +98,9 @@ import {
   ContractSignaturePad,
   type ContractSignaturePadHandle,
 } from "./ContractSignaturePad";
+
+const LEASE_REQUIRES_RESERVATION =
+  "ต้องสร้างหนังสือจองและออกเอกสารก่อนทำสัญญาเช่า";
 
 const labels: Record<AgentContractStatus, string> = {
   draft: "ฉบับร่าง",
@@ -258,9 +260,28 @@ export function ContractsScreen({
       }),
     );
   };
+  function finalizedReservation(forLeadId: number | null) {
+    return contracts.some(
+      (row) =>
+        row.formKind === "reservation" &&
+        row.reservationLetterStatus === "ready" &&
+        !["cancelled", "expired", "terminated"].includes(row.status) &&
+        (forLeadId == null || row.leadId === forLeadId),
+    );
+  }
   const nextCreationStep = () => {
     if (!leadId) {
       setError("กรุณาเลือกผู้เช่าและห้อง");
+      changeCreationStep(0);
+      return;
+    }
+    if (
+      lease &&
+      !renewing &&
+      !editingDraft?.previousAgreementId &&
+      !finalizedReservation(leadId)
+    ) {
+      setError(LEASE_REQUIRES_RESERVATION);
       changeCreationStep(0);
       return;
     }
@@ -678,22 +699,52 @@ export function ContractsScreen({
     setSignPadKey((key) => key + 1);
     setSignParties(parties);
   }
+  function partyDeliveredAt(
+    contract: AgentContract,
+    party: "owner" | "tenant",
+  ) {
+    return party === "owner"
+      ? contract.ownerDeliveredAt
+      : contract.tenantDeliveredAt;
+  }
+  function confirmShare(party: "owner" | "tenant") {
+    if (!selected || busy || documentLocked || !attachmentsReady) return;
+    if (partyDeliveredAt(selected, party)) return;
+    const label = party === "owner" ? docs.owner : docs.tenant;
+    Alert.alert(docs.shareSign, docs.shareSignMessage.replace("{party}", label), [
+      { text: t.common.cancel, style: "cancel" },
+      { text: docs.shareSignSend, onPress: () => void shareSignInvite(party) },
+    ]);
+  }
   async function shareSignInvite(party: "owner" | "tenant") {
     if (!selected || busy || documentLocked || !attachmentsReady) return;
+    if (partyDeliveredAt(selected, party)) return;
+    const contractId = selected.id;
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const invite = await createContractSignInvite(selected.id, party);
-      if (Platform.OS === "web" && typeof navigator !== "undefined" && !navigator.share && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(invite.url);
-        setNotice("คัดลอกลิงก์สำหรับลงนามแล้ว");
-        return;
-      }
-      const result = await Share.share({ message: invite.url });
-      if (Platform.OS === "web" || result?.action === Share.sharedAction) setNotice(docs.shareSignSuccess);
+      const sent = await deliverAgentContract(contractId, party);
+      const stamp = (contract: AgentContract): AgentContract =>
+        contract.id !== contractId
+          ? contract
+          : {
+              ...contract,
+              ownerDeliveredAt:
+                party === "owner" ? sent.deliveredAt : contract.ownerDeliveredAt,
+              tenantDeliveredAt:
+                party === "tenant"
+                  ? sent.deliveredAt
+                  : contract.tenantDeliveredAt,
+            };
+      setSelected((current) => (current ? stamp(current) : current));
+      setContracts((rows) => rows.map(stamp));
+      setNotice(
+        party === "owner"
+          ? "แชร์ให้ผู้ให้เช่าแล้ว"
+          : "แชร์ให้ผู้เช่าแล้ว",
+      );
     } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") return;
       setError(
         e instanceof Error && e.message ? e.message : docs.shareSignError,
       );
@@ -1143,6 +1194,15 @@ export function ContractsScreen({
         setError("กรุณาเลือกผู้เช่า");
         return;
       }
+      if (
+        !renewing &&
+        !editingDraft?.previousAgreementId &&
+        !finalizedReservation(leadId)
+      ) {
+        changeCreationStep(0);
+        setError(LEASE_REQUIRES_RESERVATION);
+        return;
+      }
       const fieldErrors = leaseAgreementFieldErrors(leaseForm);
       if (Object.keys(fieldErrors).length) {
         changeCreationStep(Math.min(...Object.keys(fieldErrors).map(leaseAgreementFieldStep)));
@@ -1305,6 +1365,14 @@ export function ContractsScreen({
   async function onCreateKind(kind: CreateDocumentKind) {
     setError("");
     setNotice("");
+    if (
+      kind === "lease" &&
+      !loadingList &&
+      !finalizedReservation(tenant?.leadId ?? null)
+    ) {
+      setError(LEASE_REQUIRES_RESERVATION);
+      return;
+    }
     if (kind === "reservation" || kind === "lease" || kind === "broker_appointment") {
       setBusy(true);
       try {
@@ -1328,7 +1396,11 @@ export function ContractsScreen({
   if (choosingType)
     return (
       <ContractTypePicker
-        onBack={() => setChoosingType(false)}
+        message={error}
+        onBack={() => {
+          setChoosingType(false);
+          setError("");
+        }}
         onSelect={(kind) => {
           void onCreateKind(kind);
         }}
@@ -2180,14 +2252,16 @@ export function ContractsScreen({
                     <MobileButton
                       variant="outline"
                       style={s.shareButton}
-                      disabled={busy || !attachmentsReady}
-                      onPress={() => {
-                        if (party.key === "owner" || party.key === "tenant") {
-                          void shareSignInvite(party.key);
-                        }
-                      }}
+                      disabled={
+                        busy ||
+                        !attachmentsReady ||
+                        !!partyDeliveredAt(selected, party.key)
+                      }
+                      onPress={() => confirmShare(party.key)}
                     >
-                      {docs.shareSign}
+                      {partyDeliveredAt(selected, party.key)
+                        ? docs.shareSignSent
+                        : docs.shareSign}
                     </MobileButton>
                   )}
                   <MobileButton

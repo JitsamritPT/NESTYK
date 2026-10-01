@@ -41,9 +41,11 @@ const CREATE_OPTIONS: Array<{
 export function ContractTypePicker({
   onSelect,
   onBack,
+  message,
 }: {
   onSelect: (kind: CreateDocumentKind) => void;
   onBack: () => void;
+  message?: string;
 }) {
   const { theme } = useMobileTheme();
   const { t } = useLocale();
@@ -59,6 +61,11 @@ export function ContractTypePicker({
         <Text style={[styles.description, { color: theme.textSecondary }]}>
           ต้องการสร้างเอกสารอะไร?
         </Text>
+        {!!message && (
+          <Text accessibilityRole="alert" style={styles.message}>
+            {message}
+          </Text>
+        )}
       </View>
       <View style={styles.grid}>
         {CREATE_OPTIONS.map((option) => {
@@ -104,6 +111,12 @@ const styles = StyleSheet.create({
     fontFamily: tokens.typography.native.body,
     fontSize: 14,
     lineHeight: 23,
+  },
+  message: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 22,
+    color: "#C74747",
   },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   tile: {

@@ -127,6 +127,12 @@ export class LeaseContractEntity extends SerialTimestampEntity {
   @Column({ type: "timestamptz", nullable: true })
   agent_signed_at: Date | null;
 
+  @Column({ type: "timestamptz", nullable: true })
+  owner_delivered_at: Date | null;
+
+  @Column({ type: "timestamptz", nullable: true })
+  tenant_delivered_at: Date | null;
+
   @Column({ type: "text", nullable: true })
   agent_signature_url: string | null;
 

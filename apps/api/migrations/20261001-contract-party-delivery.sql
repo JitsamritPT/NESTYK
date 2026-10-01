@@ -1,0 +1,3 @@
+ALTER TABLE lease_contracts
+  ADD COLUMN IF NOT EXISTS owner_delivered_at TIMESTAMPTZ NULL,
+  ADD COLUMN IF NOT EXISTS tenant_delivered_at TIMESTAMPTZ NULL;

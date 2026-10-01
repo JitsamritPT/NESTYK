@@ -498,6 +498,8 @@ export interface TranslationSchema {
       signFor: string;
       shareSign: string;
       shareSignMessage: string;
+      shareSignSend: string;
+      shareSignSent: string;
       shareSignSuccess: string;
       shareSignError: string;
       signTitle: string;

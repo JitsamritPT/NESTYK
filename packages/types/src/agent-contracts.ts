@@ -51,6 +51,8 @@ export interface AgentContract {
   notes: string | null;
   ownerSignedAt: string | null;
   tenantSignedAt: string | null;
+  ownerDeliveredAt: string | null;
+  tenantDeliveredAt: string | null;
   agentSignedAt: string | null;
   ownerSignatureUrl: string | null;
   tenantSignatureUrl: string | null;
@@ -82,6 +84,14 @@ export interface ContractSignInvite {
   party: "owner" | "tenant";
   url: string;
   expiresAt: string;
+}
+export interface ContractDelivery {
+  party: "owner" | "tenant";
+  userId: number;
+  deliveredAt: string;
+}
+export interface PartyContract extends AgentContract {
+  myParties: Array<"owner" | "tenant">;
 }
 export interface ContractCandidate {
   leadId: number;

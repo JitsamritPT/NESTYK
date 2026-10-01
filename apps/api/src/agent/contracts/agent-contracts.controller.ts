@@ -221,6 +221,15 @@ export class AgentContractsController {
   ) {
     return this.contracts.sign(user.id, id, body);
   }
+  @Post(":id/deliveries")
+  @HttpCode(HttpStatus.OK)
+  deliver(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: unknown,
+  ) {
+    return this.contracts.deliverToParty(user.id, id, body);
+  }
   @Post(":id/sign-invites")
   @HttpCode(HttpStatus.OK)
   createSignInvite(

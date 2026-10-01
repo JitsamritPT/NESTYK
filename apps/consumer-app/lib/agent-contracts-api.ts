@@ -101,6 +101,14 @@ export async function signAgentContract(
   return apiPost(`/agent/contracts/${id}/sign`, input);
 }
 
+export async function deliverAgentContract(
+  id: number,
+  party: "owner" | "tenant",
+): Promise<import("@nestyk/types").ContractDelivery> {
+  await ensureAgentSession();
+  return apiPost(`/agent/contracts/${id}/deliveries`, { party });
+}
+
 export async function createContractSignInvite(
   id: number,
   party: "owner" | "tenant",

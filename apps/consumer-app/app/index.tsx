@@ -1,6 +1,7 @@
 import { AgentCalendarScreen, emptyCalendarDraft } from '../components/AgentCalendarScreen';
 import { calendarDateKey, createCalendarDemoEvents } from '../lib/agent-calendar-demo';
 import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
+import { PartyContractsScreen } from '../components/PartyContractsScreen';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -112,6 +113,7 @@ export default function AppHomeScreen() {
   );
   const [searchQuery, setSearchQuery] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [partyInbox, setPartyInbox] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
   const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
@@ -188,6 +190,7 @@ export default function AppHomeScreen() {
       setDrawerOpen(true);
       return;
     }
+    setPartyInbox(false);
     setLeadsOpenCreate(false);
     if (tab !== 'listingLead') setLeadsWorkFilter(null);
     if (tab !== 'clients') setClientsWorkFilter(null);
@@ -239,6 +242,7 @@ export default function AppHomeScreen() {
       router.push('/login');
       return;
     }
+    setPartyInbox(false);
     setActiveRole(role);
     setActiveTab(getDefaultTabForRole(role));
   };
@@ -908,10 +912,12 @@ export default function AppHomeScreen() {
     }
     try {
       await signOut();
+      setPartyInbox(false);
       setActiveRole('guest');
       setActiveTab(getDefaultTabForRole('guest'));
       Alert.alert(t.common.signOut, t.mobile.auth.signedOut);
     } catch {
+      setPartyInbox(false);
       setActiveRole('guest');
       setActiveTab(getDefaultTabForRole('guest'));
       Alert.alert(t.common.signOut, t.mobile.auth.signedOut);
@@ -969,8 +975,12 @@ export default function AppHomeScreen() {
           />
         }
       >
-        <React.Fragment key={`${activeRole}-${activeTab}`}>
-          {renderTabBody()}
+        <React.Fragment key={`${activeRole}-${activeTab}-${partyInbox ? 'inbox' : 'tab'}`}>
+          {partyInbox ? (
+            <PartyContractsScreen onBack={() => setPartyInbox(false)} />
+          ) : (
+            renderTabBody()
+          )}
         </React.Fragment>
       </MobileModePage>
 
@@ -995,6 +1005,11 @@ export default function AppHomeScreen() {
             return;
           }
           if (action.type === 'route') {
+            if (action.path === '/tenant/contract' || action.path === '/owner/contracts') {
+              setDrawerOpen(false);
+              setPartyInbox(true);
+              return;
+            }
             Alert.alert('Open', action.path);
             return;
           }

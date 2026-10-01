@@ -24,7 +24,13 @@ type TextField = Exclude<
   "applyToAdvance" | "applyToDeposit"
 >;
 
-type Blank = { x: number; w: number; y: number; size?: number };
+type Blank = {
+  x: number;
+  w: number;
+  y: number;
+  size?: number;
+  align?: "center";
+};
 
 /**
  * Blank slots measured from template underscore runs (pdf.js positions).
@@ -38,14 +44,14 @@ const SLOTS: Record<TextField, Blank> = {
   tenantLastName: { x: 0, w: 0, y: 0 },
   tenantPhone: { x: 468.0, w: 80.0, y: 646.3 },
   tenantEmail: { x: 0, w: 0, y: 0 },
-  tenantId: { x: 355.0, w: 68.0, y: 629.4 },
+  tenantId: { x: 337.7, w: 63.2, y: 629.4, align: "center" },
   tenantNationality: { x: 505.0, w: 42.0, y: 629.4 },
   landlordName: { x: 148.0, w: 205.0, y: 612.5 },
   landlordFirstName: { x: 0, w: 0, y: 0 },
   landlordLastName: { x: 0, w: 0, y: 0 },
   landlordPhone: { x: 468.0, w: 80.0, y: 612.5 },
   landlordEmail: { x: 0, w: 0, y: 0 },
-  landlordId: { x: 345.0, w: 80.0, y: 595.6 },
+  landlordId: { x: 303.4, w: 99.0, y: 595.6, align: "center" },
   landlordNationality: { x: 505.0, w: 42.0, y: 595.6 },
   agentName: { x: 168.0, w: 88.0, y: 578.6 },
   companyName: { x: 345.0, w: 95.0, y: 578.6 },
@@ -230,7 +236,11 @@ export async function createReservationLetterPdf(
     const preferred = slot.size ?? 8.5;
     const { text, size } = fit(value, slot.w - 2, preferred);
     if (!text) return;
-    drawShaped(text, slot.x + 1, slot.y + 0.6, size);
+    const x =
+      slot.align === "center"
+        ? slot.x + Math.max(1, (slot.w - widthOf(text, size)) / 2)
+        : slot.x + 1;
+    drawShaped(text, x, slot.y + 0.6, size);
   }
 
   function mark(slot: { x: number; y: number }) {
