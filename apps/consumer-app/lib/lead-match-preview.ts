@@ -13,8 +13,10 @@ export type LeadRoomMatch = {
   room: AgentListingCard;
   /** 0–100 average of the matching-tab criteria (see lead-room-compare). */
   score: number;
-  /** 0–100 weighted distance score of the best pin. */
+  /** 0–100 weighted distance score of the best pin (`distanceScore` × `pinWeight`). */
   locationScore: number;
+  distanceScore: number;
+  pinWeight: number;
   /** Monthly rent compared with the budget. */
   price: number;
   termMonths: number | null;
@@ -60,16 +62,31 @@ export function matchLeadRooms(lead: AgentLead, rooms: AgentListingCard[]): Lead
     if (room.latitude == null || room.longitude == null) continue;
     const priced = comparablePrice(room, lead);
     if (!priced || priced.price > budget) continue;
-    let best: { locationScore: number; pin: LeadPin; distanceKm: number; withinRadius: boolean } | null = null;
+    let best: {
+      locationScore: number;
+      distanceScore: number;
+      pinWeight: number;
+      pin: LeadPin;
+      distanceKm: number;
+      withinRadius: boolean;
+    } | null = null;
     for (const pin of lead.pins) {
       const d = distanceKm(pin.latitude, pin.longitude, room.latitude, room.longitude);
       if (d > radius * 2) continue;
       const distanceScore = d <= radius ? 100 : 100 * (1 - (d - radius) / radius);
-      const locationScore = distanceScore * (PIN_RANK_WEIGHTS[pin.rank] ?? 0.7);
-      if (!best || locationScore > best.locationScore) best = { locationScore, pin, distanceKm: d, withinRadius: d <= radius };
+      const pinWeight = PIN_RANK_WEIGHTS[pin.rank] ?? 0.7;
+      const locationScore = distanceScore * pinWeight;
+      if (!best || locationScore > best.locationScore) {
+        best = { locationScore, distanceScore, pinWeight, pin, distanceKm: d, withinRadius: d <= radius };
+      }
     }
     if (best) {
-      const located = { ...priced, ...best, locationScore: Math.round(best.locationScore) };
+      const located = {
+        ...priced,
+        ...best,
+        locationScore: Math.round(best.locationScore),
+        distanceScore: Math.round(best.distanceScore),
+      };
       const comparison = compareLeadRoom(lead, located, room);
       matches.push({ room, ...located, comparison, score: overallScore(comparison) });
     }

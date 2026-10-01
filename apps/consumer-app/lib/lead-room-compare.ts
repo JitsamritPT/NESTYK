@@ -24,8 +24,13 @@ type Row<S extends CompareStatus, T> = T & {
 };
 
 export type LeadRoomComparison = {
-  budget: Row<'pass', { price: number }>;
-  location: Row<'pass' | 'near', { distanceKm: number; overKm: number; pinName: string; pinRank: number }>;
+  /** `headroom` = budget max − price (≥ 0 after the hard filter). */
+  budget: Row<'pass', { price: number; headroom: number | null }>;
+  /** `score` = `distanceScore` × `pinWeight`. */
+  location: Row<
+    'pass' | 'near',
+    { distanceKm: number; overKm: number; pinName: string; pinRank: number; distanceScore: number; pinWeight: number }
+  >;
   roomType: Row<CompareStatus, { want: string | null; have: string | null }>;
   lease: Row<CompareStatus, { want: number | null; terms: number[] }>;
   moveIn: Row<CompareStatus, { want: string | null; availableFrom: string | null; daysLate: number }>;
@@ -39,6 +44,9 @@ export const COMPARE_KEYS: CompareKey[] = ['budget', 'location', 'roomType', 'le
 export type LocatedRoom = {
   price: number;
   locationScore: number;
+  /** 0–100 before the pin-rank weight. */
+  distanceScore: number;
+  pinWeight: number;
   distanceKm: number;
   withinRadius: boolean;
   pin: { name: string; rank: number };
@@ -96,7 +104,12 @@ export function compareLeadRoom(lead: AgentLead, located: LocatedRoom, room: Roo
   const radius = lead.radiusKm ?? 0;
 
   return {
-    budget: { status: 'pass', score: 100, price: located.price },
+    budget: {
+      status: 'pass',
+      score: 100,
+      price: located.price,
+      headroom: lead.budgetMax != null ? Math.max(0, lead.budgetMax - located.price) : null,
+    },
     location: {
       status: located.withinRadius ? 'pass' : 'near',
       score: located.locationScore,
@@ -104,6 +117,8 @@ export function compareLeadRoom(lead: AgentLead, located: LocatedRoom, room: Roo
       overKm: Math.max(0, located.distanceKm - radius),
       pinName: located.pin.name,
       pinRank: located.pin.rank,
+      distanceScore: located.distanceScore,
+      pinWeight: located.pinWeight,
     },
     roomType: { status: roomTypeStatus, score: binary(roomTypeStatus), want: roomTypeWant, have: roomTypeHave },
     lease: { status: leaseStatus, score: binary(leaseStatus), want: leaseWant, terms },

@@ -1,6 +1,6 @@
 const { test }=require('node:test');const assert=require('node:assert/strict');const ts=require('typescript');require('reflect-metadata');
 require.extensions['.ts']=(module,filename)=>module._compile(ts.transpileModule(require('node:fs').readFileSync(filename,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,experimentalDecorators:true,emitDecoratorMetadata:true,esModuleInterop:true},fileName:filename}).outputText,filename);
-const {AgentLeadsService,validateLead,normalizeLeadSort}=require('../src/agent/leads/agent-leads.service.ts');const {AgentLeadsController}=require('../src/agent/leads/agent-leads.controller.ts');const {AuthService}=require('../src/auth/auth.service.ts');const {Module}=require('@nestjs/common');const {NestFactory}=require('@nestjs/core');
+const {AgentLeadsService,validateLead,normalizeLeadSort,phoneSearchDigits}=require('../src/agent/leads/agent-leads.service.ts');const {AgentLeadsController}=require('../src/agent/leads/agent-leads.controller.ts');const {AuthService}=require('../src/auth/auth.service.ts');const {Module}=require('@nestjs/common');const {NestFactory}=require('@nestjs/core');
 // Fake transaction: pin writes land on the lead row returned by rowById.
 const withTx=(repo,rowById)=>{const pinRepo={delete:async({lead_id})=>{const r=rowById(lead_id);if(r)r.pins=[];},insert:async list=>{const r=rowById(list[0].lead_id);if(r)r.pins=list.map(p=>({...p}));}};repo.manager={...(repo.manager||{}),transaction:async fn=>fn({getRepository:e=>e.name==='LeadLocationEntity'?pinRepo:repo})};return repo;};
 const asok={rank:1,placeId:'test-place',name:'BTS Asok',latitude:13.737,longitude:100.56,province:'กรุงเทพมหานคร',district:'วัฒนา'};
@@ -146,4 +146,52 @@ test('editing keeps pins on partial updates, reorders them, and can clear them',
   assert.deepEqual(row.locations,['คลองเตย','วัฒนา']);
   await service.update(7,1,{pins:[],province:null,locations:[],radiusKm:null,hasPets:null});
   assert.deepEqual(row.pins,[]); assert.equal(row.radius_km,null); assert.equal(row.province,null); assert.deepEqual(row.locations,[]); assert.equal(row.has_pets,null);
+});
+
+test('email and other contact channels are validated, trimmed and deduplicated',()=>{
+  const base={name:'A',phone:'123'};
+  assert.equal(validateLead(base).email,null);
+  assert.deepEqual(validateLead(base).otherContacts,[]);
+  assert.equal(validateLead({...base,email:'  '}).email,null);
+  const value=validateLead({...base,email:' a@b.co ',otherContacts:[{channel:'line',value:' @lead '},{channel:'line',value:'@LEAD'},{channel:'whatsapp',value:'+66 81 234 5678'}]});
+  assert.equal(value.email,'a@b.co');
+  assert.deepEqual(value.otherContacts,[{channel:'line',value:'@lead'},{channel:'whatsapp',value:'+66 81 234 5678'}]);
+  const contact={channel:'line',value:'@x'};
+  for(const patch of [{email:'no-at'},{email:5},{email:`${'a'.repeat(250)}@b.com`},{otherContacts:'line'},{otherContacts:[{channel:'kakao',value:'x'}]},{otherContacts:[{channel:'line',value:' '}]},{otherContacts:[{channel:'line',value:'x'.repeat(256)}]},{otherContacts:[null]},{otherContacts:Array.from({length:6},(_,i)=>({...contact,value:`@x${i}`}))}]) assert.throws(()=>validateLead({...base,...patch}),undefined,JSON.stringify(patch).slice(0,80));
+});
+
+test('international phone numbers are normalized to E.164 while legacy local text is kept',()=>{
+  const base={name:'A'};
+  assert.equal(validateLead({...base,phone:'+66 81-234 5678'}).phone,'+66812345678');
+  assert.equal(validateLead({...base,phone:'0812345678'}).phone,'0812345678');
+  assert.equal(validateLead({...base,phone:'TEST'}).phone,'TEST');
+  for(const phone of ['+0812345678','+66','+66abc12345','+1234567890123456']) assert.throws(()=>validateLead({...base,phone}),undefined,phone);
+});
+
+test('phone search matches Thai local and +66 forms',async()=>{
+  assert.deepEqual(phoneSearchDigits('081-234'),['081234','6681234']);
+  assert.deepEqual(phoneSearchDigits('+66 81 234'),['6681234','081234']);
+  assert.deepEqual(phoneSearchDigits('Somchai'),[]);
+  assert.deepEqual(phoneSearchDigits('12'),[]);
+  const calls=[];const qb={};
+  for(const method of ['leftJoinAndSelect','where','andWhere','orderBy','addOrderBy','skip','take']) qb[method]=(...args)=>{calls.push([method,...args]);return qb;};
+  qb.getManyAndCount=async()=>[[],0];
+  const service=new AgentLeadsService({createQueryBuilder:()=>qb},{},{},{});
+  await service.list(7,{q:'0812'});
+  const search=calls.find(([method,sql])=>method==='andWhere'&&sql.includes('ILIKE :q'));
+  assert.ok(search[1].includes('LIKE ANY')); assert.deepEqual(search[2].phoneDigits,['%0812%','%66812%']);
+  calls.length=0;
+  await service.list(7,{q:'Somchai'});
+  assert.ok(!calls.find(([method,sql])=>method==='andWhere'&&sql.includes('ILIKE :q'))[1].includes('LIKE ANY'));
+});
+
+test('editing keeps contacts on partial updates and can clear them', async () => {
+  const row = {id: 2, created_by_user_id: 7, name:'Lead',phone:'0812345678',status:'new',province:null,locations:[],email:'old@mail.com',other_contacts:[{channel:'line',value:'@old'}],created_at:new Date(),pins:[]};
+  const service = new AgentLeadsService(withTx({findOne:async()=>({...row}),update:async(_,patch)=>Object.assign(row,patch)}, () => row), {}, {}, {});
+  const kept = await service.update(7,2,{name:'Renamed'});
+  assert.equal(kept.email,'old@mail.com'); assert.deepEqual(kept.otherContacts,[{channel:'line',value:'@old'}]);
+  const changed = await service.update(7,2,{otherContacts:[{channel:'wechat',value:'wx_lead'}]});
+  assert.deepEqual(changed.otherContacts,[{channel:'wechat',value:'wx_lead'}]); assert.deepEqual(row.other_contacts,[{channel:'wechat',value:'wx_lead'}]);
+  await service.update(7,2,{email:null,otherContacts:[]});
+  assert.equal(row.email,null); assert.deepEqual(row.other_contacts,[]);
 });

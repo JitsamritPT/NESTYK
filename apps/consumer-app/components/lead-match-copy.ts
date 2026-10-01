@@ -31,21 +31,5 @@ export function useMatchCopy() {
     }
   };
 
-  /** Short chip label for the verdict row. */
-  const issueLabel = (key: CompareKey, c: LeadRoomComparison): string => {
-    switch (key) {
-      case 'location':
-        return m.issueLocation.replace('{km}', formatKm(c.location.overKm));
-      case 'roomType':
-        return m.issueRoomType;
-      case 'lease':
-        return m.issueLease;
-      case 'moveIn':
-        return m.issueMoveIn.replace('{days}', String(c.moveIn.daysLate));
-      default:
-        return '';
-    }
-  };
-
-  return { t, locale, m, roomTypeName, months, reason, issueLabel };
+  return { t, locale, m, roomTypeName, months, reason };
 }

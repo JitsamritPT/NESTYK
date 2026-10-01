@@ -1,5 +1,13 @@
 import { LeadLocationsField } from './LeadLocationsField';
 import { LeadSelectField } from './LeadSelectField';
+import { PhoneField } from './PhoneField';
+import {
+  countryForNationality,
+  parseStoredPhone,
+  phoneDraftToE164,
+  samePhoneDraft,
+  type PhoneDraft,
+} from '../lib/phone';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -9,9 +17,17 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  TextInput,
 } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
-import type { AgentLead, CreateLeadInput, LeadPinInput } from '@nestyk/types';
+import {
+  LEAD_CONTACT_CHANNELS,
+  LEAD_MAX_CONTACTS,
+  type AgentLead,
+  type CreateLeadInput,
+  type LeadContactChannel,
+  type LeadPinInput,
+} from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
 import { MoveInDateField } from '@nestyk/feature-listing';
 import {
@@ -33,7 +49,7 @@ import {
 
 type TextKey =
   | 'name'
-  | 'phone'
+  | 'email'
   | 'nationality'
   | 'budgetMin'
   | 'budgetMax'
@@ -48,7 +64,7 @@ type FormTab = LeadFormTab;
 
 const empty: Record<TextKey, string> = {
   name: '',
-  phone: '',
+  email: '',
   nationality: '',
   budgetMin: '',
   budgetMax: '',
@@ -59,8 +75,12 @@ const empty: Record<TextKey, string> = {
   notes: '',
 };
 
-const PROFILE_KEYS = new Set(['name', 'phone', 'nationality', 'occupation', 'occupantCount', 'notes']);
+const PROFILE_KEYS = new Set(['name', 'phone', 'email', 'nationality', 'occupation', 'occupantCount', 'notes']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** `channel` stays null until picked; its value input is locked until then. */
+type ContactDraft = { key: number; channel: LeadContactChannel | null; value: string };
 const NOTES_MAX = 500;
 
 export function CreateLeadForm({
@@ -107,6 +127,15 @@ export function CreateLeadForm({
     occupation:
       !!initialLead?.occupation && !presetCodeFor(LEAD_OCCUPATION_OPTIONS, initialLead.occupation),
   }));
+  const [initialPhone] = useState(() => parseStoredPhone(initialLead?.phone));
+  const [phone, setPhone] = useState<PhoneDraft>(initialPhone);
+  const contactKey = useRef(0);
+  const [contacts, setContacts] = useState<ContactDraft[]>(
+    () =>
+      (initialLead?.otherContacts ?? []).map((contact) => ({ ...contact, key: contactKey.current++ })),
+  );
+  const contactInputs = useRef(new Map<number, TextInput>());
+  const [focusContact, setFocusContact] = useState<number | null>(null);
   const [saveError, setSaveError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<{
@@ -159,6 +188,16 @@ export function CreateLeadForm({
     };
   }, [typeRetry]);
 
+  useEffect(() => {
+    if (focusContact == null) return;
+    // Wait for the channel sheet to finish closing, or it takes the focus back.
+    const timer = setTimeout(() => {
+      contactInputs.current.get(focusContact)?.focus();
+      setFocusContact(null);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [focusContact]);
+
   const visaLabel = (code: string) =>
     t.masters.visaTypes[code as keyof typeof t.masters.visaTypes] || code;
   const roomLabel = (code: string) =>
@@ -206,7 +245,9 @@ export function CreateLeadForm({
         editable={!busy}
         maxLength={opts.maxLength}
         leadingIcon={opts.icon}
-        keyboardType={key === 'phone' ? 'phone-pad' : opts.numeric ? 'decimal-pad' : 'default'}
+        keyboardType={key === 'email' ? 'email-address' : opts.numeric ? 'decimal-pad' : 'default'}
+        autoCapitalize={key === 'email' ? 'none' : undefined}
+        autoCorrect={key === 'email' ? false : undefined}
         error={errors[key]}
         multiline={opts.multiline}
         onChangeText={(value) => setField(key, value)}
@@ -249,6 +290,8 @@ export function CreateLeadForm({
             }
             setOtherOpen((current) => ({ ...current, [key]: false }));
             setField(key, next ? presets.find((preset) => preset.code === next)?.stored ?? '' : '');
+            const country = key === 'nationality' ? countryForNationality(next) : null;
+            if (country) setPhone((current) => (current.digits ? current : { region: country, digits: '' }));
           }}
         />
         {value === LEAD_OTHER_OPTION ? (
@@ -263,6 +306,89 @@ export function CreateLeadForm({
       </View>
     );
   };
+
+  const updateContact = (key: number, patch: Partial<Omit<ContactDraft, 'key'>>) =>
+    setContacts((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
+
+  const addContact = () =>
+    setContacts((current) => [...current, { key: contactKey.current++, channel: null, value: '' }]);
+
+  const pickChannel = (item: ContactDraft, channel: LeadContactChannel | null) => {
+    if (!channel) return;
+    updateContact(item.key, { channel });
+    if (!item.value.trim()) setFocusContact(item.key);
+  };
+
+  const contactsEditor = () => (
+    <View style={styles.group}>
+      <View style={{ gap: 2 }}>
+        <Text style={[styles.fieldLabel, { color: theme.textHeading }]}>{c.otherContacts}</Text>
+        <Text style={[styles.hint, { color: theme.textSecondary }]}>
+          {c.otherContactsHint.replace('{max}', String(LEAD_MAX_CONTACTS))}
+        </Text>
+      </View>
+      {contacts.map((item) => (
+        <View key={item.key} style={styles.contactRow}>
+          <LeadSelectField<LeadContactChannel>
+            style={styles.contactChannel}
+            hideLabel
+            label={c.contactChannel}
+            placeholder={c.selectContactChannel}
+            icon={item.channel === 'facebook' ? 'facebook' : 'chat'}
+            value={item.channel}
+            disabled={busy}
+            options={LEAD_CONTACT_CHANNELS.map((code) => ({ value: code, label: c.contactChannels[code] }))}
+            onChange={(channel) => pickChannel(item, channel)}
+          />
+          <MobileInput
+            ref={(input) => {
+              if (input) contactInputs.current.set(item.key, input);
+              else contactInputs.current.delete(item.key);
+            }}
+            containerStyle={styles.contactValue}
+            value={item.value}
+            placeholder={item.channel ? c.contactPlaceholders[item.channel] : c.contactPickFirst}
+            editable={!busy && item.channel != null}
+            maxLength={255}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType={item.channel === 'whatsapp' ? 'phone-pad' : 'default'}
+            accessibilityLabel={item.channel ? c.contactChannels[item.channel] : c.contactChannel}
+            onChangeText={(value) => updateContact(item.key, { value })}
+          />
+          <Pressable
+            disabled={busy}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={
+              item.channel ? `${c.removeContact}: ${c.contactChannels[item.channel]}` : c.removeContact
+            }
+            onPress={() => setContacts((current) => current.filter((row) => row.key !== item.key))}
+            {...(Platform.OS === 'android' ? { android_ripple: { color: 'rgba(0,0,0,0.06)', borderless: true } } : {})}
+            style={({ pressed }) => [styles.contactRemove, pressed && Platform.OS === 'ios' ? { opacity: 0.6 } : null]}
+          >
+            <MobileIcon name="trash" size={18} color={theme.textSecondary} />
+          </Pressable>
+        </View>
+      ))}
+      {contacts.length < LEAD_MAX_CONTACTS ? (
+        <Pressable
+          disabled={busy}
+          onPress={addContact}
+          accessibilityRole="button"
+          {...(Platform.OS === 'android' ? { android_ripple: { color: 'rgba(0,0,0,0.06)' } } : {})}
+          style={({ pressed }) => [
+            styles.contactAdd,
+            { borderColor: theme.border },
+            pressed && Platform.OS === 'ios' ? { opacity: 0.7 } : null,
+          ]}
+        >
+          <MobileIcon name="plus" size={16} color={theme.textHeading} />
+          <Text style={[styles.contactAddText, { color: theme.textHeading }]}>{c.addContact}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 
   const careChoice = (
     key: keyof typeof choices,
@@ -355,14 +481,24 @@ export function CreateLeadForm({
     if (lock.current) return;
     const next: Record<string, string> = {};
     if (!form.name.trim()) next.name = c.required;
-    if (!form.phone.trim()) next.phone = c.required;
+    const phoneE164 = phoneDraftToE164(phone);
+    // Unedited legacy numbers (free text before the picker) save as-is so other edits aren't blocked.
+    const phoneValue = phoneE164 ?? (initialLead && samePhoneDraft(phone, initialPhone) ? initialLead.phone : '');
+    if (!phone.digits) next.phone = c.required;
+    else if (!phoneValue) next.phone = c.invalidPhone;
+    const email = form.email.trim();
+    if (email && !EMAIL_PATTERN.test(email)) next.email = c.invalidEmail;
     const body: CreateLeadInput = {
       pins,
       radiusKm: pins.length ? radiusKm : null,
       province: initialLead?.province ?? null,
       locations: initialLead?.locations ?? [],
       name: form.name.trim(),
-      phone: form.phone.trim(),
+      phone: phoneValue,
+      email: email || null,
+      otherContacts: contacts.flatMap(({ channel, value }) =>
+        channel && value.trim() ? [{ channel, value: value.trim() }] : [],
+      ),
       ...choices,
       desiredRoomTypeId: roomType,
       visaTypeId: visaType,
@@ -420,7 +556,7 @@ export function CreateLeadForm({
     }
   };
 
-  const profileHasError = ['name', 'phone', 'occupantCount'].some((key) => errors[key]);
+  const profileHasError = ['name', 'phone', 'email', 'occupantCount'].some((key) => errors[key]);
   const matchingHasError = ['budgetMin', 'budgetMax'].some((key) => errors[key]);
 
   const tabButton = (value: FormTab, label: string, hasError: boolean) => {
@@ -461,13 +597,24 @@ export function CreateLeadForm({
         icon: 'user',
         required: true,
       })}
-      {field('phone', {
-        label: c.phone,
-        maxLength: 50,
-        placeholder: c.phonePlaceholder,
-        icon: 'phone',
-        required: true,
+      <PhoneField
+        label={c.phone}
+        required
+        value={phone}
+        disabled={busy}
+        error={errors.phone}
+        onChange={(draft) => {
+          setPhone(draft);
+          setErrors((current) => ({ ...current, phone: '' }));
+        }}
+      />
+      {field('email', {
+        label: c.email,
+        maxLength: 255,
+        placeholder: c.emailPlaceholder,
+        icon: 'envelope',
       })}
+      {contactsEditor()}
       <View style={styles.row2}>
         {presetSelect('nationality', LEAD_NATIONALITY_OPTIONS, c.nationalityOptions, {
           label: c.nationality,
@@ -741,6 +888,31 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 2 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  contactChannel: { width: 136 },
+  contactValue: { flex: 1, width: undefined, minWidth: 0 },
+  contactRemove: {
+    width: 36,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  contactAdd: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 44,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 10,
+  },
+  contactAddText: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
   careBox: {
     borderWidth: 1,
     borderRadius: 16,

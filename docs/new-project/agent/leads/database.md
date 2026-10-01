@@ -42,8 +42,12 @@ and the agent (`created_by_user_id`) remain required. Preference fields can be
 filled as the requirements become known. A single budget can use `budget_max`;
 a range uses both fields. Amounts are monthly THB. Negative amounts, a zero maximum,
 NaN and a minimum greater than the maximum are rejected by the database.
-`other_contacts` must be a JSON array; API validation should enforce nonblank
-`channel` and `value` on each entry when the Leads API is implemented.
+`other_contacts` must be a JSON array. The API (`otherContacts`) accepts up to 5
+entries; `channel` is one of `line`, `whatsapp`, `wechat`, `facebook`, `telegram`,
+`other` and `value` is nonblank text up to 255 characters (trimmed; duplicate
+channel + value pairs are dropped, case-insensitive). `email` is optional and must
+look like an address. Both are preserved on partial `PATCH` updates; send `[]` /
+`null` to clear.
 
 Existing databases: apply [migration](./migrations/20260908-room-seeker-preferences.sql).
 The standard Docker schema script includes it. The migration is repeatable and keeps
@@ -60,7 +64,9 @@ Only name and phone are mandatory. Existing budget fields and desired room type 
 | User field | Database column | Format |
 |---|---|---|
 | ชื่อ * | name | required text |
-| เบอร์ติดต่อ * | phone | required text |
+| เบอร์ติดต่อ * | phone | required; app sends E.164 (`+66812345678`) from a country picker. API normalizes any "+" value to E.164 and rejects malformed ones; values without "+" are legacy text kept as typed |
+| อีเมล | email | optional, valid address |
+| ช่องทางติดต่ออื่น | other_contacts | up to 5 `{channel, value}` (LINE, WhatsApp, WeChat, Facebook, Telegram, อื่นๆ) |
 | สัญชาติ | nationality | optional text |
 | งบประมาณ | budget_min / budget_max | existing monthly THB range |
 | โลเคชั่นที่สนใจ | preferred_location | optional free text, one or more areas |
@@ -85,11 +91,15 @@ profile migration. Rental duration must match an active `master_contract_types.t
 API (authenticated agent):
 - GET /api/v1/agent/leads/visa-types: active visa catalog (`id`, `code`).
 - POST /api/v1/agent/leads: create a lead; server assigns agent and status=new.
-- GET /api/v1/agent/leads?q=&page=1&limit=20: own leads, searchable by name, phone or area.
+- GET /api/v1/agent/leads?q=&page=1&limit=20: own leads, searchable by name, phone or area. Phone queries ignore spaces/dashes and match Thai local and +66 forms both ways (`081…` ↔ `+6681…`).
 - GET /api/v1/agent/leads/:id: own lead details; other agents receive 404.
 
 Mobile: Leads tab → Listing Lead → Create Lead. After save the list refreshes;
-tapping a card shows all profile fields. Existing email/source/contact-channel columns remain intact.
+tapping a card shows all profile fields. Email and other contact channels are edited
+under the phone field; on the lead info page each channel opens its app (mailto, LINE
+`line.me/R/ti/p/`, WhatsApp `wa.me/` with Thai `0…` numbers converted to `66…`,
+Telegram `t.me/`, Facebook `m.me/` or the pasted profile URL). WeChat and other
+channels have no public link, so tapping copies the value; long-press always copies.
 
 ### Province and areas
 Apply [location migration](./migrations/20260910-lead-locations.sql) before deploying the updated API. Province is optional when no map pin or area is specified; map pins require a canonical Thai province. Existing leads keep a NULL province and their original `preferred_location` text (now additional location details); no province is guessed.

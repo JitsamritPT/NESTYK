@@ -10,7 +10,8 @@ import {
   type AppIconName,
 } from '@nestyk/ui/native';
 
-export type LeadSelectOption<T extends string | number> = { value: T; label: string };
+/** `shortLabel` replaces `label` on the closed field when space is tight (e.g. "🇹🇭 +66"). */
+export type LeadSelectOption<T extends string | number> = { value: T; label: string; shortLabel?: string };
 
 export function LeadSelectField<T extends string | number>({
   label,
@@ -23,7 +24,9 @@ export function LeadSelectField<T extends string | number>({
   disabled = false,
   error,
   style,
+  hideLabel = false,
 }: {
+  /** Also the sheet title and accessibility label, so it is required even when hidden. */
   label: string;
   placeholder: string;
   icon?: AppIconName;
@@ -35,6 +38,7 @@ export function LeadSelectField<T extends string | number>({
   disabled?: boolean;
   error?: string;
   style?: object;
+  hideLabel?: boolean;
 }) {
   const { t } = useLocale();
   const { theme } = useMobileTheme();
@@ -66,9 +70,11 @@ export function LeadSelectField<T extends string | number>({
 
   return (
     <View style={[styles.group, style]}>
-      <Text style={[styles.label, { color: theme.textHeading }]} numberOfLines={1}>
-        {label}
-      </Text>
+      {hideLabel ? null : (
+        <Text style={[styles.label, { color: theme.textHeading }]} numberOfLines={1}>
+          {label}
+        </Text>
+      )}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${label}: ${selected?.label ?? placeholder}`}
@@ -90,7 +96,7 @@ export function LeadSelectField<T extends string | number>({
           ]}
           numberOfLines={1}
         >
-          {selected?.label ?? placeholder}
+          {selected ? selected.shortLabel ?? selected.label : placeholder}
         </Text>
         <MobileIcon name="chevron-down" size={16} color={tokens.colors.textSecondary} />
       </Pressable>

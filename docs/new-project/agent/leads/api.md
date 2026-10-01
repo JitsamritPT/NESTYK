@@ -31,7 +31,8 @@ Query: `rentRoomId`, `status`, `q` (name/phone), `sort`, `page`, `limit`
   "rentRoomId": 42,
   "name": "สมหญิง ใจดี",
   "phone": "0898765432",
-  "email": "line:id",
+  "email": "somying@email.com",
+  "otherContacts": [{ "channel": "line", "value": "@somying" }],
   "source": "walk_in",
   "notes": "สนใจเฟอร์นิเจอร์ครบ",
   "status": "new"

@@ -25,6 +25,7 @@ import { leadMatchReady, loadMatchRoomPool, matchLeadRooms, type LeadRoomMatch }
 import { summarizeComparison } from '../lib/lead-room-compare';
 import { useMatchCopy } from './lead-match-copy';
 import { formatBudgetRange, formatDate, formatKm, formatLeadCode, formatMoveIn, leadAvatarInitials } from '../lib/lead-format';
+import { formatPhoneDisplay, phoneDialString } from '../lib/phone';
 
 export { leadAvatarInitials };
 
@@ -167,9 +168,15 @@ export function AgentLeadDetailBody({
     { icon: 'home', text: requirement || null },
   ];
 
+  const phoneText = formatPhoneDisplay(lead.phone);
+
   const call = () => {
-    const digits = lead.phone.replace(/[^\d+]/g, '');
-    if (digits) void Linking.openURL(`tel:${digits}`);
+    const dial = phoneDialString(lead.phone);
+    if (!dial) return;
+    Linking.openURL(`tel:${dial}`).catch(async () => {
+      await Clipboard.setStringAsync(phoneText);
+      Alert.alert(c.phoneCopied, phoneText);
+    });
   };
 
   function openSheet(mode: SheetMode) {
@@ -185,8 +192,8 @@ export function AgentLeadDetailBody({
 
   const copyPhone = async () => {
     setSheetOpen(false);
-    await Clipboard.setStringAsync(lead.phone);
-    Alert.alert(c.phoneCopied, lead.phone);
+    await Clipboard.setStringAsync(phoneText);
+    Alert.alert(c.phoneCopied, phoneText);
   };
 
   const changeStatus = async (target: 'inprogress' | 'lost') => {
@@ -411,7 +418,7 @@ export function AgentLeadDetailBody({
           <Pressable
             onPress={call}
             accessibilityRole="button"
-            accessibilityLabel={`${c.callPhone} ${lead.phone}`}
+            accessibilityLabel={`${c.callPhone} ${phoneText}`}
             style={({ pressed }) => [styles.callBtn, iosPressed(pressed)]}
             android_ripple={{ color: 'rgba(255,255,255,0.24)', borderless: true }}
           >

@@ -1,4 +1,4 @@
-import type { AgentLead } from '@nestyk/types';
+import type { AgentLead, LeadContactChannel } from '@nestyk/types';
 
 const HONORIFIC = /^(คุณ|นางสาว|นาง|นาย|น\.ส\.|ด\.ช\.|ด\.ญ\.|mrs\.?|mr\.?|ms\.?|miss|dr\.?)\s*/i;
 /** Thai consonants ก–ฮ; skips leading vowels (เ แ โ ใ ไ), tone marks and above/below vowels. */
@@ -76,4 +76,36 @@ export function formatBudgetRange(lead: Pick<AgentLead, 'budgetMin' | 'budgetMax
 
 export function formatKm(km: number): string {
   return km < 10 ? km.toFixed(1) : String(Math.round(km));
+}
+
+/**
+ * Deep link that opens the chat app for a contact, or null when the channel has no public
+ * link (WeChat, other) or the value cannot form one — callers fall back to copying.
+ */
+export function leadContactUrl(channel: LeadContactChannel | 'email', raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return channel === 'wechat' || channel === 'email' ? null : value;
+  switch (channel) {
+    case 'email':
+      return `mailto:${value}`;
+    case 'line':
+      // Official accounts keep the "@"; personal IDs use the "~" prefix.
+      return value.startsWith('@')
+        ? `https://line.me/R/ti/p/@${encodeURIComponent(value.slice(1))}`
+        : `https://line.me/R/ti/p/~${encodeURIComponent(value)}`;
+    case 'whatsapp': {
+      const digits = value.replace(/\D/g, '');
+      if (digits.length < 8) return null;
+      return `https://wa.me/${/^0\d{9}$/.test(digits) ? `66${digits.slice(1)}` : digits}`;
+    }
+    case 'telegram': {
+      const user = value.replace(/^@/, '');
+      return /^\w{4,}$/.test(user) ? `https://t.me/${user}` : null;
+    }
+    case 'facebook':
+      return /^[\w.]+$/.test(value) ? `https://m.me/${value}` : null;
+    default:
+      return null;
+  }
 }

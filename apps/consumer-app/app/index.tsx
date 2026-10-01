@@ -4,7 +4,7 @@ import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import { CreateLeadForm, type LeadFormTab } from '../components/CreateLeadForm';
 import { AgentLeadDetailBody } from '../components/AgentLeadDetailBody';
 import { LeadFullInfoBody } from '../components/LeadFullInfoBody';
-import { LeadMatchedRoomBody } from '../components/LeadMatchedRoomBody';
+import { LeadMatchedRoomBody, LeadMatchedRoomCta } from '../components/LeadMatchedRoomBody';
 import type { LeadRoomMatch } from '../lib/lead-match-preview';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Alert, BackHandler } from 'react-native';
@@ -1153,7 +1153,9 @@ export default function AppHomeScreen() {
           )
         }
         bottomBar={
-          ['createListing', 'createLead', 'leadDetail', 'leadInfo', 'leadRoom'].includes(activeTab) ? null : <MobileBottomTabBar
+          activeTab === 'leadRoom' && activeLead && activeMatch ? (
+            <LeadMatchedRoomCta onPress={() => openFocusedRoom(activeMatch.room.id)} />
+          ) : ['createListing', 'createLead', 'leadDetail', 'leadInfo', 'leadRoom'].includes(activeTab) ? null : <MobileBottomTabBar
             activeRole={activeRole}
             activeTab={activeTab}
             onTabPress={handleTabPress}

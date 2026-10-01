@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import type { AgentLead } from '@nestyk/types';
-import { HeroPhotoPager, RoomShareLinkSheet, type AgentRoomDetail } from '@nestyk/feature-listing';
+import { formatBedroomSpec, HeroPhotoPager, RoomShareLinkSheet, type AgentRoomDetail } from '@nestyk/feature-listing';
 import {
   MobileActionSheetBody,
   MobileBottomSheet,
@@ -25,6 +25,7 @@ import {
   tokens,
   useMobileTheme,
   type AppIconName,
+  type MobileStatusPillTone,
   type MobileStatusPillToneKey,
 } from '@nestyk/ui/native';
 import {
@@ -35,6 +36,7 @@ import {
 } from '../lib/agent-listings-api';
 import type { LeadRoomMatch } from '../lib/lead-match-preview';
 import {
+  COMPARE_KEYS,
   compareLeadRoom,
   overallScore,
   roomLayoutValue,
@@ -59,8 +61,20 @@ const STATUS_STYLE: Record<CompareStatus, { tone: MobileStatusPillToneKey; icon:
   notEvaluable: { tone: 'slate', icon: 'info' },
 };
 
-/** Rows the agent should read in full; the rest collapse to one line. */
-const EXPANDED: CompareStatus[] = ['near', 'mismatch', 'later', 'unknown', 'notEvaluable'];
+const ISSUES: CompareStatus[] = ['near', 'mismatch', 'later'];
+/** Rows that get a status pill; full passes and blanks the lead left unset speak through the % alone. */
+const PILLED: CompareStatus[] = [...ISSUES, 'unknown', 'notEvaluable'];
+
+/** Pastel pill tones wash out on dark surfaces. */
+const DARK_TONES: Partial<Record<MobileStatusPillToneKey, MobileStatusPillTone>> = {
+  green: { bg: 'rgba(34,197,94,0.16)', fg: '#4ADE80' },
+  yellow: { bg: 'rgba(245,158,11,0.18)', fg: '#FBBF24' },
+  slate: { bg: 'rgba(148,163,184,0.16)', fg: '#CBD5E1' },
+};
+
+function toneFor(key: MobileStatusPillToneKey, isDark: boolean): MobileStatusPillTone {
+  return (isDark && DARK_TONES[key]) || STATUS_PILL_TONES[key];
+}
 
 const ROW_ICONS: Record<CompareKey, AppIconName> = {
   budget: 'credit-card',
@@ -82,9 +96,9 @@ export function LeadMatchedRoomBody({
   /** Bumped by the shell header "⋯" button; a change (not the mount value) opens the menu. */
   menuRequest?: number;
 }) {
-  const { t, locale, m, roomTypeName, months, issueLabel } = useMatchCopy();
+  const { t, locale, m, roomTypeName, months } = useMatchCopy();
   const c = t.agent.leads;
-  const { theme } = useMobileTheme();
+  const { theme, isDark } = useMobileTheme();
   const [room, setRoom] = useState<AgentRoomDetail | null>(null);
   const [roomError, setRoomError] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -92,6 +106,7 @@ export function LeadMatchedRoomBody({
   const [photoIndex, setPhotoIndex] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [howOpen, setHowOpen] = useState(false);
   const handoff = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
@@ -132,12 +147,19 @@ export function LeadMatchedRoomBody({
   );
   const score = room ? overallScore(comparison) : match.score;
   const summary = summarizeComparison(comparison);
+  const judged = COMPARE_KEYS.filter((key) => comparison[key].score != null).length;
 
-  const heroHeight = Math.round(Math.min(width * 0.6, 260));
-  const title = room?.promoTitle?.trim() || match.room.listingTitle || match.room.property?.name || `#${match.room.id}`;
+  const heroHeight = Math.round(Math.min(width * 0.5, 180));
+  const title = match.room.property?.name || room?.promoTitle?.trim() || match.room.listingTitle || `#${match.room.id}`;
+  const size = room ? roomLayoutValue(room, 'room_size') : match.room.roomSizeSqm ?? null;
+  const subtitle = [roomTypeName(comparison.roomType.have), size ? m.factSizeValue.replace('{value}', size) : null]
+    .filter(Boolean)
+    .join(' · ');
   const area = match.room.property?.district || match.room.property?.province || '';
   const km = formatKm(match.distanceKm);
+  const fromPin = m.distanceFromPinName.replace('{km}', km).replace('{name}', comparison.location.pinName);
   const budget = formatBudgetRange(lead);
+  const headroom = comparison.budget.headroom;
 
   const statusLabel: Record<CompareStatus, string> = {
     pass: m.pass,
@@ -149,18 +171,19 @@ export function LeadMatchedRoomBody({
     notEvaluable: m.notEvaluated,
   };
 
-  const rows: Array<{ key: CompareKey; title: string; want: string | null; have: string | null }> = [
+  const rows: Array<{ key: CompareKey; title: string; want: string | null; have: string | null; sub?: string }> = [
     {
       key: 'budget',
       title: m.budget,
       want: budget ? `${budget} ฿` : null,
       have: `${comparison.budget.price.toLocaleString()} ${c.perMonth}`,
+      sub: headroom ? m.belowBudget.replace('{amount}', headroom.toLocaleString()) : undefined,
     },
     {
       key: 'location',
       title: m.location,
       want: m.wantLocation.replace('{name}', comparison.location.pinName).replace('{km}', String(lead.radiusKm ?? '')),
-      have: m.distanceFromPin.replace('{km}', km).replace('{rank}', String(comparison.location.pinRank)),
+      have: fromPin,
     },
     {
       key: 'roomType',
@@ -183,15 +206,20 @@ export function LeadMatchedRoomBody({
         : null,
     },
   ];
+  const green = toneFor('green', isDark);
+  const yellow = toneFor('yellow', isDark);
 
-  const facts = room ? roomFacts(room, m) : [];
+  const facts = room ? roomFacts(room, match, { t, m, months }) : [];
+
+  /** The hero sits inside the summary card, so it is the card width minus its 1px borders. */
+  const photoWidth = Math.max(width - 2, 0);
 
   const onHeroScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const next = Math.round(event.nativeEvent.contentOffset.x / Math.max(width, 1));
+      const next = Math.round(event.nativeEvent.contentOffset.x / Math.max(photoWidth, 1));
       if (next >= 0 && next < photos.length) setPhotoIndex(next);
     },
-    [photos.length, width],
+    [photos.length, photoWidth],
   );
 
   const afterMenuClose = (next: () => void) => {
@@ -201,173 +229,256 @@ export function LeadMatchedRoomBody({
 
   return (
     <View style={styles.root} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
-      <View style={styles.titleRow}>
-        <View style={styles.titleMain}>
-          <Text style={[styles.title, { color: theme.textHeading }]} numberOfLines={2}>
-            {title}
-          </Text>
-          <Text style={[styles.price, { color: theme.textHeading }]} numberOfLines={1}>
-            {match.price.toLocaleString()} {c.perMonth}
-            {match.termMonths ? (
-              <Text style={[styles.meta, { color: theme.textSecondary }]}>{`  ·  ${months(match.termMonths)}`}</Text>
-            ) : null}
-          </Text>
-          <View style={styles.inline}>
-            <MobileIcon name="map-pin" size={15} color={theme.textSecondary} />
-            <Text style={[styles.meta, styles.flex1, { color: theme.textSecondary }]} numberOfLines={1}>
-              {[area, m.distanceFromPin.replace('{km}', km).replace('{rank}', String(match.pin.rank))]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
-          </View>
-        </View>
-        <MobileScoreRing
-          value={score}
-          size={64}
-          label={c.scoreOverallLabel}
-          accessibilityLabel={c.matchScoreA11y.replace('{score}', String(score))}
-        />
-      </View>
-
-      <View style={styles.verdict}>
-        {summary.passed ? (
-          <VerdictChip tone="green" icon="check" label={m.passCount.replace('{count}', String(summary.passed))} />
-        ) : null}
-        {summary.issues.map((key) => (
-          <VerdictChip key={key} tone="yellow" icon="warning" label={issueLabel(key, comparison)} />
-        ))}
-        {summary.unknown.length ? (
-          <VerdictChip tone="slate" icon="info" label={m.unknownCount.replace('{count}', String(summary.unknown.length))} />
-        ) : null}
-      </View>
-
-      <View style={[styles.hero, { height: heroHeight || 200, backgroundColor: theme.background }]}>
-        {width > 0 && photos.length ? (
-          <>
-            <FlatList
-              data={photos}
-              keyExtractor={(item) => item.id}
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onMomentumScrollEnd={onHeroScroll}
-              getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
-              renderItem={({ item }) => (
-                <Pressable onPress={() => onOpenRoom(match.room.id)} accessibilityRole="imagebutton">
-                  <Image source={{ uri: item.uri }} style={{ width, height: heroHeight }} contentFit="cover" transition={150} />
-                </Pressable>
+      <View style={[styles.card, leadCardShadow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={[styles.hero, { height: heroHeight || 170, backgroundColor: theme.background }]}>
+          {photoWidth > 0 && photos.length ? (
+            <>
+              <FlatList
+                data={photos}
+                keyExtractor={(item) => item.id}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={onHeroScroll}
+                getItemLayout={(_, index) => ({ length: photoWidth, offset: photoWidth * index, index })}
+                renderItem={({ item }) => (
+                  <Pressable onPress={() => onOpenRoom(match.room.id)} accessibilityRole="imagebutton">
+                    <Image
+                      source={{ uri: item.uri }}
+                      style={{ width: photoWidth, height: heroHeight }}
+                      contentFit="cover"
+                      transition={150}
+                    />
+                  </Pressable>
+                )}
+              />
+              <HeroPhotoPager index={photoIndex} total={photos.length} bottom={12} />
+            </>
+          ) : (
+            <View style={styles.heroEmpty}>
+              {roomError ? (
+                <>
+                  <Text style={[styles.body, { color: theme.textSecondary }]}>{m.loadError}</Text>
+                  <MobileButton variant="outline" onPress={() => setAttempt((n) => n + 1)}>
+                    {c.retry}
+                  </MobileButton>
+                </>
+              ) : room ? (
+                <MobileIcon name="camera" size={28} color={tokens.colors.divider} />
+              ) : (
+                <ActivityIndicator color={tokens.colors.roles.agent} />
               )}
-            />
-            <HeroPhotoPager index={photoIndex} total={photos.length} bottom={12} />
-          </>
-        ) : (
-          <View style={styles.heroEmpty}>
-            {room || roomError ? (
-              <MobileIcon name="camera" size={28} color={tokens.colors.divider} />
-            ) : (
-              <ActivityIndicator color={tokens.colors.roles.agent} />
-            )}
-          </View>
-        )}
-      </View>
-
-      {roomError ? (
-        <View style={[styles.errorRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Text style={[styles.body, styles.flex1, { color: theme.textHeading }]}>{m.loadError}</Text>
-          <MobileButton variant="outline" onPress={() => setAttempt((n) => n + 1)}>
-            {c.retry}
-          </MobileButton>
+            </View>
+          )}
         </View>
-      ) : null}
+        <View style={[styles.titleRow, styles.summaryBody]}>
+          <View style={styles.titleMain}>
+            <Text style={[styles.title, { color: theme.textHeading }]} numberOfLines={2}>
+              {title}
+            </Text>
+            {subtitle ? (
+              <Text style={[styles.body, { color: theme.textSecondary }]} numberOfLines={1}>
+                {subtitle}
+              </Text>
+            ) : null}
+            <Text style={[styles.price, { color: theme.textHeading }]} numberOfLines={1}>
+              {match.price.toLocaleString()} {c.perMonth}
+              {match.termMonths ? (
+                <Text style={[styles.meta, { color: theme.textSecondary }]}>{`  ·  ${months(match.termMonths)}`}</Text>
+              ) : null}
+            </Text>
+            <View style={styles.inline}>
+              <MobileIcon name="map-pin" size={15} color={theme.textSecondary} />
+              <Text style={[styles.meta, styles.flex1, { color: theme.textSecondary }]} numberOfLines={1}>
+                {[area, fromPin].filter(Boolean).join(' · ')}
+              </Text>
+            </View>
+          </View>
+          <MobileScoreRing
+            value={score}
+            size={64}
+            label={c.scoreOverallLabel}
+            accessibilityLabel={c.matchScoreA11y.replace('{score}', String(score))}
+          />
+        </View>
+        <View style={[styles.summaryFooter, { borderTopColor: theme.border }]}>
+          <Text style={[styles.meta, styles.flex1, { color: theme.textSecondary }]}>
+            {m.evaluatedCount.replace('{count}', String(judged)).replace('{total}', String(COMPARE_KEYS.length))}
+          </Text>
+          {summary.issues.length ? (
+            <View style={styles.inline}>
+              <MobileIcon name="warning" size={14} color={yellow.fg} />
+              <Text style={[styles.meta, styles.bold, { color: yellow.fg }]}>
+                {m.issueCount.replace('{count}', String(summary.issues.length))}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.textHeading }]}>{m.evaluationTitle}</Text>
         <View style={[styles.card, leadCardShadow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View
+            style={[styles.tableHead, { backgroundColor: theme.background, borderBottomColor: theme.border }]}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Text style={[styles.meta, styles.bold, styles.flex1, { color: theme.textSecondary }]}>{m.want}</Text>
+            <View style={[styles.valueDivider, { backgroundColor: theme.border }]} />
+            <Text style={[styles.meta, styles.bold, styles.flex1, { color: theme.textSecondary }]}>{m.have}</Text>
+          </View>
           {rows.map((row, index) => {
             const status = comparison[row.key].status as CompareStatus;
-            const look = STATUS_STYLE[status];
-            const tone = STATUS_PILL_TONES[look.tone];
-            const expanded = EXPANDED.includes(status);
-            const divider = index > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null;
-            if (!expanded) {
-              const value = status === 'unspecified' ? m.unspecified : row.have;
-              return (
-                <View key={row.key} style={[styles.compactRow, divider]}>
-                  <MobileIcon name={ROW_ICONS[row.key]} size={18} color={theme.textSecondary} />
-                  <Text style={[styles.body, styles.bold, styles.compactTitle, { color: theme.textHeading }]}>{row.title}</Text>
-                  <Text
-                    style={[
-                      styles.body,
-                      styles.compactValue,
-                      { color: status === 'unspecified' ? tokens.colors.placeholder : theme.textHeading },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {value ?? c.unknown}
-                  </Text>
-                  <MobileIcon name={look.icon} size={16} color={tone.fg} />
-                </View>
-              );
-            }
+            const rowScore = comparison[row.key].score;
+            const issue = ISSUES.includes(status);
+            const pill = PILLED.includes(status) ? statusLabel[status] : null;
+            const scoreText = rowScore == null ? '—' : `${Math.round(rowScore)}%`;
+            const scoreColor = rowScore == null ? tokens.colors.placeholder : rowScore >= 100 ? green.fg : yellow.fg;
+            const want = row.want ?? (status === 'unspecified' ? m.unspecified : null);
+            const a11y =
+              rowScore == null
+                ? `${row.title}, ${m.scoreExcluded}`
+                : m.rowScoreA11y.replace('{title}', row.title).replace('{score}', String(Math.round(rowScore)));
+            const note =
+              row.key === 'location' && rowScore != null && rowScore < 100
+                ? m.locationBreakdown
+                    .replace('{distance}', String(comparison.location.distanceScore))
+                    .replace('{rank}', String(comparison.location.pinRank))
+                    .replace('{weight}', String(Math.round(comparison.location.pinWeight * 100)))
+                : status === 'notEvaluable'
+                  ? m.notEvaluableNote
+                  : status === 'unknown'
+                    ? m.unknownNote
+                    : null;
             return (
-              <View key={row.key} style={[styles.compareRow, divider]}>
+              <View
+                key={row.key}
+                style={[
+                  styles.compareRow,
+                  index > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null,
+                  issue ? styles.issueRow : null,
+                ]}
+                accessible
+                accessibilityLabel={[
+                  a11y,
+                  pill,
+                  `${m.want} ${want ?? c.unknown}`,
+                  `${m.have} ${row.have ?? c.unknown}`,
+                  row.sub,
+                  note,
+                ]
+                  .filter(Boolean)
+                  .join(', ')}
+              >
+                {issue ? <View style={[styles.issueBar, { backgroundColor: yellow.fg }]} /> : null}
                 <View style={styles.compareHead}>
                   <MobileIcon name={ROW_ICONS[row.key]} size={18} color={theme.textSecondary} />
                   <Text style={[styles.body, styles.bold, styles.flex1, { color: theme.textHeading }]}>{row.title}</Text>
-                  <View style={[styles.pill, { backgroundColor: tone.bg }]}>
-                    <MobileIcon name={look.icon} size={12} color={tone.fg} />
-                    <MobileStatusPill label={statusLabel[status]} tone={look.tone} style={styles.pillInner} />
-                  </View>
+                  <Text style={[styles.body, styles.bold, styles.scoreText, { color: scoreColor }]}>{scoreText}</Text>
+                  {pill ? <MobileStatusPill label={pill} tone={toneFor(STATUS_STYLE[status].tone, isDark)} /> : null}
                 </View>
                 <View style={styles.compareValues}>
-                  <CompareCell label={m.want} value={row.want} />
+                  <View style={styles.flex1}>
+                    <Text
+                      style={[styles.body, { color: row.want ? theme.textSecondary : tokens.colors.placeholder }]}
+                      numberOfLines={2}
+                    >
+                      {want ?? c.unknown}
+                    </Text>
+                  </View>
                   <View style={[styles.valueDivider, { backgroundColor: theme.border }]} />
-                  <CompareCell label={m.have} value={row.have} />
+                  <View style={styles.flex1}>
+                    <Text
+                      style={[
+                        styles.body,
+                        issue ? styles.bold : null,
+                        { color: !row.have ? tokens.colors.placeholder : issue ? yellow.fg : theme.textHeading },
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {row.have ?? c.unknown}
+                    </Text>
+                    {row.sub ? <Text style={[styles.meta, { color: green.fg }]}>{row.sub}</Text> : null}
+                  </View>
                 </View>
+                {note ? <Text style={[styles.meta, styles.note, { color: theme.textSecondary }]}>{note}</Text> : null}
               </View>
             );
           })}
+          <Pressable
+            onPress={() => setHowOpen((open) => !open)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: howOpen }}
+            android_ripple={{ color: theme.border }}
+            style={({ pressed }) => [
+              styles.howHead,
+              { borderTopColor: theme.border },
+              pressed && Platform.OS === 'ios' ? { opacity: 0.7 } : null,
+            ]}
+          >
+            <MobileIcon name="info" size={16} color={theme.textSecondary} />
+            <Text style={[styles.meta, styles.bold, styles.flex1, { color: theme.textSecondary }]}>{m.howScored}</Text>
+            <View style={howOpen ? styles.flipped : undefined}>
+              <MobileIcon name="chevron-down" size={16} color={theme.textSecondary} />
+            </View>
+          </Pressable>
+          {howOpen ? (
+            <View style={styles.howBody}>
+              {[m.howScoredHigher, m.howScoredPerRow, m.howScoredAverage].map((line) => (
+                <Text key={line} style={[styles.meta, { color: theme.textSecondary }]}>
+                  {`• ${line}`}
+                </Text>
+              ))}
+            </View>
+          ) : null}
         </View>
       </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: theme.textHeading }]}>{m.factsTitle}</Text>
-        <View style={[styles.card, styles.factsCard, leadCardShadow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={[styles.card, leadCardShadow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           {!room ? (
-            roomError ? (
-              <Text style={[styles.body, { color: tokens.colors.placeholder }]}>{c.unknown}</Text>
-            ) : (
-              <ActivityIndicator color={tokens.colors.roles.agent} />
-            )
+            <View style={styles.factsState}>
+              {roomError ? (
+                <Text style={[styles.body, { color: tokens.colors.placeholder }]}>{c.unknown}</Text>
+              ) : (
+                <ActivityIndicator color={tokens.colors.roles.agent} />
+              )}
+            </View>
           ) : facts.length ? (
-            pairs(facts).map((pair) => (
-              <View key={pair[0].label} style={styles.factRow}>
-                {pair.map((fact) => (
-                  <View key={fact.label} style={styles.fact}>
-                    <Text style={[styles.meta, { color: theme.textSecondary }]}>{fact.label}</Text>
-                    <Text style={[styles.body, styles.bold, { color: theme.textHeading }]} numberOfLines={2}>
+            facts.map((group, index) => (
+              <View
+                key={group.key}
+                style={[
+                  styles.factGroup,
+                  index > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null,
+                ]}
+              >
+                <Text style={[styles.meta, styles.bold, { color: theme.textSecondary }]} accessibilityRole="header">
+                  {group.title}
+                </Text>
+                {group.facts.map((fact) => (
+                  <View key={fact.key} style={styles.factRow} accessible accessibilityLabel={`${fact.label} ${fact.value}`}>
+                    <MobileIcon name={fact.icon} size={16} color={theme.textSecondary} />
+                    <Text style={[styles.body, styles.factLabel, { color: theme.textSecondary }]}>{fact.label}</Text>
+                    <Text
+                      style={[styles.body, styles.factValue, fact.strong ? styles.bold : null, { color: theme.textHeading }]}
+                      numberOfLines={2}
+                    >
                       {fact.value}
                     </Text>
                   </View>
                 ))}
-                {pair.length === 1 ? <View style={styles.fact} /> : null}
               </View>
             ))
           ) : (
-            <Text style={[styles.body, { color: tokens.colors.placeholder }]}>{c.unknown}</Text>
+            <View style={styles.factsState}>
+              <Text style={[styles.body, { color: tokens.colors.placeholder }]}>{c.unknown}</Text>
+            </View>
           )}
         </View>
       </View>
-
-      <Pressable
-        onPress={() => onOpenRoom(match.room.id)}
-        accessibilityRole="button"
-        style={({ pressed }) => [styles.primaryBtn, pressed && Platform.OS === 'ios' ? { opacity: 0.85 } : null]}
-        android_ripple={{ color: 'rgba(255,255,255,0.16)' }}
-      >
-        <Text style={styles.primaryLabel}>{m.viewRoom}</Text>
-        <MobileIcon name="chevron-right" size={18} color="#FFFFFF" />
-      </Pressable>
 
       <MobileBottomSheet visible={menuOpen} onClose={() => setMenuOpen(false)}>
         <MobileActionSheetBody
@@ -397,104 +508,158 @@ export function LeadMatchedRoomBody({
   );
 }
 
-type MatchRoomCopy = ReturnType<typeof useMatchCopy>['m'];
+type MatchCopy = ReturnType<typeof useMatchCopy>;
+type Fact = { key: string; icon: AppIconName; label: string; value: string; strong?: boolean };
+type FactGroup = { key: string; title: string; facts: Fact[] };
 
-function roomFacts(room: AgentRoomDetail, m: MatchRoomCopy): Array<{ label: string; value: string }> {
+/** Room facts as label/value rows; anything the room doesn't record is left out rather than shown as 0 or —. */
+function roomFacts(
+  room: AgentRoomDetail,
+  match: LeadRoomMatch,
+  { t, m, months }: Pick<MatchCopy, 't' | 'm' | 'months'>,
+): FactGroup[] {
+  const spec = t.agent.listings;
   const size = roomLayoutValue(room, 'room_size');
   const floor = roomLayoutValue(room, 'floor');
   const building = roomLayoutValue(room, 'building');
   const bed = roomLayoutValue(room, 'bedroom');
   const bath = roomLayoutValue(room, 'bathroom');
-  const facts: Array<{ label: string; value: string | null }> = [
-    { label: m.factSize, value: size ? m.factSizeValue.replace('{value}', size) : null },
-    { label: m.factFloor, value: [floor, building].filter(Boolean).join(' · ') || null },
+  const bedValue = formatBedroomSpec(
+    bed,
+    { studio: t.masters.roomTypes.studio, one: spec.specBed, many: spec.specBeds },
+    room.roomTypeCode,
+  );
+  const roomRows: Array<Omit<Fact, 'value'> & { value: string | null }> = [
+    { key: 'bed', icon: 'bed', label: m.factBedroom, value: bedValue },
     {
-      label: m.factBedBath,
-      value: bed || bath ? m.factBedBathValue.replace('{bed}', bed ?? '—').replace('{bath}', bath ?? '—') : null,
+      key: 'bath',
+      icon: 'bath',
+      label: m.factBathroom,
+      value: bath ? (Number(bath) === 1 ? spec.specBath : spec.specBaths).replace('{count}', bath) : null,
     },
+    { key: 'size', icon: 'room-size', label: m.factSize, value: size ? spec.specSqm.replace('{size}', size) : null },
     {
-      label: m.factDeposit,
-      value: m.factDepositValue
-        .replace('{deposit}', String(room.depositMonths))
-        .replace('{advance}', String(room.advanceRentMonths)),
+      key: 'floor',
+      icon: 'stairs',
+      label: m.factFloor,
+      value: floor
+        ? building
+          ? t.agent.roomDetail.floorBuilding.replace('{floor}', floor).replace('{building}', building)
+          : spec.specFloor.replace('{floor}', floor)
+        : null,
     },
-    { label: m.factWater, value: room.waterRatePerUnit ? m.factRate.replace('{value}', room.waterRatePerUnit) : null },
-    { label: m.factElectric, value: room.electricRatePerUnit ? m.factRate.replace('{value}', room.electricRatePerUnit) : null },
   ];
-  return facts.filter((fact): fact is { label: string; value: string } => !!fact.value);
+
+  const term = room.prices.find((p) => p.termMonths === match.termMonths);
+  const deposit = term?.depositMonths ?? room.depositMonths;
+  const advance = term?.advanceRentMonths ?? room.advanceRentMonths;
+  const monthsAmount = (count: number) =>
+    count > 0
+      ? m.factMonthsAmount.replace('{months}', String(count)).replace('{amount}', (count * match.price).toLocaleString())
+      : m.factNone;
+  const upfront = (deposit + advance) * match.price;
+  const costRows: Array<Omit<Fact, 'value'> & { value: string | null }> = [
+    { key: 'deposit', icon: 'shield', label: m.factDeposit, value: monthsAmount(deposit) },
+    { key: 'advance', icon: 'credit-card', label: m.factAdvance, value: monthsAmount(advance) },
+    { key: 'upfront', icon: 'coins', label: m.factUpfront, value: upfront > 0 ? `${upfront.toLocaleString()} ฿` : null, strong: true },
+    { key: 'water', icon: 'drop', label: m.factWater, value: room.waterRatePerUnit ? m.factRate.replace('{value}', room.waterRatePerUnit) : null },
+    {
+      key: 'electric',
+      icon: 'lightning',
+      label: m.factElectric,
+      value: room.electricRatePerUnit ? m.factRate.replace('{value}', room.electricRatePerUnit) : null,
+    },
+  ];
+
+  const known = (rows: typeof roomRows): Fact[] => rows.filter((row): row is Fact => !!row.value);
+  return [
+    { key: 'room', title: m.factRoomGroup, facts: known(roomRows) },
+    {
+      key: 'cost',
+      title: match.termMonths ? m.factCostGroupTerm.replace('{term}', months(match.termMonths)) : m.factCostGroup,
+      facts: known(costRows),
+    },
+  ].filter((group) => group.facts.length > 0);
 }
 
-function pairs<T>(items: T[]): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += 2) out.push(items.slice(i, i + 2));
-  return out;
-}
-
-function CompareCell({ label, value }: { label: string; value: string | null }) {
-  const { t } = useMatchCopy();
+/** "View room" action for the shell's bottom bar on the `leadRoom` tab, so it stays reachable without scrolling. */
+export function LeadMatchedRoomCta({ onPress }: { onPress: () => void }) {
+  const { m } = useMatchCopy();
   const { theme } = useMobileTheme();
   return (
-    <View style={styles.flex1}>
-      <Text style={[styles.meta, { color: theme.textSecondary }]}>{label}</Text>
-      <Text
-        style={[styles.body, { color: value ? theme.textHeading : tokens.colors.placeholder }]}
-        numberOfLines={2}
+    <View style={[styles.ctaBar, { borderTopColor: theme.border }]}>
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        style={({ pressed }) => [styles.primaryBtn, pressed && Platform.OS === 'ios' ? { opacity: 0.85 } : null]}
+        android_ripple={{ color: 'rgba(255,255,255,0.16)' }}
       >
-        {value ?? t.agent.leads.unknown}
-      </Text>
-    </View>
-  );
-}
-
-function VerdictChip({ tone, icon, label }: { tone: MobileStatusPillToneKey; icon: AppIconName; label: string }) {
-  const colors = STATUS_PILL_TONES[tone];
-  return (
-    <View style={[styles.verdictChip, { backgroundColor: colors.bg }]}>
-      <MobileIcon name={icon} size={14} color={colors.fg} />
-      <Text style={[styles.verdictText, { color: colors.fg }]}>{label}</Text>
+        <Text style={styles.primaryLabel}>{m.viewRoom}</Text>
+        <MobileIcon name="chevron-right" size={18} color="#FFFFFF" />
+      </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { gap: 14, paddingBottom: 8 },
+  root: { gap: 20, paddingBottom: 8 },
   flex1: { flex: 1 },
   bold: { fontFamily: tokens.typography.native.bodyBold },
   inline: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  hero: { borderRadius: 16, overflow: 'hidden' },
-  heroEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  hero: { borderTopLeftRadius: 15, borderTopRightRadius: 15, overflow: 'hidden' },
+  heroEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 16 },
   titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   titleMain: { flex: 1, minWidth: 0, gap: 2 },
   title: { fontFamily: tokens.typography.native.headingTh, fontSize: 20, lineHeight: 30 },
   price: { fontFamily: tokens.typography.native.headingTh, fontSize: 18, lineHeight: 27 },
   meta: { fontFamily: tokens.typography.native.body, fontSize: 12, lineHeight: 18 },
   body: { fontFamily: tokens.typography.native.body, fontSize: 14, lineHeight: 21 },
-  verdict: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  verdictChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  verdictText: { fontFamily: tokens.typography.native.bodyBold, fontSize: 13, lineHeight: 19 },
-  errorRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 12, padding: 12 },
-  section: { gap: 10 },
+  section: { gap: 8 },
   sectionTitle: { fontFamily: tokens.typography.native.headingTh, fontSize: 16, lineHeight: 24 },
   card: { borderWidth: 1, borderRadius: 16, overflow: Platform.OS === 'android' ? 'hidden' : 'visible' },
-  compactRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, minHeight: 48 },
-  compactTitle: { flexShrink: 0 },
-  compactValue: { flex: 1, textAlign: 'right' },
-  compareRow: { paddingHorizontal: 14, paddingVertical: 12, gap: 8 },
+  tableHead: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingLeft: 42,
+    paddingRight: 16,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+  },
+  compareRow: { paddingHorizontal: 16, paddingVertical: 12, gap: 6 },
   compareHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   compareValues: { flexDirection: 'row', gap: 12, paddingLeft: 26 },
   valueDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
-  pill: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, paddingLeft: 8 },
-  pillInner: { paddingLeft: 4, backgroundColor: 'transparent' },
-  factsCard: { padding: 14, gap: 12 },
-  factRow: { flexDirection: 'row', gap: 12 },
-  fact: { flex: 1, minWidth: 0, gap: 2 },
+  scoreText: { minWidth: 40, textAlign: 'right' },
+  issueRow: { overflow: 'hidden', backgroundColor: 'rgba(245,158,11,0.08)' },
+  issueBar: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
+  note: { paddingLeft: 26 },
+  summaryBody: { padding: 16 },
+  summaryFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  howHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  flipped: { transform: [{ rotate: '180deg' }] },
+  howBody: { gap: 4, paddingLeft: 40, paddingRight: 16, paddingBottom: 14 },
+  factsState: { padding: 16, alignItems: 'flex-start' },
+  factGroup: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6 },
+  factRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36 },
+  factLabel: { flexShrink: 0 },
+  factValue: { flex: 1, textAlign: 'right' },
+  ctaBar: { paddingHorizontal: 16, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
   primaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',

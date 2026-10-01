@@ -15,6 +15,12 @@ export type LeadPin = {
 /** Pin as sent by the client; rank follows array order. */
 export type LeadPinInput = Omit<LeadPin, 'rank'> & { rank?: number };
 
+export const LEAD_CONTACT_CHANNELS = ['line', 'whatsapp', 'wechat', 'facebook', 'telegram', 'other'] as const;
+export type LeadContactChannel = (typeof LEAD_CONTACT_CHANNELS)[number];
+/** Max extra contact channels per lead (phone and email excluded). */
+export const LEAD_MAX_CONTACTS = 5;
+export type LeadContact = { channel: LeadContactChannel; value: string };
+
 export type CreateLeadInput = {
   /** Ordered by priority (index 0 = rank 1), up to {@link LEAD_MAX_PINS}. */
   pins?: LeadPinInput[];
@@ -26,6 +32,9 @@ export type CreateLeadInput = {
   locations?: string[];
   name: string;
   phone: string;
+  email?: string | null;
+  /** Ordered list, up to {@link LEAD_MAX_CONTACTS}; no duplicate channel + value pairs. */
+  otherContacts?: LeadContact[];
   nationality?: string | null;
   budgetMin?: number | null;
   budgetMax?: number | null;

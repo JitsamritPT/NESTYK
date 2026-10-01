@@ -3,7 +3,7 @@ import { canonicalProvince, canonicalArea, leadProvinces } from './lead-location
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
-import type { CreateLeadInput, LeadPin, LeadPinInput, LeadStatus, AgentLeadsSort } from '@nestyk/types';
+import type { CreateLeadInput, LeadContact, LeadContactChannel, LeadPin, LeadPinInput, LeadStatus, AgentLeadsSort } from '@nestyk/types';
 import { LeadEntity } from '../../entities/lead.entity';
 import { LeadLocationEntity } from '../../entities/lead-location.entity';
 import { MasterRoomTypeEntity } from '../../entities/master-room-type.entity';
@@ -12,6 +12,51 @@ import { MasterContractTypeEntity } from '../../entities/master-contract-type.en
 
 const LEAD_MAX_PINS = 3;
 const LEAD_RADII_KM = [1, 3, 5];
+const LEAD_CONTACT_CHANNELS: LeadContactChannel[] = ['line', 'whatsapp', 'wechat', 'facebook', 'telegram', 'other'];
+const LEAD_MAX_CONTACTS = 5;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const E164_PATTERN = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * Digit patterns for phone search: stored numbers are E.164 ("+66812345678") or legacy local
+ * ("0812345678"), so a Thai local query also matches the +66 form and vice versa.
+ */
+export function phoneSearchDigits(q: string): string[] {
+  if (!/^[\d\s+().-]+$/.test(q)) return [];
+  const digits = q.replace(/\D/g, '');
+  if (digits.length < 3) return [];
+  const variants = new Set([digits]);
+  if (digits.startsWith('0')) variants.add(`66${digits.slice(1)}`);
+  if (digits.startsWith('66')) variants.add(`0${digits.slice(2)}`);
+  return [...variants];
+}
+
+function validateEmail(value: unknown): string | null {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string' || value.trim().length > 255) throw new BadRequestException('email must be text up to 255 characters');
+  const email = value.trim();
+  if (!email) return null;
+  if (!EMAIL_PATTERN.test(email)) throw new BadRequestException('email must be a valid email address');
+  return email;
+}
+
+function validateContacts(value: unknown): LeadContact[] {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > LEAD_MAX_CONTACTS) throw new BadRequestException(`otherContacts must be a list of up to ${LEAD_MAX_CONTACTS} channels`);
+  const seen = new Set<string>();
+  const contacts: LeadContact[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new BadRequestException('Invalid contact channel');
+    const { channel, value: text } = raw as Record<string, unknown>;
+    if (!LEAD_CONTACT_CHANNELS.includes(channel as LeadContactChannel)) throw new BadRequestException(`Contact channel must be one of ${LEAD_CONTACT_CHANNELS.join(', ')}`);
+    if (typeof text !== 'string' || !text.trim() || text.trim().length > 255) throw new BadRequestException('Each contact channel requires a value up to 255 characters');
+    const key = `${channel}:${text.trim().toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    contacts.push({ channel: channel as LeadContactChannel, value: text.trim() });
+  }
+  return contacts;
+}
 
 function validatePins(value: unknown): LeadPin[] {
   if (value == null) return [];
@@ -77,6 +122,14 @@ export function validateLead(input: unknown): CreateLeadInput {
     if (typeof value !== 'string' || value.trim().length > max || (required && !value.trim())) throw new BadRequestException(`${key} ${required ? 'is required and ' : ''}must be text up to ${max} characters`);
     result[key] = value.trim() || null;
   }
+  // The app sends E.164; numbers without "+" are legacy free text and stay as typed.
+  if (typeof result.phone === 'string' && result.phone.startsWith('+')) {
+    const e164 = result.phone.replace(/[\s().-]/g, '');
+    if (!E164_PATTERN.test(e164)) throw new BadRequestException('phone must be an international number like +66812345678');
+    result.phone = e164;
+  }
+  result.email = validateEmail(body.email);
+  result.otherContacts = validateContacts(body.otherContacts);
   for (const key of ['hasPets', 'usesCar', 'isSmoker']) {
     if (body[key] != null && typeof body[key] !== 'boolean') throw new BadRequestException(`${key} must be true, false or null`);
     result[key] = body[key] ?? null;
@@ -140,7 +193,7 @@ export class AgentLeadsService {
       const repo = em.getRepository(LeadEntity);
       const row = await repo.save(repo.create({
         ...leadColumns(b), created_by_user_id: agentId,
-        rent_room_id: null, status: 'new', other_contacts: [],
+        rent_room_id: null, status: 'new',
       }));
       await replacePins(em, row.id, b.pins ?? []);
       return row.id;
@@ -191,7 +244,14 @@ export class AgentLeadsService {
       ? '(lead.locations && CAST(:locations AS text[]) OR (cardinality(lead.locations) = 0 AND NOT EXISTS (SELECT 1 FROM lead_locations pin WHERE pin.lead_id = lead.id)))'
       : 'lead.locations && CAST(:locations AS text[])', { locations });
     const q = query.q?.trim();
-    if (q) qb.andWhere("(lead.name ILIKE :q OR lead.phone ILIKE :q OR lead.preferred_location ILIKE :q OR lead.province ILIKE :q OR array_to_string(lead.locations, ', ') ILIKE :q OR EXISTS (SELECT 1 FROM lead_locations pin WHERE pin.lead_id = lead.id AND pin.name ILIKE :q))", { q: `%${q.replace(/[\\%_]/g, '\\$&')}%` });
+    if (q) {
+      const phoneDigits = phoneSearchDigits(q);
+      const phoneSql = phoneDigits.length ? " OR regexp_replace(lead.phone, '\\D', '', 'g') LIKE ANY(CAST(:phoneDigits AS text[]))" : '';
+      qb.andWhere(`(lead.name ILIKE :q OR lead.phone ILIKE :q${phoneSql} OR lead.preferred_location ILIKE :q OR lead.province ILIKE :q OR array_to_string(lead.locations, ', ') ILIKE :q OR EXISTS (SELECT 1 FROM lead_locations pin WHERE pin.lead_id = lead.id AND pin.name ILIKE :q))`, {
+        q: `%${q.replace(/[\\%_]/g, '\\$&')}%`,
+        phoneDigits: phoneDigits.map((d) => `%${d}%`),
+      });
+    }
     applyLeadSort(qb, sort);
     const [rows, total] = await qb.skip((page - 1) * limit).take(limit).getManyAndCount();
     if (rows.length) {
@@ -235,7 +295,8 @@ export class AgentLeadsService {
 function leadColumns(b: CreateLeadInput) {
   return {
     radius_km: b.radiusKm ?? null, province: b.province ?? null, locations: b.locations ?? [],
-    name: b.name, phone: b.phone, nationality: b.nationality ?? null,
+    name: b.name, phone: b.phone, email: b.email ?? null, other_contacts: b.otherContacts ?? [],
+    nationality: b.nationality ?? null,
     budget_min: b.budgetMin == null ? null : String(b.budgetMin), budget_max: b.budgetMax == null ? null : String(b.budgetMax),
     preferred_location: b.preferredLocation ?? null, move_in_plan: b.moveInPlan ?? null, has_pets: b.hasPets ?? null,
     occupation: b.occupation ?? null, visa_type_id: b.visaTypeId ?? null, lease_duration_months: b.leaseDurationMonths ?? null,
@@ -324,7 +385,8 @@ function toLead(row: LeadEntity) {
   return {
     pins, radiusKm: row.radius_km ?? null,
     province: row.province ?? null, locations: row.locations ?? [],
-    id: row.id, name: row.name, phone: row.phone, nationality: row.nationality,
+    id: row.id, name: row.name, phone: row.phone, email: row.email ?? null,
+    otherContacts: (row.other_contacts ?? []) as LeadContact[], nationality: row.nationality,
     budgetMin: row.budget_min == null ? null : Number(row.budget_min), budgetMax: row.budget_max == null ? null : Number(row.budget_max),
     preferredLocation: row.preferred_location, moveInPlan: row.move_in_plan, hasPets: row.has_pets,
     occupation: row.occupation, visaTypeId: row.visa_type_id, visaTypeCode: row.visa_type?.code ?? null,
