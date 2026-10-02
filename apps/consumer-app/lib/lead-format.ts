@@ -22,6 +22,10 @@ export function leadAvatarInitials(name: string): string {
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const LOCALE_TAGS: Record<string, string> = { th: 'th-TH', en: 'en-GB', zh: 'zh-CN', ja: 'ja-JP' };
 
+export function localeTag(locale: string): string {
+  return LOCALE_TAGS[locale] ?? locale;
+}
+
 /** ISO move-in dates render localized ("1 พ.ย. 2569"); legacy free text is returned as-is. */
 export function formatMoveIn(value: string | null | undefined, locale: string): string | null {
   if (!value) return null;
@@ -64,6 +68,16 @@ export function formatDateTime(value: string | null | undefined, locale: string)
   const tag = LOCALE_TAGS[locale] ?? locale;
   const time = date.toLocaleTimeString(tag, { hour: '2-digit', minute: '2-digit', hour12: false });
   return `${formatDate(value, locale)} ${time}`;
+}
+
+/** "5 ต.ค. 14:00" */
+export function formatShortDateTime(value: string | null | undefined, locale: string): string | null {
+  const date = toDate(value);
+  if (!date) return null;
+  const tag = LOCALE_TAGS[locale] ?? locale;
+  const day = date.toLocaleDateString(tag, { day: 'numeric', month: 'short' });
+  const time = date.toLocaleTimeString(tag, { hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${day} ${time}`;
 }
 
 export function formatBudgetRange(lead: Pick<AgentLead, 'budgetMin' | 'budgetMax'>): string | null {

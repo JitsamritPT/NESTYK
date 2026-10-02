@@ -9,6 +9,7 @@ export interface TranslationSchema {
     cancel: string;
     confirm: string;
     loading: string;
+    noData: string;
     scheduleViewing: string;
     viewDetails: string;
     payWithQr: string;
@@ -291,6 +292,24 @@ export interface TranslationSchema {
       kind: string;
       saved: string;
     };
+    tenants: {
+      create: string;
+      createIntro: string;
+      stepLead: string;
+      stepProfile: string;
+      stepReview: string;
+      back: string;
+      next: string;
+      review: string;
+      confirmCreate: string;
+      detailTitle: string;
+      edit: string;
+      save: string;
+      cancel: string;
+      clearFilters: string;
+      search: string;
+      clearSearch: string;
+    };
     leads: {
       mapSearchHint: string;
       mapPinHint: string;
@@ -345,7 +364,6 @@ export interface TranslationSchema {
       invalidNumber: string;
       budgetError: string;
       search: string;
-      empty: string;
       noMatches: string;
       count: string;
       profile: string;
@@ -519,16 +537,53 @@ export interface TranslationSchema {
       matchedTitleCount: string;
       matchedTitleCapped: string;
       matchShowMore: string;
-      matchedSubtitle: string;
       matchNotReadyTitle: string;
-      matchNotReadyBody: string;
       matchCompleteInfo: string;
       matchEmptyTitle: string;
-      matchEmptyBody: string;
       matchAdjust: string;
       matchLoadError: string;
+      matchRun: string;
+      matchRerun: string;
+      matchLastRun: string;
+      matchStale: string;
+      matchRunError: string;
+      matchNotRun: string;
+      matchEmptyScore: string;
+      matchClear: string;
+      matchClearConfirm: string;
+      matchClearError: string;
+      viewing: {
+        book: string;
+        /** `{date}` = short date and time */
+        booked: string;
+        title: string;
+        editTitle: string;
+        date: string;
+        time: string;
+        timePast: string;
+        dayViewings: string;
+        noDayViewings: string;
+        /** `{time}` = the other viewing's HH:mm */
+        nearViewing: string;
+        notePlaceholder: string;
+        save: string;
+        saveChange: string;
+        cancel: string;
+        cancelConfirm: string;
+        keep: string;
+        saveError: string;
+        cancelError: string;
+      };
+      matchSettings: {
+        title: string;
+        minScore: string;
+        maxResults: string;
+        percent: string;
+        rooms: string;
+        saveError: string;
+        summary: string;
+      };
       bookedTitle: string;
-      bookedBody: string;
       roomDistance: string;
       scoreCriteria: string;
       scoreCriteriaTitle: string;
@@ -1245,7 +1300,6 @@ export interface TranslationSchema {
       all: string;
       allLoaded: string;
       results: string;
-      noMatches: string;
       viewRoom: string;
       backToRooms: string;
       details: string;
@@ -1258,8 +1312,6 @@ export interface TranslationSchema {
       rented: string;
       pending_verification: string;
       needs_edit: string;
-      emptyTitle: string;
-      emptyBody: string;
       emptyCta: string;
       loadError: string;
       retry: string;
@@ -1281,7 +1333,6 @@ export interface TranslationSchema {
       sortPriceDesc: string;
       viewGrid: string;
       viewRow: string;
-      noMatchesHint: string;
       filterRooms: string;
       filterPriceRange: string;
       filterPriceUnder: string;

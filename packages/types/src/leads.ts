@@ -72,8 +72,59 @@ export type AgentLead = Required<Omit<CreateLeadInput, 'budgetMin' | 'budgetMax'
   id: number; budgetMin: number | null; budgetMax: number | null;
   desiredRoomTypeCode: string | null; visaTypeCode: string | null;
   status: LeadStatus; lostReason: string | null; createdAt: string;
+  /** Latest manual room-matching run; only on list responses, null when never matched. */
+  lastMatch?: LeadMatchSummary | null;
+};
+
+/** Per-lead room-matching preferences (docs/new-project/agent/leads/match-settings.md). */
+export type LeadMatchSettings = {
+  /** Rooms scoring below this (0–100) are left out. */
+  minScore: number;
+  /** Most rooms kept per run. */
+  maxResults: number;
+};
+export const LEAD_MATCH_MIN_SCORE_OPTIONS = [50, 60, 70, 80] as const;
+export const LEAD_MATCH_MAX_RESULTS_OPTIONS = [10, 20, 50, 100] as const;
+
+export type LeadMatchSettingsResponse = {
+  saved: Partial<LeadMatchSettings> | null;
+  effective: LeadMatchSettings;
+  defaults: LeadMatchSettings;
+};
+
+export type LeadMatchSummary = {
+  runId: number;
+  resultCount: number;
+  topScore: number | null;
+  createdAt: string;
+  /** The lead's matching fields or settings changed since this run. */
+  stale: boolean;
+};
+
+export type LeadMatchRun = LeadMatchSummary & {
+  settings: LeadMatchSettings;
+  /** Rooms that passed budget + distance before the score threshold and result cap. */
+  candidateCount: number;
 };
 export type AgentLeadsPage = { items: AgentLead[]; total: number; page: number; limit: number };
+
+/** Room viewing booked for a lead (docs/new-project/agent/leads/viewings.md). */
+export type LeadViewingStatus = 'scheduled' | 'done' | 'cancelled';
+export type LeadViewing = {
+  id: number;
+  leadId: number;
+  leadName: string;
+  rentRoomId: number;
+  /** Project name, else the listing title, else `#id`. */
+  roomTitle: string;
+  roomNumber: string | null;
+  scheduledAt: string;
+  status: LeadViewingStatus;
+  note: string | null;
+  createdAt: string;
+};
+export type CreateLeadViewingInput = { rentRoomId: number; scheduledAt: string; note?: string | null };
+export type UpdateLeadViewingInput = { scheduledAt?: string; status?: LeadViewingStatus; note?: string | null };
 
 export type LeadLocationCatalog = { name: string; nameEn: string; locations: string[] }[];
 export type LeadFilters = {

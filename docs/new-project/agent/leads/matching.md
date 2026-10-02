@@ -140,18 +140,20 @@ AI prompt (เฉพาะ preferences + room facts ที่อนุญาต)
 
 ---
 
-## 5.1 ผลเบื้องต้นฝั่ง client (ใช้อยู่ตอนนี้)
+## 5.1 ผลจับคู่เบื้องต้น (คำนวณที่ server เมื่อนายหน้ากดจับคู่)
 
-จนกว่าจะมี `GET /agent/leads/:id/matches` แอปคำนวณผลเบื้องต้นใน `apps/consumer-app/lib/lead-match-preview.ts` (คัดห้อง) และ `apps/consumer-app/lib/lead-room-compare.ts` (เทียบรายเกณฑ์ + คะแนนรวม) — ใช้ฟังก์ชันเดียวกันทั้งการ์ดห้องใน Lead detail และหน้าเทียบห้อง คะแนนจึงตรงกันทุกจุด
+> ตั้งแต่ 2026-10-02 การจับคู่ทำที่ API เมื่อกดปุ่ม "จับคู่ห้อง" และเก็บผลไว้ — รายละเอียดปุ่ม ค่าตั้งค่ารายลีด และ endpoint ดู [match-settings.md](./match-settings.md)
 
-- **Room pool:** ห้อง `available` ของ agent จาก `GET /agent/listings` (`limit=50`, สูงสุด 4 หน้า = 200 ห้อง) cache 60 วินาที ใช้ร่วมกันระหว่างรายการ Lead และหน้า detail; pull-to-refresh บังคับโหลดใหม่
+สูตรอยู่ที่เดียวใน `apps/api/src/agent/leads/lead-matching.ts` (คัดห้อง + เทียบรายเกณฑ์ + คะแนนรวม) แอปแสดง `comparison` ที่ server ส่งมาทั้งในการ์ดห้องของ Lead detail และหน้าเทียบห้อง คะแนนจึงตรงกันทุกจุด (`apps/consumer-app/lib/lead-room-compare.ts` เหลือเฉพาะ type และตัวช่วยแสดงผล)
+
+- **ห้องที่นำมาคิด:** ห้อง `available` ของ agent ที่อยู่ในกรอบพิกัดรอบหมุด (2× รัศมี) และราคาเริ่มต้นไม่เกินงบ — คัดด้วย SQL ใน `AgentListingsService.matchCandidates` ไม่มีเพดาน 200 ห้องแบบเดิม
 - **Hard filter (คัดกรองเบื้องต้น):** มีพิกัด (ห้องหรือตึก) · ราคาไม่เกิน `budget_max` (ใช้ราคาตาม `lease_duration_months` ถ้าห้องมีราคานั้น ไม่งั้นใช้ราคาถูกสุด) · อยู่ภายใน 2× รัศมีจากหมุดใดหมุดหนึ่ง — **ระยะสัญญาไม่ใช่ตัวกรองแล้ว** ห้องที่ไม่มีระยะสัญญาตรงยังแสดง แต่เสียคะแนนข้อนี้
 
 ### กติกาเกณฑ์: ใช้เฉพาะช่องในแท็บ “จับคู่ห้อง”
 
 เกณฑ์ที่นำมาคิดคะแนน = **เฉพาะช่องในแท็บ 2 “จับคู่ห้อง” ของฟอร์มสร้าง/แก้ไข Lead** เท่านั้น ข้อมูลแท็บโปรไฟล์ (สัตว์เลี้ยง ใช้รถ สูบบุหรี่ จำนวนคน ฯลฯ) **ไม่นำมาคิด**
 
-> **ถ้าในอนาคตแท็บ “จับคู่ห้อง” มีช่องเพิ่ม** ต้องเพิ่มแถวใน `compareLeadRoom()` (`lead-room-compare.ts` → `COMPARE_KEYS`) ให้มี `status` + `score` และข้อนั้นจะเข้าค่าเฉลี่ยอัตโนมัติ พร้อมเพิ่มข้อความใน `agent.leads.matchRoom.*` และอัปเดตตารางนี้
+> **ถ้าในอนาคตแท็บ “จับคู่ห้อง” มีช่องเพิ่ม** ต้องเพิ่มแถวใน `compareLeadRoom()` (`apps/api/src/agent/leads/lead-matching.ts` → `COMPARE_KEYS`) ให้มี `status` + `score` และข้อนั้นจะเข้าค่าเฉลี่ยอัตโนมัติ เพิ่มช่องนั้นใน `matchInputHash` และเพิ่ม `SCORING_VERSION` · ฝั่งแอปเพิ่ม type ใน `lead-room-compare.ts` (`COMPARE_KEYS`) พร้อมข้อความใน `agent.leads.matchRoom.*` และอัปเดตตารางนี้
 
 | เกณฑ์ | ลีด (แท็บจับคู่ห้อง) | ห้อง | คะแนนข้อนี้ | สถานะ |
 |---|---|---|---|---|
@@ -192,7 +194,7 @@ AI prompt (เฉพาะ preferences + room facts ที่อนุญาต)
 
 ## 6. สิ่งที่ยังไม่มีในระบบ
 
-- [ ] API matching / คำนวณคะแนน (ตอนนี้เป็นผลเบื้องต้นฝั่ง client — §5.1)
+- [ ] API matching / คำนวณคะแนน (ตอนนี้เป็นผลเบื้องต้นฝั่ง client — §5.1) → แผนใน [match-settings.md](./match-settings.md)
 - [ ] นิยาม hard filter query (SQL) ให้ชัด รวมกฎราคาเมื่อไม่ระบุระยะสัญญา
 - [ ] JSON schema สำหรับ Gemini (lead preferences + room facts → qualitative score และเหตุผล)
 - [ ] นโยบายห้อง (pets / smoking) ถ้าจะ hard-filter ได้จริง

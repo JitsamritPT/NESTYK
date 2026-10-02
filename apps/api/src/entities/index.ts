@@ -58,6 +58,9 @@ import { RoomLayoutValueEntity } from './room-layout-value.entity';
 import { RoomFacilityEntity } from './room-facility.entity';
 import { LeadEntity } from './lead.entity';
 import { LeadLocationEntity } from './lead-location.entity';
+import { LeadMatchRunEntity } from './lead-match-run.entity';
+import { LeadMatchResultEntity } from './lead-match-result.entity';
+import { LeadViewingEntity } from './lead-viewing.entity';
 import { TenantEntity } from './tenant.entity';
 import { RoomTenancyEntity } from './room-tenancy.entity';
 import { LeaseContractEntity } from './lease-contract.entity';
@@ -97,6 +100,9 @@ export const ALL_ENTITIES = [
   RoomFacilityEntity,
   LeadEntity,
   LeadLocationEntity,
+  LeadMatchRunEntity,
+  LeadMatchResultEntity,
+  LeadViewingEntity,
   TenantEntity,
   RoomTenancyEntity,
   LeaseContractEntity,

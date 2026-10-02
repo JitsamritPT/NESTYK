@@ -9,6 +9,7 @@ import { LeadLocationEntity } from '../../entities/lead-location.entity';
 import { MasterRoomTypeEntity } from '../../entities/master-room-type.entity';
 import { MasterVisaTypeEntity } from '../../entities/master-visa-type.entity';
 import { MasterContractTypeEntity } from '../../entities/master-contract-type.entity';
+import { loadLastMatches } from './lead-matching.service';
 
 const LEAD_MAX_PINS = 3;
 const LEAD_RADII_KM = [1, 3, 5];
@@ -271,11 +272,11 @@ export class AgentLeadsService {
     }
     applyLeadSort(qb, sort);
     const [rows, total] = await qb.skip((page - 1) * limit).take(limit).getManyAndCount();
-    if (rows.length) {
-      const pins = await this.leads.manager.getRepository(LeadLocationEntity).find({ where: { lead_id: In(rows.map((r) => r.id)) }, order: { rank: 'ASC' } });
-      for (const row of rows) row.pins = pins.filter((p) => p.lead_id === row.id);
-    }
-    return { items: rows.map(toLead), total, page, limit };
+    if (!rows.length) return { items: [], total, page, limit };
+    const pins = await this.leads.manager.getRepository(LeadLocationEntity).find({ where: { lead_id: In(rows.map((r) => r.id)) }, order: { rank: 'ASC' } });
+    for (const row of rows) row.pins = pins.filter((p) => p.lead_id === row.id);
+    const lastMatches = await loadLastMatches(this.leads.manager, rows);
+    return { items: rows.map((row) => ({ ...toLead(row), lastMatch: lastMatches.get(row.id) ?? null })), total, page, limit };
   }
 
   async view(agentId: number, id: number) {

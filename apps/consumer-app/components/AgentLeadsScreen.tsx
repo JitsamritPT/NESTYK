@@ -18,8 +18,7 @@ import {
   useMobileTheme,
 } from '@nestyk/ui/native';
 import { listAgentLeads } from '../lib/agent-leads-api';
-import type { AgentListingCard } from '../lib/agent-listings-api';
-import { leadMatchReady, loadMatchRoomPool, summarizeLeadMatch } from '../lib/lead-match-preview';
+import { leadMatchReady } from '../lib/lead-match-preview';
 import { LeadStatusBadge, leadAvatarInitials, leadStatusTone } from './AgentLeadDetailBody';
 
 type LocationDraft = {
@@ -44,7 +43,6 @@ type ListMemory = LocationDraft & {
 
 /** The shell remounts tab bodies, so list state survives opening a lead and coming back. */
 let listMemory: ListMemory | null = null;
-let lastPoolReloadToken = 0;
 
 export function AgentLeadsScreen({
   workFilter = null,
@@ -81,29 +79,12 @@ export function AgentLeadsScreen({
   const [loading, setLoading] = useState(!memory);
   const [error, setError] = useState<string | null>(null);
   const [gateOpen, setGateOpen] = useState(!!memory);
-  const [roomPool, setRoomPool] = useState<AgentListingCard[] | null>(null);
   const gateOpenRef = useRef(gateOpen);
   gateOpenRef.current = gateOpen;
 
   useEffect(() => {
     listMemory = { query, sort, page, province, locations, includeUnspecified, items, total };
   }, [query, sort, page, province, locations, includeUnspecified, items, total]);
-
-  useEffect(() => {
-    let active = true;
-    const force = !!reloadToken && reloadToken !== lastPoolReloadToken;
-    if (reloadToken) lastPoolReloadToken = reloadToken;
-    loadMatchRoomPool(force)
-      .then((rooms) => {
-        if (active) setRoomPool(rooms);
-      })
-      .catch(() => {
-        if (active) setRoomPool(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [reloadToken]);
 
   const filterBadge = useMemo(() => {
     let n = 0;
@@ -339,16 +320,15 @@ export function AgentLeadsScreen({
             </View>
           ) : !items.length ? (
             <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <Text style={{ color: theme.textSecondary }}>
-                {query.trim() || province ? c.noMatches : c.empty}
-              </Text>
+              <Text style={{ color: theme.textSecondary }}>{t.common.noData}</Text>
             </View>
           ) : (
             <View style={styles.list}>
               {items.map((lead) => {
                 const tone = STATUS_PILL_TONES[leadStatusTone(lead.status)];
-                const match = summarizeLeadMatch(lead, roomPool);
+                const match = lead.lastMatch ?? null;
                 const needsInfo = !leadMatchReady(lead);
+                const ringLabel = match ? c.matchLabel : needsInfo ? c.matchNeedsInfo : c.matchNotRun;
                 return (
                   <MobileCompactListRow
                     key={lead.id}
@@ -362,21 +342,17 @@ export function AgentLeadsScreen({
                         <LeadStatusBadge status={lead.status} />
                         {match ? (
                           <Text style={[styles.matchRooms, { color: theme.textSecondary }]} numberOfLines={1}>
-                            {c.matchRooms.replace('{count}', String(match.roomCount))}
+                            {c.matchRooms.replace('{count}', String(match.resultCount))}
                           </Text>
                         ) : null}
                       </>
                     }
                     aside={
                       <MobileScoreRing
-                        value={match?.score ?? null}
-                        label={match ? c.matchLabel : needsInfo ? c.matchNeedsInfo : undefined}
+                        value={match?.topScore ?? null}
+                        label={ringLabel}
                         accessibilityLabel={
-                          match
-                            ? c.matchScoreA11y.replace('{score}', String(match.score ?? 0))
-                            : needsInfo
-                              ? c.matchNeedsInfo
-                              : undefined
+                          match ? c.matchScoreA11y.replace('{score}', String(match.topScore ?? 0)) : ringLabel
                         }
                       />
                     }

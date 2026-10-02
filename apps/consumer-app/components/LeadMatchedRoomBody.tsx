@@ -13,7 +13,13 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import type { AgentLead } from '@nestyk/types';
-import { formatBedroomSpec, HeroPhotoPager, RoomShareLinkSheet, type AgentRoomDetail } from '@nestyk/feature-listing';
+import {
+  formatBedroomSpec,
+  HeroPhotoPager,
+  RoomShareLinkSheet,
+  type AgentRoomDetail,
+  type RoomShareVisibility,
+} from '@nestyk/feature-listing';
 import {
   MobileActionSheetBody,
   MobileBottomSheet,
@@ -37,8 +43,6 @@ import {
 import type { LeadRoomMatch } from '../lib/lead-match-preview';
 import {
   COMPARE_KEYS,
-  compareLeadRoom,
-  overallScore,
   roomLayoutValue,
   summarizeComparison,
   type CompareKey,
@@ -88,11 +92,17 @@ export function LeadMatchedRoomBody({
   lead,
   match,
   onOpenRoom,
+  onPreviewRoom,
+  roomVersion = 0,
   menuRequest = 0,
 }: {
   lead: AgentLead;
   match: LeadRoomMatch;
   onOpenRoom: (roomId: number) => void;
+  /** Customer preview chosen in the share sheet. */
+  onPreviewRoom: (roomId: number, visibility: RoomShareVisibility, contactId: number | null) => void;
+  /** Bumped when the room was edited elsewhere; re-reads the room detail. */
+  roomVersion?: number;
   /** Bumped by the shell header "⋯" button; a change (not the mount value) opens the menu. */
   menuRequest?: number;
 }) {
@@ -133,7 +143,7 @@ export function LeadMatchedRoomBody({
     return () => {
       active = false;
     };
-  }, [match.room.id, attempt]);
+  }, [match.room.id, attempt, roomVersion]);
 
   const photos = useMemo(() => {
     const images = room?.medias.filter((media) => media.mediaType === 'image') ?? [];
@@ -141,11 +151,7 @@ export function LeadMatchedRoomBody({
     return match.room.coverMediaUrl ? [{ id: 'cover', uri: match.room.coverMediaUrl }] : [];
   }, [room, match.room.coverMediaUrl]);
 
-  const comparison = useMemo(
-    () => (room ? compareLeadRoom(lead, match, room) : match.comparison),
-    [lead, match, room],
-  );
-  const score = room ? overallScore(comparison) : match.score;
+  const { comparison, score } = match;
   const summary = summarizeComparison(comparison);
   const judged = COMPARE_KEYS.filter((key) => comparison[key].score != null).length;
 
@@ -498,9 +504,9 @@ export function LeadMatchedRoomBody({
           room={room}
           api={{ create: createRoomShareLink, list: listRoomShareLinks, revoke: revokeRoomShareLink }}
           onClose={() => setShareOpen(false)}
-          onPreview={() => {
+          onPreview={(visibility, contactId) => {
             setShareOpen(false);
-            handoff.current = setTimeout(() => onOpenRoom(match.room.id), SHEET_HANDOFF_MS);
+            handoff.current = setTimeout(() => onPreviewRoom(match.room.id, visibility, contactId), SHEET_HANDOFF_MS);
           }}
         />
       ) : null}
@@ -582,25 +588,6 @@ function roomFacts(
   ].filter((group) => group.facts.length > 0);
 }
 
-/** "View room" action for the shell's bottom bar on the `leadRoom` tab, so it stays reachable without scrolling. */
-export function LeadMatchedRoomCta({ onPress }: { onPress: () => void }) {
-  const { m } = useMatchCopy();
-  const { theme } = useMobileTheme();
-  return (
-    <View style={[styles.ctaBar, { borderTopColor: theme.border }]}>
-      <Pressable
-        onPress={onPress}
-        accessibilityRole="button"
-        style={({ pressed }) => [styles.primaryBtn, pressed && Platform.OS === 'ios' ? { opacity: 0.85 } : null]}
-        android_ripple={{ color: 'rgba(255,255,255,0.16)' }}
-      >
-        <Text style={styles.primaryLabel}>{m.viewRoom}</Text>
-        <MobileIcon name="chevron-right" size={18} color="#FFFFFF" />
-      </Pressable>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { gap: 20, paddingBottom: 8 },
   flex1: { flex: 1 },
@@ -659,16 +646,4 @@ const styles = StyleSheet.create({
   factRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36 },
   factLabel: { flexShrink: 0 },
   factValue: { flex: 1, textAlign: 'right' },
-  ctaBar: { paddingHorizontal: 16, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    minHeight: 52,
-    borderRadius: 14,
-    backgroundColor: tokens.colors.primary,
-    overflow: 'hidden',
-  },
-  primaryLabel: { fontFamily: tokens.typography.native.headingTh, fontSize: 16, lineHeight: 24, color: '#FFFFFF' },
 });

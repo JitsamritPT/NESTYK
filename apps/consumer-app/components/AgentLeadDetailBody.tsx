@@ -1,30 +1,53 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
-import type { AgentLead } from '@nestyk/types';
+import {
+  LEAD_MATCH_MAX_RESULTS_OPTIONS,
+  LEAD_MATCH_MIN_SCORE_OPTIONS,
+  type AgentLead,
+  type LeadMatchSettings,
+} from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
 import {
   getCardElevation,
   MobileActionSheetBody,
+  MobileAiQuotaAction,
   MobileBottomSheet,
   MobileButton,
   MobileIcon,
   MobileInput,
   MobileScoreRing,
   MobileStatusPill,
+  SelectionChip,
   STATUS_PILL_TONES,
   tokens,
   useMobileTheme,
   type AppIconName,
   type MobileStatusPillToneKey,
 } from '@nestyk/ui/native';
-import { getAgentLead, markAgentLeadInProgress, markAgentLeadLost } from '../lib/agent-leads-api';
-import type { AgentListingCard } from '../lib/agent-listings-api';
-import { leadMatchReady, loadMatchRoomPool, matchLeadRooms, type LeadRoomMatch } from '../lib/lead-match-preview';
+import {
+  clearLeadMatches,
+  fetchLatestLeadMatch,
+  getAgentLead,
+  getLeadMatchSettings,
+  markAgentLeadInProgress,
+  markAgentLeadLost,
+  runLeadMatch,
+  saveLeadMatchSettings,
+} from '../lib/agent-leads-api';
+import { leadMatchReady, type LeadMatchRunResult, type LeadRoomMatch } from '../lib/lead-match-preview';
 import { summarizeComparison } from '../lib/lead-room-compare';
 import { useMatchCopy } from './lead-match-copy';
-import { formatBudgetRange, formatDate, formatKm, formatLeadCode, formatMoveIn, leadAvatarInitials } from '../lib/lead-format';
+import {
+  formatBudgetRange,
+  formatDate,
+  formatDateTime,
+  formatKm,
+  formatLeadCode,
+  formatMoveIn,
+  leadAvatarInitials,
+} from '../lib/lead-format';
 import { formatPhoneDisplay, phoneDialString } from '../lib/phone';
 
 export { leadAvatarInitials };
@@ -58,7 +81,7 @@ const MATCH_PAGE_SIZE = 10;
 const { boxShadow: _webShadow, ...cardShadow } = getCardElevation(1);
 export const leadCardShadow = cardShadow;
 
-type SheetMode = 'menu' | 'status' | 'lost' | 'criteria';
+type SheetMode = 'menu' | 'status' | 'lost' | 'criteria' | 'settings' | 'clear';
 
 export function AgentLeadDetailBody({
   lead,
@@ -83,9 +106,14 @@ export function AgentLeadDetailBody({
 
   const [leadError, setLeadError] = useState<string | null>(null);
   const [leadAttempt, setLeadAttempt] = useState(0);
-  const [pool, setPool] = useState<AgentListingCard[] | null>(null);
-  const [poolError, setPoolError] = useState(false);
-  const [poolAttempt, setPoolAttempt] = useState(0);
+  const [matchResult, setMatchResult] = useState<LeadMatchRunResult | null>(null);
+  const [matchError, setMatchError] = useState(false);
+  const [matchAttempt, setMatchAttempt] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [settings, setSettings] = useState<LeadMatchSettings | null>(null);
+  const [draft, setDraft] = useState<LeadMatchSettings | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetMode, setSheetMode] = useState<SheetMode>('menu');
   const [lostReason, setLostReason] = useState('');
@@ -117,25 +145,84 @@ export function AgentLeadDetailBody({
   const ready = leadMatchReady(lead);
   const booked = lead.status === 'booked';
 
+  /** Fields the server hashes for the stale flag; editing one of them re-reads the last run. */
+  const matchInputKey = JSON.stringify([
+    lead.budgetMax,
+    lead.radiusKm,
+    lead.pins.map((p) => [p.rank, p.name, p.latitude, p.longitude]),
+    lead.leaseDurationMonths,
+    lead.desiredRoomTypeCode,
+    lead.moveInPlan,
+  ]);
+
+  /** Last stored run only — matching itself runs when the agent asks for it. */
   useEffect(() => {
-    if (!ready || booked) return;
+    if (booked) return;
     let active = true;
-    setPoolError(false);
-    loadMatchRoomPool(poolAttempt > 0)
-      .then((rooms) => {
-        if (active) setPool(rooms);
+    setMatchError(false);
+    Promise.all([fetchLatestLeadMatch(lead.id), getLeadMatchSettings(lead.id)])
+      .then(([latest, saved]) => {
+        if (!active) return;
+        setMatchResult(latest);
+        setSettings(saved.effective);
       })
       .catch(() => {
-        if (active) setPoolError(true);
+        if (active) setMatchError(true);
       });
     return () => {
       active = false;
     };
-  }, [ready, booked, poolAttempt]);
+  }, [lead.id, matchInputKey, booked, matchAttempt]);
 
-  const matches = useMemo(() => (pool ? matchLeadRooms(lead, pool) : []), [lead, pool]);
+  /** Matching always starts from the settings sheet; it stays open until the run succeeds. */
+  const runFromSettings = async () => {
+    if (!draft || savingSettings || running) return;
+    if (draft.minScore !== settings?.minScore || draft.maxResults !== settings?.maxResults) {
+      setSavingSettings(true);
+      try {
+        setSettings((await saveLeadMatchSettings(lead.id, draft)).effective);
+      } catch (err) {
+        Alert.alert(c.matchSettings.saveError, err instanceof Error ? err.message : String(err));
+        return;
+      } finally {
+        setSavingSettings(false);
+      }
+    }
+    setRunning(true);
+    try {
+      setMatchResult(await runLeadMatch(lead.id));
+      setMatchError(false);
+      setSheetOpen(false);
+    } catch (err) {
+      Alert.alert(c.matchRunError, err instanceof Error ? err.message : String(err));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const clearMatches = async () => {
+    if (clearing) return;
+    setClearing(true);
+    try {
+      await clearLeadMatches(lead.id);
+      setMatchResult({ run: null, items: [] });
+      setSheetOpen(false);
+    } catch (err) {
+      Alert.alert(c.matchClearError, err instanceof Error ? err.message : String(err));
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const openSettings = () => {
+    setDraft(settings);
+    openSheet('settings');
+  };
+
+  const matches = matchResult?.items ?? [];
+  const lastRun = matchResult?.run ?? null;
   const [visibleCount, setVisibleCount] = useState(MATCH_PAGE_SIZE);
-  useEffect(() => setVisibleCount(MATCH_PAGE_SIZE), [lead.id, pool]);
+  useEffect(() => setVisibleCount(MATCH_PAGE_SIZE), [lead.id, matchResult]);
   const visibleMatches = matches.slice(0, visibleCount);
   const moreCount = Math.min(MATCH_PAGE_SIZE, matches.length - visibleMatches.length);
   const statusTargets = STATUS_TARGETS[lead.status] ?? [];
@@ -185,7 +272,7 @@ export function AgentLeadDetailBody({
   }
 
   const closeSheet = () => {
-    if (statusBusy) return;
+    if (statusBusy || clearing) return;
     setSheetOpen(false);
     setLostReason('');
   };
@@ -224,50 +311,80 @@ export function AgentLeadDetailBody({
 
   const renderMatches = () => {
     if (booked) {
-      return <StateCard icon="check" title={c.bookedTitle} body={c.bookedBody} />;
+      return <StateCard icon="check" title={c.bookedTitle} />;
     }
     if (!ready) {
       return (
         <StateCard
           icon="map-pin"
           title={c.matchNotReadyTitle}
-          body={c.matchNotReadyBody}
           action={<MobileButton onPress={onEditMatching}>{c.matchCompleteInfo}</MobileButton>}
         />
       );
     }
-    if (poolError) {
+    if (matchError) {
       return (
         <StateCard
           icon="warning"
           title={c.matchLoadError}
           action={
-            <MobileButton variant="outline" onPress={() => setPoolAttempt((n) => n + 1)}>
+            <MobileButton variant="outline" onPress={() => setMatchAttempt((n) => n + 1)}>
               {c.retry}
             </MobileButton>
           }
         />
       );
     }
-    if (!pool) return <ActivityIndicator style={styles.loader} color={agentColor} />;
-    if (!matches.length) {
+    if (!matchResult) return <ActivityIndicator style={styles.loader} color={agentColor} />;
+    if (!lastRun) {
       return (
-        <StateCard
-          icon="search"
-          title={c.matchEmptyTitle}
-          body={c.matchEmptyBody
-            .replace('{budget}', (lead.budgetMax ?? 0).toLocaleString())
-            .replace('{km}', String(lead.radiusKm))}
-          action={
-            <MobileButton variant="outline" onPress={onEditMatching}>
-              {c.matchAdjust}
-            </MobileButton>
-          }
+        <MobileAiQuotaAction
+          label={c.matchRun}
+          variant="solid"
+          remaining={1}
+          limit={1}
+          showQuota={false}
+          loading={running}
+          onPress={openSettings}
         />
+      );
+    }
+    const runMeta = (
+      <View style={styles.runMeta}>
+        <Text style={[styles.meta, styles.flex1, { color: theme.textSecondary }]} numberOfLines={1}>
+          {c.matchLastRun.replace('{date}', formatDateTime(lastRun.createdAt, locale) ?? '—')}
+          {' · '}
+          {c.matchSettings.summary.replace('{score}', String(lastRun.settings.minScore))}
+        </Text>
+        {lastRun.stale ? <MobileStatusPill label={c.matchStale} tone="yellow" /> : null}
+      </View>
+    );
+    if (!matches.length) {
+      const belowScore = lastRun.candidateCount > 0;
+      return (
+        <View style={styles.roomList}>
+          {runMeta}
+          <StateCard
+            icon="search"
+            title={
+              belowScore
+                ? c.matchEmptyScore
+                    .replace('{count}', String(lastRun.candidateCount))
+                    .replace('{score}', String(lastRun.settings.minScore))
+                : c.matchEmptyTitle
+            }
+            action={
+              <MobileButton variant="outline" onPress={belowScore ? openSettings : onEditMatching}>
+                {belowScore ? c.matchSettings.title : c.matchAdjust}
+              </MobileButton>
+            }
+          />
+        </View>
       );
     }
     return (
       <View style={styles.roomList}>
+        {runMeta}
         {visibleMatches.map((match) => (
           <MatchedRoomCard key={match.room.id} match={match} onPress={onOpenMatch} />
         ))}
@@ -302,6 +419,101 @@ export function AgentLeadDetailBody({
           cancelLabel={t.common.cancel}
           onCancel={closeSheet}
         />
+      );
+    }
+    if (sheetMode === 'clear') {
+      return (
+        <>
+          <SheetHeader title={c.matchClearConfirm} onClose={closeSheet} />
+          <View style={styles.sheetBody}>
+            <MobileButton
+              onPress={() => void clearMatches()}
+              isLoading={clearing}
+              style={styles.dangerBtn}
+              textStyle={styles.dangerLabel}
+            >
+              {c.matchClear}
+            </MobileButton>
+            <MobileButton variant="outline" onPress={() => setSheetMode('settings')} disabled={clearing}>
+              {t.common.cancel}
+            </MobileButton>
+          </View>
+        </>
+      );
+    }
+    if (sheetMode === 'settings') {
+      const s = c.matchSettings;
+      const value = draft ?? settings;
+      const busy = savingSettings || running;
+      const group = (
+        title: string,
+        options: readonly number[],
+        selected: number | undefined,
+        label: (n: number) => string,
+        pick: (n: number) => void,
+      ) => (
+        <View style={styles.settingGroup}>
+          <Text style={[styles.settingTitle, { color: theme.textHeading }]}>{title}</Text>
+          <View style={styles.chipRow}>
+            {options.map((n) => (
+              <SelectionChip
+                key={n}
+                label={label(n)}
+                selected={selected === n}
+                showCheck={false}
+                disabled={busy}
+                onPress={() => pick(n)}
+              />
+            ))}
+          </View>
+        </View>
+      );
+      return (
+        <>
+          <SheetHeader title={s.title} onClose={closeSheet} />
+          {!value ? (
+            <ActivityIndicator style={styles.loader} color={agentColor} />
+          ) : (
+            <View style={styles.sheetBody}>
+              {group(
+                s.minScore,
+                LEAD_MATCH_MIN_SCORE_OPTIONS,
+                value.minScore,
+                (n) => s.percent.replace('{value}', String(n)),
+                (n) => setDraft({ ...value, minScore: n }),
+              )}
+              {group(
+                s.maxResults,
+                LEAD_MATCH_MAX_RESULTS_OPTIONS,
+                value.maxResults,
+                (n) => s.rooms.replace('{count}', String(n)),
+                (n) => setDraft({ ...value, maxResults: n }),
+              )}
+              <MobileAiQuotaAction
+                label={lastRun ? c.matchRerun : c.matchRun}
+                variant="solid"
+                remaining={1}
+                limit={1}
+                showQuota={false}
+                loading={busy}
+                onPress={() => void runFromSettings()}
+                style={styles.sheetAction}
+              />
+              {lastRun ? (
+                <Pressable
+                  onPress={() => setSheetMode('clear')}
+                  disabled={busy}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [styles.clearLink, iosPressed(pressed)]}
+                  {...androidRipple}
+                >
+                  <Text style={[styles.link, { color: tokens.colors.danger }]}>{c.matchClear}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        </>
       );
     }
     if (sheetMode === 'criteria') {
@@ -468,20 +680,27 @@ export function AgentLeadDetailBody({
 
       <View style={styles.section}>
         <View style={styles.sectionHead}>
-          <View style={styles.flex1}>
-            <Text style={[styles.sectionTitle, { color: theme.textHeading }]}>
-              {!pool || !ready || booked
-                ? c.matchedTitle
-                : matches.length > visibleMatches.length
-                  ? c.matchedTitleCapped
-                      .replace('{shown}', String(visibleMatches.length))
-                      .replace('{total}', String(matches.length))
-                  : c.matchedTitleCount.replace('{count}', String(matches.length))}
-            </Text>
-            {ready && !booked ? (
-              <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>{c.matchedSubtitle}</Text>
-            ) : null}
-          </View>
+          <Text style={[styles.sectionTitle, { color: theme.textHeading }]}>
+            {!lastRun || !ready || booked
+              ? c.matchedTitle
+              : matches.length > visibleMatches.length
+                ? c.matchedTitleCapped
+                    .replace('{shown}', String(visibleMatches.length))
+                    .replace('{total}', String(matches.length))
+                : c.matchedTitleCount.replace('{count}', String(matches.length))}
+          </Text>
+          {lastRun && ready && !booked ? (
+            <Pressable
+              onPress={openSettings}
+              disabled={!settings}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={c.matchSettings.title}
+              accessibilityState={{ disabled: !settings }}
+            >
+              <MobileIcon name="sliders" size={20} color={settings ? theme.textSecondary : tokens.colors.divider} />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => openSheet('criteria')}
             hitSlop={10}
@@ -498,7 +717,7 @@ export function AgentLeadDetailBody({
         visible={sheetOpen}
         onClose={closeSheet}
         avoidKeyboard={sheetMode === 'lost'}
-        maxHeight={sheetMode === 'criteria' ? '80%' : '70%'}
+        maxHeight={sheetMode === 'criteria' || sheetMode === 'settings' ? '80%' : '70%'}
       >
         {renderSheet()}
       </MobileBottomSheet>
@@ -727,7 +946,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   issueText: { flex: 1, fontFamily: tokens.typography.native.bodyBold, fontSize: 13, lineHeight: 19 },
-  sectionSub: { fontFamily: tokens.typography.native.body, fontSize: 12, lineHeight: 18 },
   moreBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -744,6 +962,14 @@ const styles = StyleSheet.create({
   stateTitle: { fontFamily: tokens.typography.native.headingTh, fontSize: 16, lineHeight: 24, textAlign: 'center' },
   stateBody: { fontFamily: tokens.typography.native.body, fontSize: 14, lineHeight: 21, textAlign: 'center' },
   stateAction: { alignSelf: 'stretch', marginTop: 8 },
+  sheetAction: { marginTop: 8 },
+  clearLink: { alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 12, borderRadius: 8, overflow: 'hidden' },
+  dangerBtn: { backgroundColor: tokens.colors.danger },
+  dangerLabel: { color: '#FFFFFF' },
+  runMeta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  settingGroup: { gap: 6 },
+  settingTitle: { fontFamily: tokens.typography.native.bodyBold, fontSize: 15, lineHeight: 22 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 },
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',

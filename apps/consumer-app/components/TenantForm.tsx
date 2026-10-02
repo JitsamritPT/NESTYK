@@ -1,12 +1,22 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
+import { useLocale } from "@nestyk/i18n";
+import {
+  MobileButton,
+  MobileIcon,
+  MobileInput,
+  tokens,
+  useMobileTheme,
+} from "@nestyk/ui/native";
 import type {
   AgentTenant,
   TenantLeadOption,
@@ -19,14 +29,20 @@ import {
 } from "../lib/agent-tenants-api";
 
 export function TenantForm({
-  onBack,
   onCreated,
+  onBusy,
+  backRef,
 }: {
-  onBack: () => void;
   onCreated: (tenant: AgentTenant) => void;
+  onBusy?: (busy: boolean) => void;
+  /** Shell header / hardware back: returns true when it stepped back, false on the first step. */
+  backRef?: React.MutableRefObject<(() => boolean) | null>;
 }) {
+  const { t } = useLocale();
+  const c = t.agent.tenants;
   const { theme } = useMobileTheme();
   const [step, setStep] = useState(1);
+  const scroll = useRef<ScrollView>(null);
   const [lead, setLead] = useState<TenantLeadOption | null>(null);
   const [room, setRoom] = useState<TenantRoomOption | null>(null);
   const [leads, setLeads] = useState<TenantLeadOption[]>([]);
@@ -77,33 +93,29 @@ export function TenantForm({
       clearTimeout(timer);
     };
   }, [step, search, roomSearch, retry]);
-  const button = (
-    label: string,
-    action: () => void,
-    primary = false,
-    disabled = false,
-  ) => (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled: busy || disabled }}
-      disabled={busy || disabled}
-      onPress={action}
-      style={[
-        s.button,
-        {
-          backgroundColor: primary ? "#FFBF19" : theme.surface,
-          borderColor: primary ? "#FFBF19" : theme.border,
-          opacity: busy || disabled ? 0.5 : 1,
-        },
-      ]}
-    >
-      <Text
-        style={[s.body, { color: primary ? "#202631" : theme.textHeading }]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
+  useEffect(() => {
+    scroll.current?.scrollTo({ y: 0, animated: false });
+  }, [step]);
+  useEffect(() => {
+    onBusy?.(busy);
+  }, [busy, onBusy]);
+  useEffect(() => {
+    if (!backRef) return;
+    backRef.current = () => {
+      if (saving.current) return true;
+      if (step === 1) return false;
+      setError("");
+      setStep(step - 1);
+      return true;
+    };
+    return () => {
+      backRef.current = null;
+    };
+  }, [backRef, step]);
+  const goToStep = (next: number) => {
+    setError("");
+    setStep(next);
+  };
   function review() {
     if (!form.firstName.trim() || !form.phone.trim() || !room) {
       setError("กรุณากรอกชื่อ เบอร์โทร และเลือกห้องที่เช่า");
@@ -157,51 +169,90 @@ export function TenantForm({
       setBusy(false);
     }
   }
+  const steps = [c.stepLead, c.stepProfile, c.stepReview];
+  const primary =
+    step === 1
+      ? {
+          label: c.next,
+          onPress: () => goToStep(2),
+          disabled: !lead || loading || !!loadError,
+        }
+      : step === 2
+        ? { label: c.review, onPress: review, disabled: false }
+        : {
+            label: c.confirmCreate,
+            onPress: () => {
+              void save();
+            },
+            disabled: false,
+          };
   return (
-    <View style={s.root}>
-      {button(step === 1 ? "← กลับไปหน้าผู้เช่า" : "← ย้อนกลับ", () => {
-        setError("");
-        if (step === 1) onBack();
-        else setStep(step - 1);
-      })}
-      <Text style={[s.heading, title]}>สร้างผู้เช่า</Text>
-      <Text style={[s.body, muted]}>
-        นำข้อมูลจาก Lead มาต่อยอดเป็นผู้เช่าของคุณ
-      </Text>
-      <View style={s.steps}>
-        {["เลือก Lead", "ข้อมูลผู้เช่า", "ตรวจสอบ"].map((label, i) => (
-          <View
-            key={label}
-            style={[
-              s.step,
-              { borderBottomColor: step === i + 1 ? "#FFBF19" : theme.border },
-            ]}
-          >
-            <Text style={[s.small, step === i + 1 ? title : muted]}>
-              {i + 1}. {label}
-            </Text>
-          </View>
-        ))}
-      </View>
-      {!!error && (
-        <Text accessibilityRole="alert" style={[s.body, { color: "#C43D4C" }]}>
-          {error}
-        </Text>
-      )}
-      {step !== 3 && (
-        <>
-          {!!loadError && (
-            <View style={[s.panel, panel]}>
-              <Text
-                accessibilityRole="alert"
-                style={[s.body, { color: "#C43D4C" }]}
+    <KeyboardAvoidingView
+      style={s.fill}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <View style={s.tabsWrap}>
+        <View
+          style={[s.tabs, { borderColor: theme.border }]}
+          accessibilityRole="tablist"
+        >
+          {steps.map((label, i) => {
+            const n = i + 1;
+            const on = step === n;
+            const done = n < step;
+            return (
+              <Pressable
+                key={label}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: on, disabled: !done }}
+                disabled={!done || busy}
+                onPress={() => goToStep(n)}
+                android_ripple={{ color: tokens.colors.brand[100], borderless: false }}
+                style={({ pressed }) => [
+                  s.tab,
+                  on && s.tabOn,
+                  pressed && Platform.OS === "ios" && s.tabPressed,
+                ]}
               >
-                {loadError}
-              </Text>
-              {button("ลองโหลดอีกครั้ง", () => setRetry((n) => n + 1))}
-            </View>
-          )}
-        </>
+                <Text
+                  style={[
+                    s.tabText,
+                    {
+                      color: on
+                        ? tokens.colors.primary
+                        : done
+                          ? theme.textHeading
+                          : theme.textSecondary,
+                    },
+                    on && s.tabTextOn,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {n}. {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+      <ScrollView
+        ref={scroll}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={s.form}
+      >
+      <Text style={[s.body, muted]}>{c.createIntro}</Text>
+      {step !== 3 && !!loadError && (
+        <View style={[s.panel, panel]}>
+          <Text
+            accessibilityRole="alert"
+            style={[s.body, { color: tokens.colors.danger }]}
+          >
+            {loadError}
+          </Text>
+          <MobileButton variant="outline" onPress={() => setRetry((n) => n + 1)}>
+            ลองโหลดอีกครั้ง
+          </MobileButton>
+        </View>
       )}
       {step === 1 && (
         <>
@@ -228,7 +279,8 @@ export function TenantForm({
                       if (lead?.id !== l.id) {
                         setLead(l);
                         setForm({
-                          firstName: l.firstName || l.name.trim().split(/\s+/)[0] || "",
+                          firstName:
+                            l.firstName || l.name.trim().split(/\s+/)[0] || "",
                           lastName:
                             l.lastName ||
                             l.name.trim().split(/\s+/).slice(1).join(" "),
@@ -267,12 +319,6 @@ export function TenantForm({
             )
           )}
           {lead && <Text style={[s.small, muted]}>เลือกแล้ว: {lead.name}</Text>}
-          {button(
-            "ถัดไป · ข้อมูลผู้เช่า",
-            () => setStep(2),
-            true,
-            !lead || loading || !!loadError,
-          )}
         </>
       )}
       {step === 2 && (
@@ -382,7 +428,6 @@ export function TenantForm({
               </Text>
             )}
           </View>
-          {button("ตรวจสอบข้อมูล", review, true)}
         </>
       )}
       {step === 3 && (
@@ -418,24 +463,88 @@ export function TenantForm({
             เมื่อบันทึก Lead จะเป็นสถานะจองแล้ว และเชื่อมกับผู้เช่าคนนี้
             คุณสามารถสร้างสัญญาในขั้นถัดไปได้
           </Text>
-          {button(
-            busy ? "กำลังบันทึก…" : "ยืนยันสร้างผู้เช่า",
-            () => {
-              void save();
-            },
-            true,
-          )}
         </>
       )}
-    </View>
+      </ScrollView>
+      <View
+        style={[
+          s.footer,
+          { backgroundColor: theme.surface, borderTopColor: theme.border },
+        ]}
+      >
+        {!!error && (
+          <Text
+            accessibilityRole="alert"
+            style={[s.footerError, { color: tokens.colors.danger }]}
+          >
+            {error}
+          </Text>
+        )}
+        <View style={s.footerRow}>
+          {step > 1 && (
+            <MobileButton
+              variant="outline"
+              onPress={() => goToStep(step - 1)}
+              disabled={busy}
+              style={s.backButton}
+            >
+              {c.back}
+            </MobileButton>
+          )}
+          <MobileButton
+            onPress={primary.onPress}
+            disabled={primary.disabled || busy}
+            isLoading={busy}
+            style={s.primaryButton}
+          >
+            <View style={s.primaryInner}>
+              {step === 3 && (
+                <MobileIcon name="check" size={18} color={tokens.colors.primary} />
+              )}
+              <Text style={s.primaryText}>{primary.label}</Text>
+            </View>
+          </MobileButton>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 const s = StyleSheet.create({
-  root: { gap: 16, width: "100%", maxWidth: 760, alignSelf: "center" },
-  heading: {
+  fill: { flex: 1 },
+  tabsWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
+  tabs: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+    backgroundColor: "#F1F5F9",
+  },
+  tab: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    overflow: "hidden",
+  },
+  tabOn: { backgroundColor: tokens.colors.brand[500] },
+  tabPressed: { opacity: 0.7 },
+  tabText: {
     fontFamily: tokens.typography.native.headingTh,
-    fontSize: 25,
-    lineHeight: 36,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  tabTextOn: { fontWeight: "600" },
+  form: {
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    padding: 16,
+    paddingTop: 12,
+    gap: 16,
+    paddingBottom: 24,
   },
   subtitle: {
     fontFamily: tokens.typography.native.headingTh,
@@ -454,12 +563,26 @@ const s = StyleSheet.create({
   },
   panel: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 14 },
   room: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 4 },
-  steps: { flexDirection: "row", gap: 8 },
-  step: { flex: 1, paddingBottom: 10, borderBottomWidth: 3 },
-  button: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 13,
-    alignItems: "center",
+  footer: {
+    borderTopWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
+    gap: 8,
+  },
+  footerError: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  footerRow: { flexDirection: "row", gap: 10 },
+  backButton: { flex: 1, minHeight: 50, borderRadius: 12 },
+  primaryButton: { flex: 2, minHeight: 50, borderRadius: 12 },
+  primaryInner: { flexDirection: "row", alignItems: "center", gap: 8 },
+  primaryText: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    color: tokens.colors.primary,
   },
 });

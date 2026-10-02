@@ -51,6 +51,7 @@ export type AppIconName =
   | 'apple'
   | 'swap'
   | 'funnel'
+  | 'sliders'
   | 'lock'
   | 'plus'
   | 'pencil'
