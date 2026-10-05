@@ -105,8 +105,8 @@ const finalizedReservation = {
   status: 'active',
   document_url: '7/1/generated/reservation_letter/letter-v1/booked.pdf',
 };
-function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0, draft = null, reservations = [finalizedReservation] } = {}) {
-  const saved = []; const calls = []; let rolledBack = false;
+function fixture({ failInvoiceUpdate = false, status = 'booked', overlap = 0, foreignRoom = false, failSave = false, previous = null, successor = 0, draft = null, reservations = [finalizedReservation] } = {}) {
+  const saved = []; const calls = []; const uploads = []; const removed = []; let rolledBack = false;
   const qb = {};
   for (const key of ['leftJoin', 'where', 'andWhere']) qb[key] = (...args) => { calls.push([key, ...args]); return qb; };
   qb.getCount = async () => calls.some(c => c[1] === "c.previous_agreement_id = :previousId") ? successor : overlap;
@@ -123,6 +123,7 @@ function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave
     findOneBy: async (entity, options) => { if (entity === AgreementTemplateEntity) return { form_kind: previous?.form_kind ?? 'lease' }; if (entity !== TenantEntity) return null; assert.deepEqual(options, { id: 2, lead_id: 1, created_by_user_id: 7 }); return { id: 2, name: 'Original tenant' }; },
     update: async (entity, where, patch) => {
       calls.push(['update', entity.name, where, patch]);
+      if (failInvoiceUpdate && patch.invoice_url) throw new Error('invoice DB failure');
       if (entity === LeaseContractEntity) Object.assign(saved.find(row => row.id === where.id) ?? draft, patch);
     },
     getRepository: () => ({ createQueryBuilder: () => qb }),
@@ -134,9 +135,16 @@ function fixture({ status = 'booked', overlap = 0, foreignRoom = false, failSave
     create: (_, data) => data,
     save: async (entity, data) => { if (failSave && entity !== RoomTenancyEntity) throw Error('database failure'); const row = { id: saved.length + 10, ...data }; saved.push(row); return row; },
   };
-  const service = new AgentContractsService({ getRepository: (entity) => ({ findOneBy: async ({code, id, created_by_user_id}) => entity === LeaseContractEntity ? (draft?.id === id && created_by_user_id === draft.created_by_user_id ? draft : null) : ({ code, form_kind: code === 'reservation' ? 'reservation' : code === 'broker' ? 'broker_appointment' : 'lease' }), findOne: async ({where}) => ({id: 1, version: 1, form_kind: where.agreement_type_code === 'reservation' ? 'reservation' : where.agreement_type_code === 'broker' ? 'broker_appointment' : 'lease', data_schema: {type:'object'}}) }), transaction: async fn => { try { return await fn(manager); } catch (e) { saved.length = 0; rolledBack = true; throw e; } } });
+  const service = new AgentContractsService({ getRepository: (entity) => ({ findOneBy: async ({code, id, created_by_user_id}) => entity === LeaseContractEntity ? (draft?.id === id && created_by_user_id === draft.created_by_user_id ? draft : null) : ({ code, form_kind: code === 'reservation' ? 'reservation' : code === 'broker' ? 'broker_appointment' : 'lease' }), findOne: async ({where}) => ({id: 1, version: 1, form_kind: where.agreement_type_code === 'reservation' ? 'reservation' : where.agreement_type_code === 'broker' ? 'broker_appointment' : 'lease', data_schema: {type:'object'}}) }), transaction: async fn => { try { return await fn(manager); } catch (e) { saved.length = 0; rolledBack = true; throw e; } } }, {
+    upload: async (agentId, contractId, kind, file) => {
+      assert.equal(file.buffer.subarray(0, 4).toString(), '%PDF');
+      const path = `${agentId}/${contractId}/${kind}/${uploads.length}.pdf`;
+      uploads.push(path); return { path };
+    },
+    remove: async path => removed.push(path),
+  });
   service.view = async (agentId, id) => { assert.equal(agentId, 7); return saved.find(c => c.id === id) ?? draft; };
-  return { service, saved, calls, rolledBack: () => rolledBack };
+  return { service, saved, calls, uploads, removed, rolledBack: () => rolledBack };
 }
 test('creates tenancy and draft using server-owned identity and locked room', async () => {
   const f = fixture(); const c = await f.service.create(7, { ...valid, status: 'active', created_by_user_id: 99, tenantId: 99 });
@@ -200,6 +208,11 @@ test('reservation drafts persist their master code and booking fee without month
   assert.equal(c.end_date, null); assert.equal(c.move_in_date, '2026-10-15');
   assert.match(c.contract_no, /^RS\d{4}\d{5}$/);
   assert.ok(f.calls.some(call => call[2]?.start === '2026-10-15' && call[2]?.end === null));
+  assert.equal(c.data.financialDocuments.invoice.items[0].unitPrice, 5000);
+  assert.equal(c.data.financialDocuments.invoice.reference, c.contract_no);
+  assert.equal(c.data.financialDocuments.invoice.documentNo, `INV-${c.contract_no}`);
+  assert.equal(f.uploads.length, 1);
+  assert.ok(c.invoice_url);
   assert.equal(c.agreement_type_code, 'reservation'); assert.equal(c.reservation_fee, '5000.00'); assert.equal(c.monthly_rent, null); assert.equal(c.deposit, null);
   assert.ok(f.calls.some(call => call[2]?.formKind === 'reservation'));
 });
@@ -333,7 +346,11 @@ test('editing each draft kind preserves identity and tenancy, invalidates docume
     const result = await f.service.updateDraft(7, 40, { ...payload, agreementTypeCode: code, notes: 'Updated' });
     assert.equal(result.id, 40); assert.equal(result.contract_no, draft.contract_no);
     assert.equal(result.room_tenancy_id, 9); assert.equal(result.notes, 'Updated');
-    assert.equal(result.document_url, null); assert.equal(result.invoice_url, null);
+    assert.equal(result.document_url, null);
+    if (code === 'reservation') {
+      assert.ok(result.invoice_url);
+      assert.equal(result.data.financialDocuments.invoice.items[0].unitPrice, 1000);
+    } else assert.equal(result.invoice_url, null);
     assert.equal(result.status, 'draft'); assert.ok(result.data.draftRevision);
     assert.equal(f.saved.length, 1);
     assert.ok(f.calls.some(c => c[0] === 'andWhere' && c[1] === 'c.id <> :editingId' && c[2].editingId === 40));
@@ -379,4 +396,48 @@ test('stale draft revisions cannot overwrite a newer edit', async () => {
   assert.equal(f.saved.length, 0);
   const result = await f.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease', expectedDraftRevision: 'new-version' });
   assert.notEqual(result.data.draftRevision, 'new-version');
+});
+
+
+test('reservation invoice upload is cleaned up and draft rolls back if linking fails', async () => {
+  const f = fixture({ failInvoiceUpdate: true });
+  await assert.rejects(() => f.service.create(7, {
+    leadId: 1, agreementTypeCode: 'reservation', startDate: '2026-10-01',
+    moveInDate: '2026-10-15', reservationFee: 5000,
+  }), /invoice DB failure/);
+  assert.equal(f.saved.length, 0);
+  assert.equal(f.rolledBack(), true);
+  assert.deepEqual(f.removed, f.uploads);
+});
+
+test('editing a booking draft keeps its invoice identity and updates the amount', async () => {
+  const draft = draftRow({ agreement_type_code: 'reservation', contract_no: 'RS202600040',
+    invoice_url: '7/40/invoice/old.pdf', data: { financialDocuments: { invoice: {
+      documentNo: 'INV-RS202600040', issueDate: '2026-09-01', dueDate: '2026-09-03',
+    } } } });
+  const f = fixture({ draft });
+  const result = await f.service.updateDraft(7, 40, {
+    leadId: 1, agreementTypeCode: 'reservation', startDate: '2026-10-01',
+    moveInDate: '2026-10-15', reservationFee: 6000,
+  });
+  const invoice = result.data.financialDocuments.invoice;
+  assert.equal(invoice.documentNo, 'INV-RS202600040');
+  assert.equal(invoice.issueDate, '2026-09-01');
+  assert.equal(invoice.items[0].unitPrice, 6000);
+  assert.equal(f.uploads.length, 1);
+  assert.deepEqual(f.removed, ['7/40/invoice/old.pdf']);
+});
+
+test('draft payment records cannot be forged, edited away or cancelled', async () => {
+  for (const key of ['financialDocuments', 'reservationPayment', 'documentFileNames']) {
+    const f = fixture();
+    await assert.rejects(() => f.service.create(7, { ...valid, data: { [key]: {} } }), /สถานะระบบ/);
+    assert.equal(f.saved.length, 0);
+  }
+  for (const patch of [{ data: { reservationPayment: { slipPath: 'slip.jpg' } } }, { receipt_url: 'receipt.pdf' }]) {
+    const f = fixture({ draft: draftRow(patch) });
+    await assert.rejects(() => f.service.updateDraft(7, 40, { ...valid, agreementTypeCode: 'lease' }), /ชำระเงิน/);
+    await assert.rejects(() => f.service.cancelDraft(7, 40, { reason: 'cancel' }), /ชำระเงิน/);
+    assert.equal(f.saved.length, 0);
+  }
 });

@@ -12,6 +12,7 @@ type Preview = {
   tenant: string;
   agreementTypeName: string;
   alreadySigned: boolean;
+  signingBlockedReason: string | null;
   expiresAt: string;
 };
 
@@ -30,6 +31,7 @@ export default function PublicSignPage() {
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +62,7 @@ export default function PublicSignPage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, retry]);
 
   function point(event: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
@@ -81,6 +83,10 @@ export default function PublicSignPage() {
   }
 
   async function submit() {
+    if (preview?.signingBlockedReason) {
+      setError(preview.signingBlockedReason);
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas || !dirty.current) {
       setError('กรุณาวาดลายเซ็นก่อนยืนยัน');
@@ -217,6 +223,12 @@ export default function PublicSignPage() {
                 }}
               >
                 บันทึกลายเซ็นแล้ว ขอบคุณที่ลงนาม สามารถปิดหน้านี้ได้
+              </section>
+            ) : preview.signingBlockedReason ? (
+              <section style={{ padding: 20, borderRadius: 16, background: '#FFFBEB', border: '1px solid #FDE68A', color: '#92400E' }}>
+                <p>{preview.signingBlockedReason}</p>
+                <p>เปิดหนังสือจองในบัญชีผู้เช่าเพื่อดูใบแจ้งหนี้และอัปโหลดสลิปชำระค่าจอง</p>
+                <button type="button" onClick={() => setRetry(value => value + 1)}>ตรวจสอบการชำระอีกครั้ง</button>
               </section>
             ) : (
               <section

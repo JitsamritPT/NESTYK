@@ -138,3 +138,32 @@ test('the recipient can sign only the delivered party', async () => {
   );
   assert.equal(stranger.updates.length, 0);
 });
+
+test('reservation delivery remains possible before payment but tenant signing needs an issued receipt', async () => {
+  const f = serviceFor(contract({
+    template: { form_kind: 'reservation' }, agreement_type: { form_kind: 'reservation' },
+    agreement_type_code: 'reservation', reservation_fee: '5000',
+  }));
+  await f.service.deliverToParty(7, 11, { party: 'tenant' });
+  const deliveredWrites = f.updates.length;
+  for (const data of [{}, { reservationPayment: { slipPath: 'slip.jpg' } }]) {
+    f.current.data = data;
+    await assert.rejects(() => f.service.signAsParty(8, 11, { party: 'tenant', signaturePng }), /ต้องชำระค่าจอง/);
+    assert.equal(f.updates.length, deliveredWrites);
+    assert.equal(f.current.tenant_signed_at, null);
+  }
+  f.current.receipt_url = '7/11/receipt/paid.pdf';
+  await f.service.signAsParty(8, 11, { party: 'tenant', signaturePng });
+  assert.ok(f.current.tenant_signed_at);
+  assert.equal(f.updates.at(-1)[0].receipt_url, '7/11/receipt/paid.pdf');
+});
+
+test('delivered owner can sign a reservation while tenant payment is pending', async () => {
+  const f = serviceFor(contract({
+    template: { form_kind: 'reservation' }, agreement_type: { form_kind: 'reservation' },
+    owner_delivered_at: new Date(),
+  }));
+  await f.service.signAsParty(9, 11, { party: 'owner', signaturePng });
+  assert.ok(f.current.owner_signed_at);
+  assert.equal(f.current.tenant_signed_at, null);
+});

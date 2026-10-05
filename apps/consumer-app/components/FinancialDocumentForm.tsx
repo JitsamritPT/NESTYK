@@ -90,7 +90,8 @@ export function FinancialDocumentForm({
   const { t } = useLocale();
   const labels = t.agent.contracts.financial;
   const { theme } = useMobileTheme();
-  const standalone = kind === "invoice";
+  const linked = fixedContractId != null;
+  const standalone = kind === "invoice" && !linked;
   const needsHostPick = fixedContractId == null && !standalone && kind !== "receipt";
   const [hostId, setHostId] = useState<number | null>(fixedContractId ?? null);
   const contractId = fixedContractId ?? hostId;
@@ -128,7 +129,7 @@ export function FinancialDocumentForm({
     return () => sub.remove();
   }, [onBack, slipSourceOpen]);
   useEffect(() => {
-    if (isReceipt) {
+    if (isReceipt && !linked) {
       if (fixedInvoiceId != null) {
         setInvoiceId(fixedInvoiceId);
         setError("");
@@ -243,9 +244,9 @@ export function FinancialDocumentForm({
     return () => {
       active = false;
     };
-  }, [standalone, contractId, kind, isReceipt, fixedInvoiceId, payer, retry, labels.invalid]);
+  }, [standalone, linked, contractId, kind, isReceipt, fixedInvoiceId, payer, retry, labels.invalid]);
   useEffect(() => {
-    if (!isReceipt || invoiceId == null) return;
+    if (!isReceipt || linked || invoiceId == null) return;
     let active = true;
     setLoading(true);
     setError("");
@@ -271,7 +272,7 @@ export function FinancialDocumentForm({
     return () => {
       active = false;
     };
-  }, [isReceipt, invoiceId, retry, labels.invalid]);
+  }, [isReceipt, linked, invoiceId, retry, labels.invalid]);
   const required: TextField[] = isReceipt
     ? [
         "documentNo",
@@ -367,7 +368,7 @@ export function FinancialDocumentForm({
     if (!form || saving.current) return;
     if (!isReceipt && !standalone && contractId == null) return;
     if (isReceipt) {
-      if (invoiceId == null) return;
+      if (!linked && invoiceId == null) return;
       const markingPaid = fixedInvoiceId != null;
       if (markingPaid && !slip) {
         setError(labels.slipRequired);
@@ -386,10 +387,19 @@ export function FinancialDocumentForm({
       setBusy(true);
       setError("");
       try {
+        if (linked) {
+          onCreated(await generateFinancialDocument(contractId!, "receipt", {
+            ...form,
+            paymentMethod: form.paymentMethod,
+            paymentDetails: form.paymentDetails,
+            receiverName: form.receiverName,
+          }));
+          return;
+        }
         if (!onStandaloneCreated) return;
         onStandaloneCreated(
           await createReceiptForInvoice(
-            invoiceId,
+            invoiceId!,
             {
               documentNo: form.documentNo,
               issueDate: form.issueDate,
@@ -542,7 +552,7 @@ export function FinancialDocumentForm({
               : labels.receiptHint
             : labels.hint}
       </Text>
-      {isReceipt && fixedInvoiceId == null && (
+      {isReceipt && !linked && fixedInvoiceId == null && (
         <View style={{ gap: 8 }}>
           <Text style={[{ fontSize: 14, lineHeight: 22, fontWeight: "600" }, title]}>
             {labels.pickInvoice} *
@@ -644,7 +654,7 @@ export function FinancialDocumentForm({
           {error}
         </Text>
       )}
-      {isReceipt && invoiceId == null ? null : !standalone && !isReceipt && contractId == null ? null : loading ? (
+      {isReceipt && !linked && invoiceId == null ? null : !standalone && !isReceipt && contractId == null ? null : loading ? (
         <ActivityIndicator />
       ) : !form ? (
         <MobileButton onPress={() => setRetry((n) => n + 1)}>

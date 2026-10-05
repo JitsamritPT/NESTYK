@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from "react-native-safe-area-context";
 import { MobileButton, MobileIcon, MobileSectionHeader, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { AppIconName } from "@nestyk/ui/native";
@@ -91,6 +91,7 @@ function signedAt(row: PartyContract, party: keyof typeof PARTY_LABEL) {
 export function PartyContractsScreen({
   reloadToken = 0,
   onReloadSettled,
+  onRefresh,
   opened,
   onOpenedChange,
   selectedRoom,
@@ -99,6 +100,7 @@ export function PartyContractsScreen({
 }: {
   reloadToken?: number;
   onReloadSettled?: (token: number) => void;
+  onRefresh?: () => void;
   opened: PartyContract | null;
   onOpenedChange: (contract: PartyContract | null) => void;
   selectedRoom: PartyContractRoom | null;
@@ -262,7 +264,19 @@ export function PartyContractsScreen({
                   onBackPress={() => onOpenedChange(null)}
                 />
               </View>
-              <ScrollView contentContainerStyle={styles.detailScroll}>
+              <ScrollView
+                contentContainerStyle={styles.detailScroll}
+                alwaysBounceVertical={Boolean(onRefresh)}
+                refreshControl={onRefresh ? (
+                  <RefreshControl
+                    refreshing={listSettled !== reloadToken || detailSettled !== reloadToken}
+                    onRefresh={onRefresh}
+                    tintColor={accentColor}
+                    colors={[accentColor]}
+                    progressBackgroundColor={theme.surface}
+                  />
+                ) : undefined}
+              >
                 <PartyContractDetail
                   key={opened.id}
                   contract={opened}
@@ -303,7 +317,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     borderBottomWidth: 1,
   },
-  detailScroll: { padding: 16, paddingBottom: 32 },
+  detailScroll: { flexGrow: 1, padding: 16, paddingBottom: 32 },
   heading: { fontSize: 20, lineHeight: 30 },
   contractNo: { fontSize: 16, lineHeight: 24 },
   copy: { fontSize: 14, lineHeight: 22 },

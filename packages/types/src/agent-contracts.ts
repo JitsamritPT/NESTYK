@@ -68,6 +68,14 @@ export interface AgentContract {
     "awaiting_signatures" | "ready_to_generate" | "ready" | null;
   invoiceUrl: string | null;
   receiptUrl: string | null;
+  reservationPayment: {
+    invoiceDocumentNo: string;
+    receiptDocumentNo: string | null;
+    total: number;
+    status: "unpaid" | "submitted" | "paid";
+    paymentSlipUrl: string | null;
+    submittedAt: string | null;
+  } | null;
 }
 export type AgentContractDocumentKind =
   | "reservation_letter"

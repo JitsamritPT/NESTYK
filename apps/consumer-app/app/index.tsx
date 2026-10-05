@@ -1246,6 +1246,7 @@ export default function AppHomeScreen() {
               accentColor={tokens.colors.roles[partyRole]}
               reloadToken={partyContractsReloadToken}
               onReloadSettled={finishPageRefresh}
+              onRefresh={activeRole !== 'agent' ? handlePageRefresh : undefined}
             />
           ) : (
             renderTabBody()

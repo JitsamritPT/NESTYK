@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 import {
   MobileBottomSheet,
   MobileButton,
@@ -20,12 +21,16 @@ import {
   openMyContractDocument,
   signMyContract,
   uploadMyAttachment,
+  openMyFinancialDocument,
+  uploadMyReservationPaymentSlip,
 } from "../lib/party-contracts-api";
 import {
   ContractSignaturePad,
   type ContractSignaturePadHandle,
 } from "./ContractSignaturePad";
 import { ContractDocumentPreview } from "./ContractDocumentPreview";
+import { ReservationPaymentCard } from "./ReservationPaymentCard";
+import { bookingPaymentBlocksSigning, BOOKING_PAYMENT_BEFORE_SIGNING } from "../lib/contract-signing";
 
 const CONTRACT_ICON: Record<PartyContract["formKind"], AppIconName> = {
   reservation: "calendar",
@@ -110,6 +115,8 @@ export function PartyContractDetail({
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTitle, setPreviewTitle] = useState("");
+  const [slipSourceOpen, setSlipSourceOpen] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [signing, setSigning] = useState<"owner" | "tenant" | null>(null);
   const [signPadKey, setSignPadKey] = useState(0);
@@ -194,6 +201,7 @@ export function PartyContractDetail({
   async function openDocument() {
     setPreviewBusy(true);
     setError("");
+    setPreviewTitle("เอกสารสัญญา");
     try {
       const ready =
         contract.formKind === "reservation"
@@ -217,6 +225,7 @@ export function PartyContractDetail({
   async function openFile(documentId: number) {
     setBusy(true);
     setError("");
+    setPreviewTitle("เอกสารแนบ");
     try {
       const doc = await openMyAttachment(contract.id, documentId);
       setPreviewUrl(doc.url);
@@ -227,8 +236,65 @@ export function PartyContractDetail({
     }
   }
 
+  async function openPaymentDocument(kind: "invoice" | "receipt" | "payment-slip") {
+    setPreviewBusy(true);
+    setError("");
+    try {
+      const doc = await openMyFinancialDocument(contract.id, kind);
+      setPreviewTitle(kind === "invoice" ? "ใบแจ้งหนี้ค่าจอง" : kind === "receipt" ? "ใบเสร็จค่าจอง" : "สลิปชำระค่าจอง");
+      setPreviewUrl(doc.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "เปิดเอกสารไม่สำเร็จ");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  function chooseSlipSource(source: "documents" | "photos") {
+    setSlipSourceOpen(false);
+    setTimeout(() => void uploadPaymentSlip(source), 400);
+  }
+
+  async function uploadPaymentSlip(source: "documents" | "photos") {
+    if (busy || picking) return;
+    setPicking("payment-slip");
+    setError("");
+    setNotice("");
+    try {
+      let file: { uri: string; name: string; mimeType: string; file?: File };
+      if (source === "photos") {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) throw new Error("กรุณาอนุญาตให้เข้าถึงรูปภาพเพื่อแนบสลิป");
+        const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: false, quality: 1, preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible });
+        if (result.canceled) return;
+        const asset = result.assets[0];
+        if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) throw new Error("ไฟล์ต้องไม่เกิน 10 MB");
+        file = { uri: asset.uri, name: asset.fileName || "slip.jpg", mimeType: asset.mimeType || "image/jpeg", file: asset.file };
+      } else {
+        const result = await DocumentPicker.getDocumentAsync({ type: ["application/pdf", "image/jpeg", "image/png"], copyToCacheDirectory: true, multiple: false });
+        if (result.canceled) return;
+        const asset = result.assets[0];
+        if (asset.size && asset.size > 10 * 1024 * 1024) throw new Error("ไฟล์ต้องไม่เกิน 10 MB");
+        file = { uri: asset.uri, name: asset.name, mimeType: asset.mimeType ?? "application/octet-stream", file: asset.file };
+      }
+      setBusy(true);
+      const updated = await uploadMyReservationPaymentSlip(contract.id, file);
+      onUpdated(updated);
+      setNotice("ส่งสลิปแล้ว รอเอเจนต์ตรวจสอบและออกใบเสร็จ");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "อัปโหลดสลิปไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+      setPicking(null);
+    }
+  }
+
   async function submit(image: string) {
     if (!signing || busy) return;
+    if (bookingPaymentBlocksSigning(contract, signing)) {
+      setError(BOOKING_PAYMENT_BEFORE_SIGNING);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -251,6 +317,7 @@ export function PartyContractDetail({
   const signParty = canSignNow
     ? mine.find((party) => !signedAt(contract, party))
     : undefined;
+  const paymentBlocksSigning = bookingPaymentBlocksSigning(contract, signParty);
   const partyReady = ownRequirements
     .filter((row) => row.subject === signParty)
     .every((row) => row.complete);
@@ -310,6 +377,15 @@ export function PartyContractDetail({
           ดูเอกสารสัญญา
         </MobileButton>
       </View>
+
+      {contract.formKind === "reservation" && (
+        <ReservationPaymentCard
+          contract={contract}
+          busy={busy || previewBusy || refreshing || picking != null}
+          onOpen={(kind) => void openPaymentDocument(kind)}
+          onUpload={mine.includes("tenant") ? () => setSlipSourceOpen(true) : undefined}
+        />
+      )}
 
       <View style={[styles.card, card]}>
         <Text style={[styles.contractNo, title]}>เอกสารที่จำเป็นของฉัน</Text>
@@ -405,19 +481,33 @@ export function PartyContractDetail({
           <Text style={[styles.copy, body]}>แนบเอกสารของคุณให้ครบก่อนลงนาม</Text>
         ) : null}
         {signParty ? (
-          <MobileButton
-            disabled={busy || refreshing || loading || !attachments || !partyReady}
-            onPress={() => {
-              setError("");
-              setNotice("");
-              setSignPadKey((key) => key + 1);
-              setSigning(signParty);
-            }}
-          >
-            ลงนาม{PARTY_LABEL[signParty]}
-          </MobileButton>
+          <>
+            {paymentBlocksSigning && (
+              <Text style={[styles.copy, body]}>{BOOKING_PAYMENT_BEFORE_SIGNING}</Text>
+            )}
+            <MobileButton
+              disabled={busy || refreshing || loading || !attachments || !partyReady || paymentBlocksSigning}
+              onPress={() => {
+                setError("");
+                setNotice("");
+                setSignPadKey((key) => key + 1);
+                setSigning(signParty);
+              }}
+            >
+              ลงนาม{PARTY_LABEL[signParty]}
+            </MobileButton>
+          </>
         ) : null}
       </View>
+
+      <MobileBottomSheet visible={slipSourceOpen} onClose={() => setSlipSourceOpen(false)} maxHeight="50%">
+        <View style={{ gap: 12, padding: 16 }}>
+          <Text style={[styles.contractNo, title]}>แนบสลิปชำระค่าจอง</Text>
+          <MobileButton onPress={() => chooseSlipSource("photos")}>เลือกจากรูปภาพ</MobileButton>
+          <MobileButton variant="outline" onPress={() => chooseSlipSource("documents")}>เลือกจากไฟล์</MobileButton>
+          <MobileButton variant="outline" onPress={() => setSlipSourceOpen(false)}>ยกเลิก</MobileButton>
+        </View>
+      </MobileBottomSheet>
 
       <MobileBottomSheet
         visible={previewUrl != null}
@@ -426,7 +516,7 @@ export function PartyContractDetail({
         sheetStyle={styles.previewSheet}
       >
         <View style={styles.previewHeader}>
-          <Text style={[styles.contractNo, title]}>{contract.contractNo}</Text>
+          <Text style={[styles.contractNo, title]}>{previewTitle} · {contract.contractNo}</Text>
           <MobileButton variant="outline" onPress={() => setPreviewUrl(null)}>
             ปิด
           </MobileButton>

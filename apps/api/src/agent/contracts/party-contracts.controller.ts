@@ -96,6 +96,28 @@ export class PartyContractsController {
     return this.contracts.documentForParty(user.id, id);
   }
 
+  @Get("mine/:id/financial-documents/:kind")
+  financialDocument(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+    @Param("kind") kind: string,
+  ) {
+    return this.contracts.financialDocumentForParty(user.id, id, kind);
+  }
+
+  @Post("mine/:id/payment-slip")
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor("file", {
+    limits: { fileSize: MAX_CONTRACT_DOCUMENT_BYTES, files: 1, fields: 0 },
+  }))
+  paymentSlip(
+    @CurrentUser() user: AuthRequestUser,
+    @Param("id", ParseIntPipe) id: number,
+    @UploadedFile() file: { buffer: Buffer; size: number; originalname?: string } | undefined,
+  ) {
+    return this.contracts.uploadReservationPaymentSlip(user.id, id, file);
+  }
+
   @Post("mine/:id/sign")
   @HttpCode(HttpStatus.OK)
   sign(

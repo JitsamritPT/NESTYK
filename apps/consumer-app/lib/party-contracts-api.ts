@@ -13,6 +13,28 @@ export function openMyContractDocument(id: number): Promise<{ url: string }> {
   return apiPost(`/contracts/mine/${id}/document`, {});
 }
 
+export function openMyFinancialDocument(id: number, kind: "invoice" | "receipt" | "payment-slip"): Promise<{ url: string }> {
+  return apiGet(`/contracts/mine/${id}/financial-documents/${kind}`);
+}
+
+export async function uploadMyReservationPaymentSlip(
+  id: number,
+  file: { uri: string; name: string; mimeType: string; file?: File },
+): Promise<PartyContract> {
+  const form = new FormData();
+  if (Platform.OS === "web")
+    form.append("file", file.file ?? (await (await fetch(file.uri)).blob()), file.name);
+  else
+    form.append("file", { uri: file.uri, name: file.name, type: file.mimeType } as unknown as Blob);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  try {
+    return await apiRequest(`/contracts/mine/${id}/payment-slip`, { method: "POST", body: form, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function listMyAttachments(
   id: number,
 ): Promise<AgreementAttachmentChecklist> {
