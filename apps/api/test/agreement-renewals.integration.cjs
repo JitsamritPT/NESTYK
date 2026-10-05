@@ -80,6 +80,7 @@ test('PostgreSQL: migration repeatability, backfill, version pinning, renewal ch
     await admin.query(fs.readFileSync(path.resolve(__dirname,'../migrations/20260915-attachments-without-review.sql'),'utf8'));
     await admin.query(fs.readFileSync(path.resolve(__dirname,'../migrations/20260917-optional-attachment-signing.sql'),'utf8'));
     await admin.query(fs.readFileSync(path.resolve(__dirname,'../migrations/20260917-restore-required-attachment-signing.sql'),'utf8'));
+    await admin.query(fs.readFileSync(path.resolve(__dirname,'../migrations/20261002-party-own-documents-before-signing.sql'),'utf8'));
     assert.equal((await admin.query("SELECT count(*)::int n FROM agreement_template_document_requirements")).rows[0].n,5);
     const objects = new Map(); let fileSequence = 0;
     const storage = {

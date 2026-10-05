@@ -225,6 +225,8 @@ test('a new lease requires a generated reservation letter for the same lead and 
   const booked = fixture();
   const created = await booked.service.create(7, valid);
   assert.equal(created.status, 'draft');
+  assert.ok(created.owner_delivered_at instanceof Date);
+  assert.equal(created.owner_user_id, 5);
 });
 test('renewing a lease does not require another reservation letter', async () => {
   const f = fixture({ previous: original, reservations: [] });

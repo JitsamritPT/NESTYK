@@ -1,76 +1,163 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import {
-  MobileBottomSheet,
-  MobileButton,
-  tokens,
-  useMobileTheme,
-} from "@nestyk/ui/native";
-import type { PartyContract } from "@nestyk/types";
-import { listMyContracts, signMyContract } from "../lib/party-contracts-api";
-import {
-  ContractSignaturePad,
-  type ContractSignaturePadHandle,
-} from "./ContractSignaturePad";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from "react-native-safe-area-context";
+import { MobileButton, MobileIcon, MobileSectionHeader, tokens, useMobileTheme } from "@nestyk/ui/native";
+import type { AppIconName } from "@nestyk/ui/native";
+import type { AgentContractStatus, PartyContract } from "@nestyk/types";
+import { listMyContracts } from "../lib/party-contracts-api";
+import { PartyContractDetail } from "./PartyContractDetail";
 
-const PARTY_LABEL = { owner: "ผู้ให้เช่า", tenant: "ผู้เช่า" } as const;
+const STATUS_LABEL: Record<AgentContractStatus, string> = {
+  draft: "ฉบับร่าง",
+  awaiting_signatures: "รอลงนาม",
+  awaiting_agent_review: "รอตรวจสัญญา",
+  awaiting_payment: "รอชำระเงิน",
+  awaiting_payment_verification: "รอตรวจชำระเงิน",
+  active: "มีผลแล้ว",
+  cancelled: "ยกเลิก",
+  expired: "หมดอายุ",
+  terminated: "สิ้นสุดสัญญา",
+};
 
-export function PartyContractsScreen({ onBack }: { onBack: () => void }) {
+function statusColor(status: AgentContractStatus) {
+  if (status === "active") return "#278268";
+  if (status.startsWith("awaiting")) return "#BB7914";
+  return "#788193";
+}
+
+const CONTRACT_ICON: Record<PartyContract["formKind"], AppIconName> = {
+  reservation: "calendar",
+  lease: "key",
+  broker_appointment: "handshake",
+};
+
+const KIND_LABEL: Record<PartyContract["formKind"], string> = {
+  reservation: "หนังสือจอง",
+  lease: "สัญญาเช่า",
+  broker_appointment: "แต่งตั้งนายหน้า",
+};
+
+const KIND_ORDER: PartyContract["formKind"][] = ["reservation", "lease", "broker_appointment"];
+
+export type PartyContractRoom = {
+  key: string;
+  property: string;
+  room: string | null;
+};
+
+function partyRoom(row: Pick<PartyContract, "property" | "room">): PartyContractRoom {
+  const property = row.property?.trim() || "ไม่ระบุโครงการ";
+  return { key: `${property}\u0000${row.room ?? ""}`, property, room: row.room };
+}
+
+function roomGroups(rows: PartyContract[]) {
+  const groups = new Map<string, PartyContractRoom & { count: number; kinds: PartyContract["formKind"][] }>();
+  for (const row of rows) {
+    const room = partyRoom(row);
+    const current = groups.get(room.key);
+    if (!current) {
+      groups.set(room.key, { ...room, count: 1, kinds: [row.formKind] });
+      continue;
+    }
+    current.count += 1;
+    if (!current.kinds.includes(row.formKind)) current.kinds.push(row.formKind);
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      kinds: KIND_ORDER.filter((kind) => group.kinds.includes(kind)),
+    }))
+    .sort((a, b) => a.property.localeCompare(b.property, "th") || (a.room ?? "").localeCompare(b.room ?? "", "th"));
+}
+
+const PARTY_LABEL = {
+  owner: "ผู้ให้เช่า",
+  tenant: "ผู้เช่า",
+  agent: "นายหน้า",
+} as const;
+
+function signerKeys(row: PartyContract): Array<keyof typeof PARTY_LABEL> {
+  if (row.formKind === "lease") return ["owner", "tenant"];
+  if (row.formKind === "broker_appointment") return ["owner", "agent"];
+  return ["owner", "tenant", "agent"];
+}
+
+function signedAt(row: PartyContract, party: keyof typeof PARTY_LABEL) {
+  if (party === "owner") return row.ownerSignedAt;
+  if (party === "tenant") return row.tenantSignedAt;
+  return row.agentSignedAt;
+}
+
+export function PartyContractsScreen({
+  reloadToken = 0,
+  onReloadSettled,
+  opened,
+  onOpenedChange,
+  selectedRoom,
+  onSelectedRoomChange,
+  accentColor = tokens.colors.roles.owner,
+}: {
+  reloadToken?: number;
+  onReloadSettled?: (token: number) => void;
+  opened: PartyContract | null;
+  onOpenedChange: (contract: PartyContract | null) => void;
+  selectedRoom: PartyContractRoom | null;
+  onSelectedRoomChange: (room: PartyContractRoom | null) => void;
+  accentColor?: string;
+}) {
   const { theme } = useMobileTheme();
   const [rows, setRows] = useState<PartyContract[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [signing, setSigning] = useState<{
-    contract: PartyContract;
-    party: "owner" | "tenant";
-  } | null>(null);
-  const padRef = useRef<ContractSignaturePadHandle>(null);
+  const openedRef = useRef(opened);
+  const onOpenedChangeRef = useRef(onOpenedChange);
+  openedRef.current = opened;
+  onOpenedChangeRef.current = onOpenedChange;
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      setRows(await listMyContracts());
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : "โหลดสัญญาไม่สำเร็จ");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [listSettled, setListSettled] = useState(-1);
+  const [detailSettled, setDetailSettled] = useState(-1);
 
   useEffect(() => {
-    void load();
-  }, []);
-
-  async function submit(image: string) {
-    if (!signing || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const saved = await signMyContract(signing.contract.id, signing.party, image);
-      setRows((current) => current.map((row) => (row.id === saved.id ? saved : row)));
-      setSigning(null);
-      setNotice("บันทึกลายเซ็นแล้ว");
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : "ลงนามไม่สำเร็จ");
-    } finally {
-      setBusy(false);
+    if (listSettled === reloadToken && (!opened || detailSettled === reloadToken)) {
+      onReloadSettled?.(reloadToken);
     }
-  }
+  }, [listSettled, detailSettled, reloadToken, opened, onReloadSettled]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    listMyContracts()
+      .then((next) => {
+        if (!cancelled) {
+          setRows(next);
+          const current = openedRef.current;
+          if (current) {
+            onOpenedChangeRef.current(next.find((row) => row.id === current.id) ?? current);
+          }
+        }
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setError(e instanceof Error && e.message ? e.message : "โหลดสัญญาไม่สำเร็จ");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setListSettled(reloadToken);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
 
   const title = { color: theme.textHeading, fontFamily: tokens.typography.native.headingTh };
   const body = { color: theme.textSecondary, fontFamily: tokens.typography.native.body };
 
   return (
     <View style={styles.root}>
-      <MobileButton variant="outline" onPress={onBack}>
-        ‹ กลับ
-      </MobileButton>
-      <Text style={[styles.heading, title]}>สัญญาที่ส่งมาให้ฉัน</Text>
-      {!!notice && <Text style={[styles.copy, { color: theme.textHeading }]}>{notice}</Text>}
-      {!!error && !signing && (
+      {!!error && (
         <Text accessibilityRole="alert" style={styles.error}>
           {error}
         </Text>
@@ -79,88 +166,148 @@ export function PartyContractsScreen({ onBack }: { onBack: () => void }) {
       {!loading && !rows.length && !error ? (
         <Text style={[styles.copy, body]}>ยังไม่มีสัญญาที่ส่งเข้าบัญชีนี้</Text>
       ) : null}
-      {rows.map((row) => (
+      {!selectedRoom
+        ? roomGroups(rows).map((room) => (
+            <Pressable
+              key={room.key}
+              accessibilityRole="button"
+              accessibilityLabel={`${room.property}${room.room ? ` ห้อง ${room.room}` : ""} ${room.count} ฉบับ`}
+              android_ripple={{ color: `${accentColor}22` }}
+              onPress={() => onSelectedRoomChange({ key: room.key, property: room.property, room: room.room })}
+              style={({ pressed }) => [
+                styles.card,
+                { backgroundColor: theme.card, borderColor: theme.border },
+                pressed ? styles.pressed : null,
+              ]}
+            >
+              <View style={styles.cardHeader}>
+                <View style={styles.cardTitle}>
+                  <View style={[styles.kindIcon, { backgroundColor: `${accentColor}18` }]}>
+                    <MobileIcon name="home" size={18} color={accentColor} />
+                  </View>
+                  <View style={styles.contractNoText}>
+                    <Text style={[styles.contractNo, title]} numberOfLines={2}>
+                      {room.property}
+                    </Text>
+                    {room.room ? (
+                      <Text style={[styles.copy, body]}>ห้อง {room.room}</Text>
+                    ) : null}
+                  </View>
+                </View>
+                <Text style={[styles.count, { color: accentColor }]}>{room.count} ฉบับ</Text>
+              </View>
+              <View style={styles.kindRow}>
+                {room.kinds.map((kind) => (
+                  <View key={kind} style={[styles.kindChip, { borderColor: theme.border }]}>
+                    <MobileIcon name={CONTRACT_ICON[kind]} size={14} color={accentColor} />
+                    <Text style={[styles.kindLabel, body]}>{KIND_LABEL[kind]}</Text>
+                  </View>
+                ))}
+              </View>
+            </Pressable>
+          ))
+        : null}
+      {!loading && selectedRoom && !rows.some((row) => partyRoom(row).key === selectedRoom.key) && !error ? (
+        <Text style={[styles.copy, body]}>ไม่มีสัญญาในห้องนี้</Text>
+      ) : null}
+      {(selectedRoom ? rows.filter((row) => partyRoom(row).key === selectedRoom.key) : []).map((row) => (
         <View
           key={row.id}
           style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
         >
-          <Text style={[styles.contractNo, title]}>{row.contractNo}</Text>
-          <Text style={[styles.copy, body]}>
-            {row.agreementTypeName} · {row.property}
-            {row.room ? ` ห้อง ${row.room}` : ""}
-          </Text>
-          <Text style={[styles.copy, body]}>ผู้เช่า {row.tenant}</Text>
-          {row.myParties.map((party) => {
-            const signed =
-              party === "owner" ? row.ownerSignedAt : row.tenantSignedAt;
-            return (
-              <View key={party} style={styles.partyRow}>
-                <Text style={[styles.copy, body]}>
-                  {PARTY_LABEL[party]}
-                  {signed ? " · ลงนามแล้ว" : " · ยังไม่ลงนาม"}
-                </Text>
-                {!signed && row.status !== "cancelled" ? (
-                  <MobileButton
-                    disabled={busy}
-                    onPress={() => {
-                      setError("");
-                      setNotice("");
-                      setSigning({ contract: row, party });
-                    }}
-                  >
-                    ลงนาม
-                  </MobileButton>
-                ) : null}
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitle}>
+              <View style={[styles.kindIcon, { backgroundColor: `${accentColor}18` }]}>
+                <MobileIcon name={CONTRACT_ICON[row.formKind]} size={18} color={accentColor} />
               </View>
+              <Text style={[styles.contractNo, title, styles.contractNoText]} numberOfLines={1}>
+                {row.contractNo}
+              </Text>
+            </View>
+            <StatusBadge status={row.status} />
+          </View>
+          <Text style={[styles.copy, body]}>{row.agreementTypeName}</Text>
+          <Text style={[styles.copy, body]}>ผู้เช่า {row.tenant}</Text>
+          {signerKeys(row).map((party) => {
+            const signed = signedAt(row, party);
+            return (
+              <Text
+                key={party}
+                style={[styles.copy, body, signed ? styles.signed : null]}
+              >
+                {PARTY_LABEL[party]}
+                {signed ? " · ลงนามแล้ว" : " · ยังไม่ลงนาม"}
+              </Text>
             );
           })}
+          <MobileButton variant="outline" onPress={() => onOpenedChange(row)}>
+            ดูสัญญา
+          </MobileButton>
         </View>
       ))}
-      <MobileBottomSheet
-        visible={signing != null}
-        onClose={() => !busy && setSigning(null)}
-        maxHeight="90%"
+      <Modal
+        visible={opened != null}
+        presentationStyle="fullScreen"
+        animationType="slide"
+        onRequestClose={() => onOpenedChange(null)}
       >
-        <Text style={[styles.heading, title]}>
-          ลงนาม{signing ? PARTY_LABEL[signing.party] : ""}
-        </Text>
-        <Text style={[styles.copy, body]}>วาดลายเซ็นในกรอบ แล้วกดยืนยัน</Text>
-        {!!error && signing ? (
-          <Text accessibilityRole="alert" style={styles.error}>
-            {error}
-          </Text>
+        {opened ? (
+          <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+            <SafeAreaView style={[styles.detailRoot, { backgroundColor: theme.background }]}>
+              <View style={[styles.detailHeader, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+                <MobileSectionHeader
+                  title="รายละเอียดสัญญา"
+                  accentColor={accentColor}
+                  leading="back"
+                  onBackPress={() => onOpenedChange(null)}
+                />
+              </View>
+              <ScrollView contentContainerStyle={styles.detailScroll}>
+                <PartyContractDetail
+                  key={opened.id}
+                  contract={opened}
+                  accentColor={accentColor}
+                  reloadToken={reloadToken}
+                  onReloadSettled={setDetailSettled}
+                  refreshError={error}
+                  refreshing={listSettled !== reloadToken || detailSettled !== reloadToken}
+                  onUpdated={(next) => {
+                    onOpenedChange(next);
+                    setRows((current) => current.map((row) => (row.id === next.id ? next : row)));
+                  }}
+                />
+              </ScrollView>
+            </SafeAreaView>
+          </SafeAreaProvider>
         ) : null}
-        {signing ? (
-          <ContractSignaturePad
-            ref={padRef}
-            onOK={(image) => {
-              void submit(image);
-            }}
-            onEmpty={() => setError("กรุณาวาดลายเซ็นก่อนยืนยัน")}
-          />
-        ) : null}
-        <View style={styles.actions}>
-          <MobileButton
-            variant="outline"
-            disabled={busy}
-            onPress={() => padRef.current?.clearSignature()}
-          >
-            ล้างลายเซ็น
-          </MobileButton>
-          <MobileButton disabled={busy} onPress={() => padRef.current?.readSignature()}>
-            ยืนยันลายเซ็น
-          </MobileButton>
-        </View>
-      </MobileBottomSheet>
+      </Modal>
+    </View>
+  );
+}
+
+function StatusBadge({ status }: { status: AgentContractStatus }) {
+  const color = statusColor(status);
+  return (
+    <View style={[styles.badge, { backgroundColor: `${color}15` }]}>
+      <Text style={[styles.badgeLabel, { color }]}>{STATUS_LABEL[status]}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { gap: 14, paddingBottom: 24 },
+  detailRoot: { flex: 1 },
+  detailHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+  },
+  detailScroll: { padding: 16, paddingBottom: 32 },
   heading: { fontSize: 20, lineHeight: 30 },
   contractNo: { fontSize: 16, lineHeight: 24 },
   copy: { fontSize: 14, lineHeight: 22 },
+  signed: { color: "#166534" },
   error: {
     fontFamily: tokens.typography.native.body,
     fontSize: 14,
@@ -168,11 +315,42 @@ const styles = StyleSheet.create({
     color: "#C74747",
   },
   card: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 8 },
-  partyRow: {
+  cardHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 8,
   },
-  actions: { flexDirection: "row", gap: 10 },
+  cardTitle: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  kindIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contractNoText: { flex: 1 },
+  pressed: { opacity: 0.85 },
+  count: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  kindRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  kindChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  kindLabel: { fontSize: 12, lineHeight: 18 },
+  badge: { borderRadius: 8, paddingHorizontal: 9, paddingVertical: 4 },
+  badgeLabel: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
 });

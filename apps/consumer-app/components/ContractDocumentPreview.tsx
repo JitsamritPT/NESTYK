@@ -11,6 +11,16 @@ import { WebView } from "react-native-webview";
 import { isPdfDocumentUrl, pdfViewerHtml } from "../lib/pdf-viewer/html";
 export { isPdfDocumentUrl } from "../lib/pdf-viewer/html";
 
+function allowDocumentRequest(requestUrl: string, documentUrl: string) {
+  if (requestUrl === "about:blank" || requestUrl.startsWith("about:blank#")) return true;
+  if (requestUrl.startsWith("blob:") || requestUrl.startsWith("data:")) return true;
+  try {
+    return new URL(requestUrl).origin === new URL(documentUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 export function ContractDocumentPreview({ url }: { url: string }) {
   const html = useMemo(
     () => (isPdfDocumentUrl(url) ? pdfViewerHtml(url) : null),
@@ -25,8 +35,7 @@ export function ContractDocumentPreview({ url }: { url: string }) {
           source={{ html }}
           originWhitelist={["*"]}
           onShouldStartLoadWithRequest={(request) =>
-            request.url === "about:blank" ||
-            request.url.startsWith("about:blank#")
+            allowDocumentRequest(request.url, url)
           }
           setSupportMultipleWindows={false}
           javaScriptCanOpenWindowsAutomatically={false}

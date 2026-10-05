@@ -153,9 +153,62 @@ export class AgreementAttachmentsService {
     agentId: number,
     id: number,
   ): Promise<AgreementAttachmentChecklist> {
-    const c = await this.contract(agentId, id);
+    return this.checklist(await this.contract(agentId, id), agentId);
+  }
+  async checklistForContract(c: LeaseContractEntity) {
+    return this.checklist(c);
+  }
+  async uploadForParty(
+    c: LeaseContractEntity,
+    uploaderId: number,
+    allowedSubjects: Array<"owner" | "tenant">,
+    input: unknown,
+    file: { buffer: Buffer; size: number; originalname?: string } | undefined,
+  ) {
+    const b = validateAttachmentInput(input);
+    if (!allowedSubjects.includes(b.subject as "owner" | "tenant"))
+      throw new BadRequestException("แนบได้เฉพาะเอกสารของฝ่ายคุณ");
+    this.mutable(c);
+    const stored = await this.storage.uploadAttachment(
+      c.created_by_user_id,
+      c.id,
+      file,
+    );
+    try {
+      await this.insert(
+        c.created_by_user_id,
+        c.id,
+        b,
+        stored,
+        file?.originalname ?? "document",
+        null,
+        uploaderId,
+      );
+    } catch (e) {
+      await this.storage.remove(stored.path).catch(() => undefined);
+      throw e;
+    }
+    return this.checklist(c);
+  }
+  async urlForContract(c: LeaseContractEntity, documentId: number) {
+    const d = await this.db.manager.findOneBy(AgreementDocumentEntity, {
+      id: documentId,
+      agreement_id: c.id,
+    });
+    if (!d || d.removed_at) throw new NotFoundException("ไม่พบเอกสาร");
+    this.assertPath(d, c.created_by_user_id);
+    const signed = await this.storage.signPaths([d.file_path]);
+    const url = signed.get(d.file_path);
+    if (!url)
+      throw new BadRequestException("ไม่สามารถเปิดเอกสารได้ กรุณาลองอีกครั้ง");
+    return { url };
+  }
+  private async checklist(
+    c: LeaseContractEntity,
+    agentId?: number,
+  ): Promise<AgreementAttachmentChecklist> {
     const [docs, requirements, types] = await Promise.all([
-      this.rows(id),
+      this.rows(c.id),
       this.db.manager.find(AgreementDocumentRequirementEntity, {
         where: { template_id: c.template_id },
         order: { id: "ASC" },
@@ -167,7 +220,7 @@ export class AgreementAttachmentsService {
     ]);
     const groups = attachmentChecklist(requirements, docs);
     let reusable: AgreementDocumentEntity[] = [];
-    if (c.previous_agreement_id) {
+    if (agentId && c.previous_agreement_id) {
       const previous = await this.contract(agentId, c.previous_agreement_id);
       if (
         previous.tenant_id === c.tenant_id &&
@@ -191,18 +244,27 @@ export class AgreementAttachmentsService {
     };
   }
   async assertReady(c: LeaseContractEntity) {
-    const requirements = await this.db.manager.find(
-      AgreementDocumentRequirementEntity,
-      { where: { template_id: c.template_id } },
-    );
-    if (
-      attachmentChecklist(requirements, await this.rows(c.id)).some(
-        (g) => !g.complete,
-      )
-    )
+    if ((await this.groups(c)).some((g) => !g.complete))
       throw new BadRequestException(
         "กรุณาแนบเอกสารที่จำเป็นให้ครบก่อนลงนาม",
       );
+  }
+  async assertReadyForSubject(
+    c: LeaseContractEntity,
+    subject: "owner" | "tenant",
+  ) {
+    if (
+      (await this.groups(c)).some((g) => g.subject === subject && !g.complete)
+    )
+      throw new BadRequestException("กรุณาแนบเอกสารของคุณให้ครบก่อนลงนาม");
+  }
+  private async groups(c: LeaseContractEntity) {
+    return attachmentChecklist(
+      await this.db.manager.find(AgreementDocumentRequirementEntity, {
+        where: { template_id: c.template_id },
+      }),
+      await this.rows(c.id),
+    );
   }
   async url(agentId: number, id: number, documentId: number) {
     await this.contract(agentId, id);
@@ -229,6 +291,7 @@ export class AgreementAttachmentsService {
     file: { path: string; mimeType: string; size: number },
     name: string,
     source: AgreementDocumentEntity | null,
+    uploaderId = agentId,
   ) {
     return this.db.transaction(async (manager) => {
       const c = await this.contract(agentId, id, manager, true);
@@ -271,7 +334,7 @@ export class AgreementAttachmentsService {
             name.replace(/[\x00-\x1f/\\]/g, "_").slice(0, 255) || "document",
           mime_type: file.mimeType,
           byte_size: file.size,
-          uploaded_by_user_id: agentId,
+          uploaded_by_user_id: uploaderId,
           review_status: "pending",
           supersedes_document_id: input.supersedesDocumentId,
           source_document_id: source?.id ?? null,

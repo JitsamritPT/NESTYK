@@ -1873,7 +1873,7 @@ export function ContractsScreen({
             )}
           {(!steppedCreation || creationStep === 3) && (
             <Text style={[s.small, muted]}>
-              บันทึกเป็นฉบับร่าง ยังไม่ส่งเอกสารให้คู่สัญญาลงนาม
+              บันทึกเป็นฉบับร่าง คู่สัญญาที่มีบัญชีจะเห็นสัญญานี้ทันที
             </Text>
           )}
         </View>

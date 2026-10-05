@@ -1610,6 +1610,105 @@ export class AgentContractsService {
       throw new ConflictException("สัญญาถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
     return { party, userId, deliveredAt: now.toISOString() };
   }
+  async contractForParty(userId: number, id: number) {
+    const c = await this.inboxQuery().andWhere("c.id = :id", { id }).getOne();
+    const parties = c ? this.partiesFor(userId, c) : [];
+    if (!c || !parties.length) throw new NotFoundException("ไม่พบสัญญา");
+    return { contract: c, parties };
+  }
+  async documentForParty(userId: number, id: number) {
+    const c = await this.inboxQuery().andWhere("c.id = :id", { id }).getOne();
+    if (!c || !this.partiesFor(userId, c).length)
+      throw new NotFoundException("ไม่พบสัญญา");
+    if (!this.documents)
+      throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา");
+    const existing = this.partyDocumentPath(c);
+    const path = existing ?? (await this.storePartyPreview(c)).path;
+    const signed = await this.documents.signPaths([path]);
+    const url = signed.get(path);
+    if (!url)
+      throw new ServiceUnavailableException("ไม่สามารถเปิดเอกสารได้ กรุณาลองอีกครั้ง");
+    return { url };
+  }
+  private partyDocumentPath(c: LeaseContractEntity) {
+    return (
+      this.reservationDocument(c)?.path ??
+      this.brokerDocument(c)?.path ??
+      this.leaseDocument(c)?.path ??
+      null
+    );
+  }
+  private async storePartyPreview(c: LeaseContractEntity) {
+    const formKind =
+      c.template?.form_kind ?? c.agreement_type?.form_kind ?? "lease";
+    const pdf =
+      formKind === "reservation"
+        ? await createReservationMock(this.reservationPreviewContract(c))
+        : formKind === "broker_appointment"
+          ? await createBrokerAppointmentPdf(this.brokerPreviewInput(c))
+          : await createLeaseAgreementPdf(this.leasePreviewInput(c));
+    return this.documents!.uploadPartyPreview(
+      c.created_by_user_id,
+      c.id,
+      formKind,
+      pdf,
+    );
+  }
+  private reservationPreviewContract(c: LeaseContractEntity): AgentContract {
+    const serialized = this.serialize(c);
+    const snap = (c.party_snapshot ?? {}) as Record<string, unknown>;
+    const existing = (serialized.data?.reservationLetter ?? null) as
+      | Record<string, unknown>
+      | null;
+    if (!existing || typeof existing !== "object") {
+      serialized.data = {
+        ...serialized.data,
+        reservationLetter: {
+          tenantPhone: String(snap.tenantPhone ?? ""),
+          tenantId: String(snap.tenantIdNumber ?? ""),
+          tenantNationality: String(snap.tenantNationality ?? ""),
+          landlordName: String(snap.ownerName ?? ""),
+          landlordPhone: String(snap.ownerPhone ?? ""),
+          landlordId: String(snap.ownerIdNumber ?? ""),
+          agentName: String(snap.agentName ?? ""),
+          agentPhone: String(snap.agentPhone ?? ""),
+          address: String(snap.propertyAddress ?? ""),
+          payee: String(snap.ownerName ?? ""),
+          landlordSignName: String(snap.ownerName ?? ""),
+          agentSignName: String(snap.agentName ?? ""),
+        },
+      };
+    }
+    return serialized;
+  }
+  private leasePreviewInput(c: LeaseContractEntity): LeaseAgreementInput {
+    const saved = (c.data?.leaseAgreement ?? null) as LeaseAgreementInput | null;
+    if (!saved) throw new BadRequestException("ไม่พบข้อมูลฟอร์มสัญญาเช่า");
+    return {
+      ...saved,
+      documentNo: saved.documentNo || c.contract_no || `LS-${c.id}`,
+      landlordSignName: saved.landlordName || saved.landlordSignName || "",
+      tenantSignName: saved.tenantName || saved.tenantSignName || "",
+      witnessSignName: saved.witnessSignName || saved.agentContact || "",
+      landlordSignaturePng: "",
+      tenantSignaturePng: "",
+    };
+  }
+  private brokerPreviewInput(c: LeaseContractEntity): BrokerAppointmentInput {
+    const saved = (c.data?.brokerAppointment ?? null) as
+      | BrokerAppointmentInput
+      | null;
+    if (!saved)
+      throw new BadRequestException("ไม่พบข้อมูลฟอร์มแต่งตั้งนายหน้า");
+    return {
+      ...saved,
+      documentNo: saved.documentNo || c.contract_no || `BA-${c.id}`,
+      landlordSignName: saved.landlordName || saved.landlordSignName || "",
+      brokerSignName: saved.brokerSignName || saved.brokerContact || "",
+      landlordSignaturePng: "",
+      brokerSignaturePng: "",
+    };
+  }
   async listForUser(userId: number) {
     const rows = await this.inboxQuery()
       .andWhere(
@@ -1636,7 +1735,8 @@ export class AgentContractsService {
       throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
     if (c[SIGN_COLUMNS[party].at])
       throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
-    if (this.attachments) await this.attachments.assertReady(c);
+    if (this.attachments)
+      await this.attachments.assertReadyForSubject(c, party);
     const { png } = validateSign({
       parties: [party],
       signaturePng:
@@ -1695,7 +1795,7 @@ export class AgentContractsService {
     } catch (error) {
       await this.documents.remove(stored.path).catch(() => undefined);
       if ((error as { code?: string }).code === "23514")
-        throw new BadRequestException("กรุณาแนบเอกสารที่จำเป็นให้ครบก่อนลงนาม");
+        throw new BadRequestException("กรุณาแนบเอกสารของคุณให้ครบก่อนลงนาม");
       throw error;
     }
     const latest = await this.inboxQuery().andWhere("c.id = :id", { id }).getOne();
@@ -2555,9 +2655,33 @@ export class AgentContractsService {
             created_by_user_id: agentId,
           })
         : null;
-      const ownerUser = room.owner_id
-        ? await manager.findOneBy(UserEntity, { id: room.owner_id })
+      let ownerUserId = reservationParties?.ownerUserId ?? room.owner_id ?? null;
+      if (ownerUserId == null && type.form_kind !== "reservation") {
+        const bookedOwner = await manager
+          .getRepository(LeaseContractEntity)
+          .createQueryBuilder("c")
+          .leftJoin("c.template", "contractTemplate")
+          .leftJoin("c.agreement_type", "agreementType")
+          .where("c.lead_id = :leadId", { leadId: lead.id })
+          .andWhere("c.rent_room_id = :roomId", { roomId: room.id })
+          .andWhere("c.owner_user_id IS NOT NULL")
+          .andWhere("c.status NOT IN (:...closed)", {
+            closed: ["cancelled", "expired", "terminated"],
+          })
+          .andWhere(
+            "COALESCE(contractTemplate.form_kind, agreementType.form_kind) = 'reservation'",
+          )
+          .orderBy("c.id", "DESC")
+          .getOne();
+        ownerUserId = bookedOwner?.owner_user_id ?? null;
+      }
+      const ownerUser = ownerUserId
+        ? await manager.findOneBy(UserEntity, { id: ownerUserId })
         : null;
+      const deliveredAt = new Date();
+      const deliverTenant =
+        type.form_kind !== "broker_appointment" && tenant.user_id != null;
+      const deliverOwner = ownerUserId != null;
       const property = await manager.findOneBy(PropertyEntity, {
         id: room.properties_id,
       });
@@ -2634,7 +2758,13 @@ export class AgentContractsService {
           rent_room_id: room.id,
           room_tenancy_id: tenancy.id,
           property_owner_id: room.property_owner_id,
-          owner_user_id: reservationParties?.ownerUserId ?? room.owner_id,
+          owner_user_id: ownerUserId,
+          tenant_delivered_at: deliverTenant
+            ? (existing?.tenant_delivered_at ?? deliveredAt)
+            : (existing?.tenant_delivered_at ?? null),
+          owner_delivered_at: deliverOwner
+            ? (existing?.owner_delivered_at ?? deliveredAt)
+            : (existing?.owner_delivered_at ?? null),
           created_by_user_id: agentId,
           start_date: contractInput.startDate,
           end_date:

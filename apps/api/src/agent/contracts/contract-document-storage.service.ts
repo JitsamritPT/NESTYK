@@ -345,6 +345,30 @@ export class ContractDocumentStorageService {
     return { path };
   }
 
+  async uploadPartyPreview(
+    agentId: number,
+    contractId: number,
+    formKind: string,
+    pdf: Buffer,
+  ) {
+    if (
+      this.sniff(pdf).mime !== "application/pdf" ||
+      pdf.length > MAX_CONTRACT_DOCUMENT_BYTES
+    )
+      throw new BadRequestException("ไฟล์ PDF ไม่ถูกต้องหรือมีขนาดเกิน 10 MB");
+    await this.ensureBucket();
+    const path = `${agentId}/${contractId}/party-preview/${formKind}.pdf`;
+    const { error } = await this.storage().upload(path, pdf, {
+      contentType: "application/pdf",
+      upsert: true,
+    });
+    if (error)
+      throw new ServiceUnavailableException(
+        "สร้างเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง",
+      );
+    return { path };
+  }
+
   async signPaths(paths: Array<string | null | undefined>) {
     const unique = [...new Set(paths.filter((path): path is string => !!path))];
     const signed = new Map<string, string>();

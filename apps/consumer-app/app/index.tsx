@@ -1,7 +1,7 @@
 import { AgentCalendarScreen, emptyCalendarDraft } from '../components/AgentCalendarScreen';
 import { calendarDateKey, createCalendarDemoEvents } from '../lib/agent-calendar-demo';
 import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
-import { PartyContractsScreen } from '../components/PartyContractsScreen';
+import { PartyContractsScreen, type PartyContractRoom } from '../components/PartyContractsScreen';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import { CreateLeadForm, type LeadFormTab } from '../components/CreateLeadForm';
@@ -33,7 +33,7 @@ import {
   getDefaultTabForRole,
   tokens,
 } from '@nestyk/ui/native';
-import { UserRole, type AgentLead } from '@nestyk/types';
+import { UserRole, type AgentLead, type PartyContract } from '@nestyk/types';
 import {
   MobileCreateListingWizardBody,
   MobileAgentDashboardBody,
@@ -128,6 +128,8 @@ export default function AppHomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [partyInbox, setPartyInbox] = useState(false);
+  const [selectedPartyRoom, setSelectedPartyRoom] = useState<PartyContractRoom | null>(null);
+  const [openedPartyContract, setOpenedPartyContract] = useState<PartyContract | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
   const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
@@ -142,6 +144,7 @@ export default function AppHomeScreen() {
   const pendingRefresh = useRef<number | null>(null);
   const [leadsReloadToken, setLeadsReloadToken] = useState(0);
   const [roomsReloadToken, setRoomsReloadToken] = useState(0);
+  const [partyContractsReloadToken, setPartyContractsReloadToken] = useState(0);
   const [clientsSearchOpen, setClientsSearchOpen] = useState(false);
   /** Where header/hardware back should return from secondary screens (e.g. create listing). */
   const [secondaryReturnTab, setSecondaryReturnTab] = useState<MobileAppTab | null>(null);
@@ -211,6 +214,8 @@ export default function AppHomeScreen() {
       return;
     }
     setPartyInbox(false);
+    setSelectedPartyRoom(null);
+    setOpenedPartyContract(null);
     if (tab !== 'listingLead') setLeadsWorkFilter(null);
     if (tab !== 'clients') setClientsWorkFilter(null);
     setSecondaryReturnTab(null);
@@ -339,6 +344,15 @@ export default function AppHomeScreen() {
     return () => sub.remove();
   }, [activeTab, handleCreateLeadBack]);
 
+  useEffect(() => {
+    if (!partyInbox || !selectedPartyRoom || openedPartyContract) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSelectedPartyRoom(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [partyInbox, selectedPartyRoom, openedPartyContract]);
+
   const handleRoleChange = (role: UserRole) => {
     if (roleRequiresAuth(role) && !isAuthenticated) {
       setPendingRole(role);
@@ -347,6 +361,8 @@ export default function AppHomeScreen() {
       return;
     }
     setPartyInbox(false);
+    setSelectedPartyRoom(null);
+    setOpenedPartyContract(null);
     setActiveRole(role);
     setActiveTab(getDefaultTabForRole(role));
   };
@@ -390,9 +406,10 @@ export default function AppHomeScreen() {
   const secondaryText = { color: theme.textSecondary };
 
   const screenTitle =
-    activeRole === 'agent'
+    activeRole === 'agent' || partyInbox
       ? undefined
       : getScreenTitle(activeTab, t);
+  const partyRole = activeRole === 'tenant' ? 'tenant' : 'owner';
 
   const agentSectionTabs: MobileAppTab[] = [
     'listingRoom',
@@ -617,7 +634,7 @@ export default function AppHomeScreen() {
     // A completion from a previous tab/role must never stop a newer refresh.
     pendingRefresh.current = null;
     setPageRefreshing(false);
-  }, [activeRole, activeTab]);
+  }, [activeRole, activeTab, partyInbox]);
 
   useEffect(() => {
     // Demo data is synchronous: finish after the new snapshot is committed.
@@ -632,7 +649,9 @@ export default function AppHomeScreen() {
     const token = ++refreshSequence.current;
     pendingRefresh.current = token;
     setPageRefreshing(true);
-    if (activeRole === 'agent' && activeTab === 'dashboard') {
+    if (partyInbox && activeRole !== 'agent') {
+      setPartyContractsReloadToken(token);
+    } else if (activeRole === 'agent' && activeTab === 'dashboard') {
       setDashboardRefreshKey(token);
     } else if (activeTab === 'listingLead') {
       setLeadsReloadToken(token);
@@ -641,7 +660,7 @@ export default function AppHomeScreen() {
     } else {
       finishPageRefresh(token);
     }
-  }, [activeRole, activeTab, finishPageRefresh]);
+  }, [activeRole, activeTab, partyInbox, finishPageRefresh]);
 
   const renderListingCards = () => (
     <>
@@ -1127,11 +1146,15 @@ export default function AppHomeScreen() {
     try {
       await signOut();
       setPartyInbox(false);
+      setSelectedPartyRoom(null);
+      setOpenedPartyContract(null);
       setActiveRole('guest');
       setActiveTab(getDefaultTabForRole('guest'));
       Alert.alert(t.common.signOut, t.mobile.auth.signedOut);
     } catch {
       setPartyInbox(false);
+      setSelectedPartyRoom(null);
+      setOpenedPartyContract(null);
       setActiveRole('guest');
       setActiveTab(getDefaultTabForRole('guest'));
       Alert.alert(t.common.signOut, t.mobile.auth.signedOut);
@@ -1157,16 +1180,35 @@ export default function AppHomeScreen() {
       <MobileModePage
         role={activeRole}
         screenTitle={screenTitle}
-        scrollable={!isWizardTab}
+        scrollable={partyInbox || !isWizardTab}
         refreshing={pageRefreshing}
         onRefresh={
-          !isWizardTab && activeRole === 'agent' &&
-          ['dashboard', 'listingLead', 'listingRoom'].includes(activeTab)
+          (partyInbox && activeRole !== 'agent') ||
+          (!partyInbox && !isWizardTab && activeRole === 'agent' &&
+          ['dashboard', 'listingLead', 'listingRoom'].includes(activeTab))
             ? handlePageRefresh : undefined
         }
         header={
           activeRole === 'agent' ? (
             renderAgentHeader()
+          ) : partyInbox ? (
+            <MobileSectionHeader
+              title={
+                selectedPartyRoom
+                  ? (selectedPartyRoom.room ? `ห้อง ${selectedPartyRoom.room}` : selectedPartyRoom.property)
+                  : "สัญญาของฉัน"
+              }
+              workspaceLabel={
+                selectedPartyRoom?.room ? selectedPartyRoom.property : t.roles[partyRole]
+              }
+              accentColor={tokens.colors.roles[partyRole]}
+              leading={selectedPartyRoom ? "back" : "menu"}
+              onBackPress={() => {
+                setOpenedPartyContract(null);
+                setSelectedPartyRoom(null);
+              }}
+              onMenuPress={() => setDrawerOpen(true)}
+            />
           ) : (
             <MobileHeaderActions
               initials={profileInitials}
@@ -1196,7 +1238,15 @@ export default function AppHomeScreen() {
       >
         <React.Fragment key={`${activeRole}-${activeTab}-${partyInbox ? 'inbox' : 'tab'}`}>
           {partyInbox ? (
-            <PartyContractsScreen onBack={() => setPartyInbox(false)} />
+            <PartyContractsScreen
+              opened={openedPartyContract}
+              onOpenedChange={setOpenedPartyContract}
+              selectedRoom={selectedPartyRoom}
+              onSelectedRoomChange={setSelectedPartyRoom}
+              accentColor={tokens.colors.roles[partyRole]}
+              reloadToken={partyContractsReloadToken}
+              onReloadSettled={finishPageRefresh}
+            />
           ) : (
             renderTabBody()
           )}
@@ -1226,6 +1276,8 @@ export default function AppHomeScreen() {
           if (action.type === 'route') {
             if (action.path === '/tenant/contract' || action.path === '/owner/contracts') {
               setDrawerOpen(false);
+              setOpenedPartyContract(null);
+              setSelectedPartyRoom(null);
               setPartyInbox(true);
               return;
             }

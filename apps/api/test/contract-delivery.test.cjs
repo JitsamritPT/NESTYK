@@ -108,6 +108,21 @@ test('deliver rejects a party that has no account and does not write', async () 
   assert.equal(missingOwner.updates.length, 0);
 });
 
+test('a delivered party can open the stored contract', async () => {
+  const f = serviceFor(contract({
+    tenant_delivered_at: new Date(),
+    document_url: '7/11/mock/lease_agreement/v1/letter.pdf',
+  }));
+  const doc = await f.service.documentForParty(8, 11);
+  assert.equal(doc.url, 'https://signed.example/7/11/mock/lease_agreement/v1/letter.pdf');
+
+  const stranger = serviceFor(contract({ tenant_delivered_at: new Date() }));
+  await assert.rejects(
+    () => stranger.service.documentForParty(99, 11),
+    (error) => error.getStatus() === 404,
+  );
+});
+
 test('the recipient can sign only the delivered party', async () => {
   const f = serviceFor(contract({ tenant_delivered_at: new Date() }));
   const signed = await f.service.signAsParty(8, 11, { party: 'tenant', signaturePng });
