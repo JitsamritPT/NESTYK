@@ -80,6 +80,27 @@ export function formatShortDateTime(value: string | null | undefined, locale: st
   return `${day} ${time}`;
 }
 
+/** Calendar days from today in device time (0 = today); rounding absorbs DST shifts. */
+export function daysFromToday(date: Date, now = new Date()): number {
+  const start = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((start(date) - start(now)) / 86400000);
+}
+
+/** "วันนี้" / "พรุ่งนี้" / weekday within the week / "อีก 9 วัน". */
+export function viewingDayLabel(
+  value: string | null | undefined,
+  locale: string,
+  copy: { today: string; tomorrow: string; inDays: string },
+): string | null {
+  const date = toDate(value);
+  if (!date) return null;
+  const days = daysFromToday(date);
+  if (days <= 0) return copy.today;
+  if (days === 1) return copy.tomorrow;
+  if (days < 7) return date.toLocaleDateString(LOCALE_TAGS[locale] ?? locale, { weekday: 'short' });
+  return copy.inDays.replace('{n}', String(days));
+}
+
 export function formatBudgetRange(lead: Pick<AgentLead, 'budgetMin' | 'budgetMax'>): string | null {
   if (lead.budgetMin == null && lead.budgetMax == null) return null;
   return [lead.budgetMin, lead.budgetMax]

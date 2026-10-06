@@ -140,10 +140,16 @@ export function ContractsScreen({
   tenant,
   initialContract,
   onChanged,
+  startCreate = null,
+  onStartCreateHandled,
 }: {
   tenant?: AgentTenant;
   initialContract?: AgentContract | null;
   onChanged?: () => void;
+  /** Open the create form of this document straight away, skipping the type picker. */
+  startCreate?: CreateDocumentKind | null;
+  /** Called once `startCreate` was taken, so the owner can clear it. */
+  onStartCreateHandled?: () => void;
 } = {}) {
   const { theme } = useMobileTheme();
   const { t } = useLocale();
@@ -210,6 +216,19 @@ export function ContractsScreen({
       listRequest.current++;
     };
   }, [tenant?.id, retry]);
+  const startedCreate = useRef(false);
+  useEffect(() => {
+    if (!startCreate) {
+      startedCreate.current = false;
+      return;
+    }
+    if (startedCreate.current) return;
+    startedCreate.current = true;
+    onStartCreateHandled?.();
+    void onCreateKind(startCreate);
+    // One start per request; `onCreateKind` is a new function on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startCreate]);
   const [selected, setSelected] = useState<AgentContract | null>(
     initialContract ?? null,
   );

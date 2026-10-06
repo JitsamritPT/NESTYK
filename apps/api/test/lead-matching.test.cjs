@@ -32,17 +32,29 @@ test('lower-ranked pins weigh less and unfilled criteria leave the average',()=>
 
 test('settings filter by score and cap results; invalid values are rejected',()=>{
  const matches=M.matchLeadRooms(lead,[room(1,1),room(2,4.5),room(6,1,{prices:[{termMonths:6,price:9000}],roomTypeCode:'1br',availableFromDate:'2026-11-16'})]);
- assert.deepEqual(M.applyMatchSettings(matches,{minScore:60,maxResults:10}).map(m=>m.roomId),[1,2]);
- assert.deepEqual(M.applyMatchSettings(matches,{minScore:50,maxResults:10}).map(m=>m.roomId),[1,2,6]);
- assert.deepEqual(M.applyMatchSettings(Array.from({length:30},(_,i)=>({...matches[0],roomId:i})),{minScore:50,maxResults:20}).length,20);
- assert.deepEqual(M.effectiveMatchSettings(null),{minScore:50,maxResults:10});
- assert.deepEqual(M.effectiveMatchSettings({minScore:70,maxResults:7}),{minScore:70,maxResults:10});
- assert.deepEqual(M.validateMatchSettings({minScore:80}),{minScore:80});
- for(const body of [null,[],{minScore:55},{maxResults:0},{minScore:'60'}]) assert.throws(()=>M.validateMatchSettings(body),undefined,JSON.stringify(body));
+ assert.deepEqual(M.applyMatchSettings(matches,{minScore:60,maxScore:100,maxResults:10}).map(m=>m.roomId),[1,2]);
+ assert.deepEqual(M.applyMatchSettings(matches,{minScore:50,maxScore:100,maxResults:10}).map(m=>m.roomId),[1,2,6]);
+ const scores=matches.map(m=>m.score);
+ assert.deepEqual(M.applyMatchSettings(matches,{minScore:0,maxScore:Math.max(...scores)-5,maxResults:10}).map(m=>m.score),scores.filter(s=>s<=Math.max(...scores)-5),'rooms above maxScore are left out');
+ assert.deepEqual(M.applyMatchSettings(Array.from({length:30},(_,i)=>({...matches[0],roomId:i})),{minScore:50,maxScore:100,maxResults:20}).length,20);
+ assert.deepEqual(M.effectiveMatchSettings(null),{minScore:50,maxScore:100,maxResults:10});
+ assert.deepEqual(M.effectiveMatchSettings({minScore:70,maxResults:7}),{minScore:70,maxScore:100,maxResults:10});
+ assert.deepEqual(M.effectiveMatchSettings({minScore:63,maxResults:20}),{minScore:50,maxScore:100,maxResults:20});
+ assert.deepEqual(M.effectiveMatchSettings({minScore:40,maxScore:80,maxResults:10}),{minScore:40,maxScore:80,maxResults:10});
+ assert.deepEqual(M.effectiveMatchSettings({minScore:80,maxScore:80,maxResults:10}),{minScore:80,maxScore:100,maxResults:10},'a range narrower than the gap falls back');
+ assert.deepEqual(M.effectiveMatchSettings({minScore:100,maxResults:10}),{minScore:50,maxScore:100,maxResults:10});
+ for(const minScore of [0,35,55,65,95,100]) assert.deepEqual(M.validateMatchSettings({minScore}),{minScore});
+ assert.deepEqual(M.validateMatchSettings({minScore:40,maxScore:80}),{minScore:40,maxScore:80});
+ for(const body of [null,[],{minScore:-5},{minScore:63},{minScore:105},{minScore:62.5},{maxScore:101},{maxScore:'90'},{maxResults:0},{minScore:'60'}]) assert.throws(()=>M.validateMatchSettings(body),undefined,JSON.stringify(body));
+ assert.doesNotThrow(()=>M.assertScoreRange({minScore:75,maxScore:80,maxResults:10}));
+ for(const s of [{minScore:80,maxScore:80},{minScore:85,maxScore:80}]) assert.throws(()=>M.assertScoreRange({...s,maxResults:10}),undefined,JSON.stringify(s));
 });
 
 test('input hash follows matching fields and settings only; search boxes cover the full reach',()=>{
- const settings={minScore:50,maxResults:10};const base=M.matchInputHash(lead,settings);
+ const settings={minScore:50,maxScore:100,maxResults:10};const base=M.matchInputHash(lead,settings);
+ const {maxScore:_,...beforeMaxScore}=settings;
+ assert.equal(M.matchInputHash(lead,beforeMaxScore),base,'runs saved before maxScore existed keep their fingerprint');
+ assert.notEqual(M.matchInputHash(lead,{...settings,maxScore:90}),base);
  assert.equal(M.matchInputHash({...lead},settings),base);
  assert.notEqual(M.matchInputHash({...lead,budgetMax:16000},settings),base);
  assert.notEqual(M.matchInputHash({...lead,pins:[{...asok,latitude:13.8}]},settings),base);
@@ -62,7 +74,7 @@ function fakeService(){
    for(let i=results.length-1;i>=0;i--)if(!runs.some(r=>r.id===results[i].run_id))results.splice(i,1);},
   findOne:async({where})=>runs.filter(r=>r.lead_id===where.lead_id).sort((a,b)=>b.id-a.id)[0]??null};
  const resultRepo={create:list=>list.map(r=>({...r})),save:async list=>{results.push(...list);return list;},find:async({where})=>results.filter(r=>r.run_id===where.run_id).sort((a,b)=>a.rank-b.rank)};
- leads.manager={transaction:async fn=>fn({getRepository:e=>e.name==='LeadMatchRunEntity'?runRepo:resultRepo})};
+ leads.manager={transaction:async fn=>fn({getRepository:e=>e.name==='LeadEntity'?leads:e.name==='LeadMatchRunEntity'?runRepo:resultRepo})};
  let inventory=[room(11,1),room(12,4.5),room(13,1,{prices:[{termMonths:12,price:20000}]})];const filters=[];
  const listings={matchCandidates:async(agentId,filter)=>{filters.push({agentId,...filter});return inventory;},
   cardsByIds:async(agentId,ids)=>ids.filter(id=>inventory.some(r=>r.id===id)).map(id=>({id,listingTitle:`Room ${id}`,roomStatusCode:'available'}))};
@@ -84,9 +96,11 @@ test('match HTTP API runs on demand, stores the run, and flags stale results',as
 
  const empty=await call('5/match-runs/latest');assert.equal(empty.status,200);assert.deepEqual(await empty.json(),{run:null,items:[]});
  const settings=await (await call('5/match-settings')).json();
- assert.deepEqual(settings,{saved:null,effective:{minScore:50,maxResults:10},defaults:{minScore:50,maxResults:10}});
+ assert.deepEqual(settings,{saved:null,effective:{minScore:50,maxScore:100,maxResults:10},defaults:{minScore:50,maxScore:100,maxResults:10}});
 
+ assert.equal(f.leadRow.updated_at,undefined);
  const first=await call('5/match-runs',{method:'POST'});assert.equal(first.status,201);const ran=await first.json();
+ assert.ok(f.leadRow.updated_at instanceof Date,'a run moves the lead updated_at');
  assert.deepEqual(ran.items.map(i=>i.room.id),[11,12]);
  assert.equal(ran.run.candidateCount,2);assert.equal(ran.run.resultCount,2);assert.equal(ran.run.topScore,100);assert.equal(ran.run.stale,false);
  assert.equal(ran.items[0].score,100);assert.equal(ran.items[0].comparison.budget.headroom,3000);assert.equal(ran.items[0].room.listingTitle,'Room 11');
@@ -99,15 +113,17 @@ test('match HTTP API runs on demand, stores the run, and flags stale results',as
  f.setInventory([room(12,4.5)]);
  const gone=await (await call('5/match-runs/latest')).json();assert.deepEqual(gone.items.map(i=>i.room.id),[12]);
 
- assert.equal((await call('5/match-settings',{method:'PATCH',body:{minScore:55}})).status,400);
+ assert.equal((await call('5/match-settings',{method:'PATCH',body:{minScore:63}})).status,400);
+ assert.equal((await call('5/match-settings',{method:'PATCH',body:{minScore:60,maxScore:60}})).status,400);
+ assert.equal((await call('5/match-settings',{method:'PATCH',body:{maxScore:40}})).status,400,'checked against the saved minScore');
  const saved=await (await call('5/match-settings',{method:'PATCH',body:{minScore:80}})).json();
- assert.deepEqual(saved.effective,{minScore:80,maxResults:10});assert.deepEqual(f.leadRow.match_settings,{minScore:80,maxResults:10});
+ assert.deepEqual(saved.effective,{minScore:80,maxScore:100,maxResults:10});assert.deepEqual(f.leadRow.match_settings,{minScore:80,maxScore:100,maxResults:10});
  assert.equal((await (await call('5/match-runs/latest')).json()).run.stale,true);
 
  f.setInventory([room(11,1),room(14,1,{prices:[{termMonths:6,price:9000}],roomTypeCode:'1br',availableFromDate:'2026-11-16'})]);
  const rerun=await (await call('5/match-runs',{method:'POST'})).json();
  assert.deepEqual(rerun.items.map(i=>i.room.id),[11]);assert.equal(rerun.run.candidateCount,2);assert.equal(rerun.run.stale,false);
- assert.deepEqual(rerun.run.settings,{minScore:80,maxResults:10});
+ assert.deepEqual(rerun.run.settings,{minScore:80,maxScore:100,maxResults:10});
 
  for(let i=0;i<6;i++) await call('5/match-runs',{method:'POST'});
  assert.equal(f.runs.length,5);
@@ -118,7 +134,7 @@ test('match HTTP API runs on demand, stores the run, and flags stale results',as
  const cleared=await call('5/match-runs',{method:'DELETE'});assert.equal(cleared.status,204);
  assert.equal(f.runs.length,0);assert.equal(f.results.length,0);
  assert.deepEqual(await (await call('5/match-runs/latest')).json(),{run:null,items:[]});
- assert.deepEqual(f.leadRow.match_settings,{minScore:80,maxResults:10});
+ assert.deepEqual(f.leadRow.match_settings,{minScore:80,maxScore:100,maxResults:10});
 
  f.leadRow.radius_km=null;
  const notReady=await call('5/match-runs',{method:'POST'});assert.equal(notReady.status,422);assert.equal((await notReady.json()).code,'LEAD_NOT_READY');

@@ -101,6 +101,8 @@ import {
   Thermometer,
   Wind,
   Elevator,
+  Wallet,
+  Files,
   IconProps,
 } from 'phosphor-react-native';
 import { tokens } from '../theme/tokens';
@@ -208,6 +210,8 @@ const ICON_MAP: Record<Exclude<AppIconName, 'house-plus'>, React.ComponentType<I
   thermometer: Thermometer,
   wind: Wind,
   elevator: Elevator,
+  wallet: Wallet,
+  files: Files,
 };
 
 const TONE_COLORS: Record<AppIconTone, string> = {

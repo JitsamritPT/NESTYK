@@ -14,6 +14,7 @@ import {
   MobileButton,
   MobileIcon,
   MobileInput,
+  MobileFilterChip,
   MobileListSearchRow,
   tokens,
   useMobileTheme,
@@ -21,8 +22,10 @@ import {
 import type { AgentContract, AgentTenant } from "@nestyk/types";
 import { useLocale } from "@nestyk/i18n";
 import { getAgentTenant, listAgentTenants, updateAgentTenant } from "../lib/agent-tenants-api";
+import { nextIdentityNumberDraft } from "../lib/identity-number";
 import { TenantForm } from "./TenantForm";
 import { ContractsScreen } from "./ContractsScreen";
+import type { CreateDocumentKind } from "./ContractTypePicker";
 
 type Filter = "all" | "signing" | "active";
 const filters: Record<Filter, string> = {
@@ -91,6 +94,14 @@ export type TenantDetailActions = {
   edit: () => void;
   save: () => void;
 };
+/** A tenant whose page opens as soon as the screen mounts, e.g. from a lead that booked a room. */
+export type TenantEntry = {
+  tenantId: number;
+  /** Already at hand (just booked); otherwise the tenant is read by id. */
+  tenant?: AgentTenant;
+  /** Go straight into creating this document for the tenant. */
+  startContract?: CreateDocumentKind | null;
+};
 
 export function AgentTenantsScreen({
   workFilter = null,
@@ -100,6 +111,8 @@ export function AgentTenantsScreen({
   createBackRef,
   createdTenant = null,
   onTenantCreated,
+  entry = null,
+  onEntryBack,
   detailActionsRef,
   onDetailStateChange,
 }: {
@@ -111,6 +124,10 @@ export function AgentTenantsScreen({
   /** The shell remounts this screen when the form closes; reopen the tenant just created. */
   createdTenant?: AgentTenant | null;
   onTenantCreated?: (tenant: AgentTenant) => void;
+  /** Read on mount: open this tenant's page instead of the list. */
+  entry?: TenantEntry | null;
+  /** Back from the `entry` tenant's page: return to where the shell came from, not to the list. */
+  onEntryBack?: () => void;
   detailActionsRef?: React.MutableRefObject<TenantDetailActions | null>;
   onDetailStateChange?: (state: TenantDetailState) => void;
   workFilter?:
@@ -124,13 +141,23 @@ export function AgentTenantsScreen({
   const c = t.agent.tenants;
   const { theme } = useMobileTheme();
   const [items, setItems] = useState<AgentTenant[]>([]);
-  const [selected, setSelected] = useState<AgentTenant | null>(createdTenant);
+  const [selected, setSelected] = useState<AgentTenant | null>(
+    entry?.tenant ?? createdTenant,
+  );
   const [creatingLocal, setCreatingLocal] = useState(false);
   const creating = creatingProp ?? creatingLocal;
   const setCreating = onCreatingChange ?? setCreatingLocal;
-  const [tab, setTab] = useState<"overview" | "contracts">("overview");
+  const [tab, setTab] = useState<"overview" | "contracts">(
+    entry?.startContract ? "contracts" : "overview",
+  );
+  /** Document the contracts tab starts creating when it opens (the reservation letter after a booking). */
+  const [contractStart, setContractStart] = useState<CreateDocumentKind | null>(
+    entry?.startContract ?? null,
+  );
   const [tabsWidth, setTabsWidth] = useState(0);
-  const tabPosition = useRef(new Animated.Value(0)).current;
+  const tabPosition = useRef(
+    new Animated.Value(tab === "overview" ? 0 : 1),
+  ).current;
   useEffect(() => {
     const animation = Animated.timing(tabPosition, {
       toValue: tab === "overview" ? 0 : 1,
@@ -148,7 +175,7 @@ export function AgentTenantsScreen({
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(
-    createdTenant ? "สร้างผู้เช่าแล้ว พร้อมเริ่มเตรียมสัญญา" : "",
+    createdTenant && !entry ? c.createdNotice : "",
   );
   const [editing, setEditing] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -195,6 +222,12 @@ export function AgentTenantsScreen({
       refreshVersion.current++;
     };
   }, []);
+  // A tenant the shell asks for by id opens the same way as a tap on its row.
+  useEffect(() => {
+    if (entry && !entry.tenant) void open(entry.tenantId);
+    // Read once: the shell mounts this screen for the entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const badge = (t: AgentTenant) => (
     <Text
       style={[
@@ -217,14 +250,14 @@ export function AgentTenantsScreen({
       </Text>
     </View>
   );
-  async function open(t: AgentTenant) {
+  async function open(id: number) {
     if (opening) return;
     setOpening(true);
     setError("");
     setNotice("");
     setEditing(false);
     try {
-      setSelected(await getAgentTenant(t.id));
+      setSelected(await getAgentTenant(id));
       setTab("overview");
     } catch (e) {
       setError(e instanceof Error ? e.message : "โหลดรายละเอียดไม่สำเร็จ");
@@ -318,6 +351,10 @@ export function AgentTenantsScreen({
           setEditing(false);
           return;
         }
+        if (onEntryBack && entry && selected?.id === entry.tenantId) {
+          onEntryBack();
+          return;
+        }
         setSelected(null);
         setNotice("");
       },
@@ -340,7 +377,7 @@ export function AgentTenantsScreen({
       <MobileBrandLoader
         fill
         size="md"
-        done={!loading}
+        done={!loading && !opening}
         onComplete={() => setGateOpen(true)}
       />
     );
@@ -360,7 +397,7 @@ export function AgentTenantsScreen({
           setSelected(tenant);
           setTab("overview");
           setError("");
-          setNotice("สร้างผู้เช่าแล้ว พร้อมเริ่มเตรียมสัญญา");
+          setNotice(c.createdNotice);
         }}
       />
     );
@@ -435,10 +472,33 @@ export function AgentTenantsScreen({
             ]}
           />
         </View>
+        {tab === "overview" && !editing && !selected.contracts.length && (
+          <View style={[s.card, panel]}>
+            <Text style={[s.subtitle, title]}>{c.nextStepTitle}</Text>
+            <Text style={[s.body, muted]}>
+              {selected.email ? c.nextStepBody : c.reservedNeedsEmail}
+            </Text>
+            <MobileButton
+              onPress={() => {
+                if (!selected.email) {
+                  beginEdit(selected);
+                  return;
+                }
+                setNotice("");
+                setContractStart("reservation");
+                setTab("contracts");
+              }}
+            >
+              {selected.email ? c.makeReservation : c.addEmail}
+            </MobileButton>
+          </View>
+        )}
         {tab === "contracts" ? (
           <ContractsScreen
             key={selected.id}
             tenant={selected}
+            startCreate={contractStart}
+            onStartCreateHandled={() => setContractStart(null)}
             onChanged={() => {
               void refreshTenant(selected.id);
             }}
@@ -466,7 +526,10 @@ export function AgentTenantsScreen({
                   accessibilityLabel={label}
                   value={editForm[key]}
                   onChangeText={(value) =>
-                    setEditForm((current) => ({ ...current, [key]: value }))
+                    setEditForm((current) => ({
+                      ...current,
+                      [key]: key === "identityNumber" ? nextIdentityNumberDraft(value) : value,
+                    }))
                   }
                   placeholder={placeholder}
                   maxLength={
@@ -488,10 +551,13 @@ export function AgentTenantsScreen({
                         : "default"
                   }
                   autoCapitalize={
-                    key === "email" || key === "identityNumber"
+                    key === "email"
                       ? "none"
-                      : "sentences"
+                      : key === "identityNumber"
+                        ? "characters"
+                        : "sentences"
                   }
+                  autoCorrect={key === "identityNumber" ? false : undefined}
                   editable={!savingEdit}
                 />
               </View>
@@ -552,41 +618,18 @@ export function AgentTenantsScreen({
       />
       <View style={s.filters}>
         {(Object.keys(filters) as Filter[]).map((key) => (
-          <Pressable
+          <MobileFilterChip
             key={key}
-            accessibilityRole="button"
-            accessibilityState={{ selected: filter === key }}
-            onPress={() => setFilter(key)}
-            android_ripple={{ color: tokens.colors.brand[100] }}
-            style={({ pressed }) => [
-              s.chip,
-              {
-                borderColor:
-                  filter === key ? tokens.colors.brand[500] : theme.border,
-                backgroundColor:
-                  filter === key ? tokens.colors.brand[100] : theme.surface,
-              },
-              pressed && Platform.OS === "ios" && { opacity: 0.7 },
-            ]}
-          >
-            <Text
-              style={[
-                s.small,
-                {
-                  color:
-                    filter === key
-                      ? tokens.colors.primary
-                      : theme.textSecondary,
-                },
-              ]}
-            >
-              {filters[key]}{" "}
-              {loading
+            label={filters[key]}
+            count={
+              loading
                 ? "–"
                 : items.filter((t) => key === "all" || stateOf(t) === key)
-                    .length}
-            </Text>
-          </Pressable>
+                    .length
+            }
+            selected={filter === key}
+            onPress={() => setFilter(key)}
+          />
         ))}
       </View>
       {opening ? (
@@ -606,7 +649,7 @@ export function AgentTenantsScreen({
               accessibilityRole="button"
               accessibilityLabel={`ดูผู้เช่า ${t.name}`}
               onPress={() => {
-                void open(t);
+                void open(t.id);
               }}
               style={({ pressed }) => [
                 s.card,
@@ -787,14 +830,7 @@ const s = StyleSheet.create({
     overflow: "hidden",
     alignSelf: "flex-start",
   },
-  filters: { flexDirection: "row", gap: 7, flexWrap: "wrap" },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 13,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-    overflow: "hidden",
-  },
+  filters: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   renewal: {
     borderWidth: 1,
     borderRadius: 13,

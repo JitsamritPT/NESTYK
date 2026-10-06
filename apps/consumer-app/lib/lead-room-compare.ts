@@ -42,6 +42,16 @@ export function roomLayoutValue(room: { layout: Array<{ code: string; value: str
   return room?.layout.find((item) => item.code === code)?.value?.trim() || null;
 }
 
+export type CriterionTone = 'green' | 'yellow' | 'red' | 'slate';
+
+/** Colour from the row's own score as displayed (rounded): 100 green, 1–99 yellow, 0 red, unjudged slate. */
+export function criterionTone(score: number | null): CriterionTone {
+  if (score == null) return 'slate';
+  const shown = Math.round(score);
+  if (shown >= 100) return 'green';
+  return shown <= 0 ? 'red' : 'yellow';
+}
+
 export type ComparisonSummary = {
   passed: number;
   /** Judged criteria that did not fully pass, in display order. */

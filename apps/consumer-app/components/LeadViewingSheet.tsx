@@ -265,7 +265,10 @@ export function LeadViewingSheet({
               <View style={[styles.warn, { backgroundColor: tokens.colors.subtle.warningBg }]}>
                 <MobileIcon name="warning" size={16} color={tokens.colors.subtle.warningFg} />
                 <Text style={[styles.warnText, { color: tokens.colors.subtle.warningFg }]}>
-                  {c.nearViewing.replace('{time}', timeKey(new Date(near.scheduledAt)))}
+                  {(near.rentRoomId === roomId ? c.nearViewingSameRoom : c.nearViewing).replace(
+                    '{time}',
+                    timeKey(new Date(near.scheduledAt)),
+                  )}
                 </Text>
               </View>
             ) : null}

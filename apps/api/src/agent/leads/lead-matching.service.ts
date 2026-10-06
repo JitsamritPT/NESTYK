@@ -8,6 +8,7 @@ import { LeadMatchResultEntity } from '../../entities/lead-match-result.entity';
 import { AgentListingsService, type ListingCard } from '../listings/agent-listings.service';
 import {
   applyMatchSettings,
+  assertScoreRange,
   effectiveMatchSettings,
   leadMatchReady,
   matchInputHash,
@@ -108,6 +109,7 @@ export class LeadMatchingService {
     const row = await this.requireLead(agentId, leadId);
     const patch = validateMatchSettings(input);
     const saved = { ...effectiveMatchSettings(row.match_settings), ...patch };
+    assertScoreRange(saved);
     await this.leads.update({ id: leadId, created_by_user_id: agentId }, { match_settings: saved });
     row.match_settings = saved;
     return settingsResponse(row);
@@ -169,6 +171,7 @@ export class LeadMatchingService {
         take: KEPT_RUNS_PER_LEAD,
       });
       await runRepo.delete({ lead_id: leadId, id: Not(In(keep.map((r) => r.id))) });
+      await em.getRepository(LeadEntity).update({ id: leadId }, { updated_at: new Date() });
       return saved;
     });
 

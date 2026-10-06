@@ -24,6 +24,7 @@ export async function listAgentLeads(q: string, page: number, filters: LeadFilte
   if (filters.locations?.length) params.set('locations', JSON.stringify(filters.locations));
   if (filters.includeUnspecified) params.set('includeUnspecified', 'true');
   if (filters.sort) params.set('sort', filters.sort);
+  if (filters.status) params.set('status', filters.status);
   return apiGet(`/agent/leads?${params}`);
 }
 

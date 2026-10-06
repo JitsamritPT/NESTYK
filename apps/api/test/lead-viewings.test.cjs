@@ -43,11 +43,13 @@ function fakeService(){
   findOneBy:async where=>rows.find(x=>matches(x,where))??null,
   update:async(where,patch)=>{for(const r of rows)if(matches(r,where))Object.assign(r,patch);},
  };
+ const leadWrites={update:async(where,patch)=>{for(const l of leads)if(matches(l,where))Object.assign(l,patch);}};
  const em={
   findOne:async(entity,{where})=>leads.find(l=>matches(l,where))??null,
   findOneBy:async(entity,where)=>(entity.name==='RentRoomEntity'?rooms:rows).find(x=>matches(x,where))??null,
-  getRepository:()=>viewingRepo,
+  getRepository:entity=>(entity.name==='LeadEntity'?leadWrites:viewingRepo),
  };
+ viewingRepo.manager={transaction:async fn=>fn(em)};
  const leadRepo={findOne:async({where})=>leads.find(l=>matches(l,where))??null,manager:{transaction:async fn=>fn(em)}};
  return {service:new V.LeadViewingsService(leadRepo,viewingRepo),rows,leads};
 }
@@ -68,7 +70,11 @@ test('viewings HTTP API books, lists by lead and by range, and moves or closes a
  assert.equal((await call('leads/5/viewings',{method:'POST',body:{rentRoomId:11,scheduledAt:at(-hour)}})).status,400);
  const closed=await call('leads/6/viewings',{method:'POST',body:{rentRoomId:11,scheduledAt:when}});assert.equal(closed.status,409);assert.equal((await closed.json()).code,'LEAD_CLOSED');
 
- const created=await call('leads/5/viewings',{method:'POST',body:{rentRoomId:11,scheduledAt:when,note:'Lobby'}});assert.equal(created.status,201);
+ const may=f.leads[0];
+ const touched=async(fn)=>{may.updated_at=null;await fn();assert.ok(may.updated_at instanceof Date,'lead updated_at moves');};
+ let created;
+ await touched(async()=>{created=await call('leads/5/viewings',{method:'POST',body:{rentRoomId:11,scheduledAt:when,note:'Lobby'}});});
+ assert.equal(created.status,201);
  const v=await created.json();
  assert.deepEqual({...v,createdAt:undefined},{id:1,leadId:5,leadName:'May',rentRoomId:11,roomTitle:'The Line',roomNumber:'1208',scheduledAt:when,status:'scheduled',note:'Lobby',createdAt:undefined});
  const dup=await call('leads/5/viewings',{method:'POST',body:{rentRoomId:11,scheduledAt:at(3*hour)}});assert.equal(dup.status,409);assert.equal((await dup.json()).code,'VIEWING_EXISTS');
@@ -85,13 +91,17 @@ test('viewings HTTP API books, lists by lead and by range, and moves or closes a
  assert.deepEqual(await (await call(`viewings?from=${from}&to=${to}`,{user:9})).json(),[]);
 
  const later=at(4*hour);
- const moved=await (await call('viewings/1',{method:'PATCH',body:{scheduledAt:later}})).json();assert.equal(moved.scheduledAt,later);
+ let moved;
+ await touched(async()=>{moved=await (await call('viewings/1',{method:'PATCH',body:{scheduledAt:later}})).json();});
+ assert.equal(moved.scheduledAt,later);
  assert.equal((await call('viewings/1',{method:'PATCH',user:9,body:{status:'done'}})).status,404);
  assert.equal((await call('viewings/1',{method:'PATCH',body:{}})).status,400);
- const cancelled=await (await call('viewings/2',{method:'PATCH',body:{status:'cancelled'}})).json();assert.equal(cancelled.status,'cancelled');
+ let cancelled;
+ await touched(async()=>{cancelled=await (await call('viewings/2',{method:'PATCH',body:{status:'cancelled'}})).json();});
+ assert.equal(cancelled.status,'cancelled');
  assert.deepEqual((await (await call(`viewings?from=${from}&to=${to}`)).json()).map(x=>x.id),[1]);
  const reopen=await call('viewings/2',{method:'PATCH',body:{status:'scheduled'}});assert.equal(reopen.status,409);assert.equal((await reopen.json()).code,'VIEWING_CLOSED');
- assert.equal((await call('viewings/2',{method:'PATCH',body:{note:'Changed mind'}})).status,200);
+ await touched(async()=>{assert.equal((await call('viewings/2',{method:'PATCH',body:{note:'Changed mind'}})).status,200);});
 
  const again=await call('leads/5/viewings',{method:'POST',body:{rentRoomId:12,scheduledAt:at(hour)}});assert.equal(again.status,201);
 });

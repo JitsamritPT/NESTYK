@@ -1,13 +1,14 @@
 import { LeadLocationPicker } from './LeadLocationPicker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, ScrollView } from 'react-native';
-import type { AgentLead, AgentLeadsSort } from '@nestyk/types';
+import type { AgentLead, AgentLeadsPage, AgentLeadsSort, LeadDisplayStatus } from '@nestyk/types';
 import { useLocale } from '@nestyk/i18n';
 import {
   MobileBottomSheet,
   MobileBrandLoader,
   MobileButton,
   MobileCompactListRow,
+  MobileFilterChip,
   MobileIcon,
   MobileListSearchRow,
   MobileListToolbar,
@@ -19,7 +20,8 @@ import {
 } from '@nestyk/ui/native';
 import { listAgentLeads } from '../lib/agent-leads-api';
 import { leadMatchReady } from '../lib/lead-match-preview';
-import { LeadStatusBadge, leadAvatarInitials, leadStatusTone } from './AgentLeadDetailBody';
+import { LeadStatusBadge, leadAvatarInitials, leadDisplayStatus, leadStatusTone } from './AgentLeadDetailBody';
+import { ViewingDateTile } from './ViewingDateTile';
 
 type LocationDraft = {
   province: string;
@@ -36,10 +38,14 @@ const EMPTY_DRAFT: LocationDraft = {
 type ListMemory = LocationDraft & {
   query: string;
   sort: AgentLeadsSort;
+  statusFilter: LeadDisplayStatus | null;
   page: number;
   items: AgentLead[];
   total: number;
+  statusCounts: AgentLeadsPage['statusCounts'] | null;
 };
+
+const STATUS_CHIPS: Array<LeadDisplayStatus | null> = [null, 'new', 'inprogress', 'viewing', 'booked', 'lost'];
 
 /** The shell remounts tab bodies, so list state survives opening a lead and coming back. */
 let listMemory: ListMemory | null = null;
@@ -73,7 +79,9 @@ export function AgentLeadsScreen({
   const [filterOpen, setFilterOpen] = useState(false);
   const [draft, setDraft] = useState<LocationDraft>(EMPTY_DRAFT);
   const [sortOpen, setSortOpen] = useState(false);
-  const [sort, setSort] = useState<AgentLeadsSort>(memory?.sort ?? 'created_desc');
+  const [sort, setSort] = useState<AgentLeadsSort>(memory?.sort ?? 'updated_desc');
+  const [statusFilter, setStatusFilter] = useState<LeadDisplayStatus | null>(memory?.statusFilter ?? null);
+  const [statusCounts, setStatusCounts] = useState<AgentLeadsPage['statusCounts'] | null>(memory?.statusCounts ?? null);
   const [page, setPage] = useState(memory?.page ?? 1);
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(!memory);
@@ -83,8 +91,8 @@ export function AgentLeadsScreen({
   gateOpenRef.current = gateOpen;
 
   useEffect(() => {
-    listMemory = { query, sort, page, province, locations, includeUnspecified, items, total };
-  }, [query, sort, page, province, locations, includeUnspecified, items, total]);
+    listMemory = { query, sort, statusFilter, page, province, locations, includeUnspecified, items, total, statusCounts };
+  }, [query, sort, statusFilter, page, province, locations, includeUnspecified, items, total, statusCounts]);
 
   const filterBadge = useMemo(() => {
     let n = 0;
@@ -164,11 +172,12 @@ export function AgentLeadsScreen({
     if (!gateOpenRef.current) setLoading(true);
     setError(null);
     const timer = setTimeout(() => {
-      listAgentLeads(query.trim(), page, { province, locations, includeUnspecified, sort })
+      listAgentLeads(query.trim(), page, { province, locations, includeUnspecified, sort, status: statusFilter ?? undefined })
         .then((result) => {
           if (cancelled) return;
           setItems(result.items);
           setTotal(result.total);
+          setStatusCounts(result.statusCounts ?? null);
           if (page > 1 && !result.items.length) setPage(Math.max(1, Math.ceil(result.total / 20)));
         })
         .catch((err) => {
@@ -184,19 +193,19 @@ export function AgentLeadsScreen({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, page, refresh, province, locations, includeUnspecified, sort, reloadToken, onReloadSettled]);
+  }, [query, page, refresh, province, locations, includeUnspecified, sort, statusFilter, reloadToken, onReloadSettled]);
 
   const sortOptions: Array<{ value: AgentLeadsSort; label: string }> = [
+    { value: 'updated_desc', label: c.sortUpdatedDesc },
     { value: 'created_desc', label: c.sortCreatedDesc },
     { value: 'created_asc', label: c.sortCreatedAsc },
-    { value: 'updated_desc', label: c.sortUpdatedDesc },
     { value: 'name_asc', label: c.sortNameAsc },
     { value: 'budget_asc', label: c.sortBudgetAsc },
     { value: 'budget_desc', label: c.sortBudgetDesc },
     { value: 'status_asc', label: c.sortStatusAsc },
     { value: 'status_desc', label: c.sortStatusDesc },
   ];
-  const sortLabel = sortOptions.find((opt) => opt.value === sort)?.label ?? c.sortCreatedDesc;
+  const sortLabel = sortOptions.find((opt) => opt.value === sort)?.label ?? c.sortUpdatedDesc;
 
   const budget = (lead: AgentLead) => {
     if (lead.budgetMin == null && lead.budgetMax == null) return null;
@@ -259,6 +268,37 @@ export function AgentLeadsScreen({
             filterAccessibilityLabel={c.searchFilters}
             clearAccessibilityLabel={c.clearFilters}
           />
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.statusRow}
+            accessibilityLabel={c.statusFilter}
+          >
+            {STATUS_CHIPS.map((value) => {
+              const selected = statusFilter === value;
+              const label = value ? c.statuses[value] : c.statusAll;
+              const count = statusCounts
+                ? value
+                  ? statusCounts[value]
+                  : Object.values(statusCounts).reduce((sum, n) => sum + n, 0)
+                : null;
+              return (
+                <MobileFilterChip
+                  key={value ?? 'all'}
+                  label={label}
+                  count={count}
+                  selected={selected}
+                  tone={value ? leadStatusTone(value) : 'slate'}
+                  showDot={!!value}
+                  onPress={() => {
+                    setStatusFilter(selected ? null : value);
+                    setPage(1);
+                  }}
+                />
+              );
+            })}
+          </ScrollView>
 
           {activeChips.length > 0 ? (
             <View style={styles.activeChipsRow}>
@@ -325,10 +365,24 @@ export function AgentLeadsScreen({
           ) : (
             <View style={styles.list}>
               {items.map((lead) => {
-                const tone = STATUS_PILL_TONES[leadStatusTone(lead.status)];
+                const status = leadDisplayStatus(lead);
+                const tone = STATUS_PILL_TONES[leadStatusTone(status)];
                 const match = lead.lastMatch ?? null;
                 const needsInfo = !leadMatchReady(lead);
-                const ringLabel = match ? c.matchLabel : needsInfo ? c.matchNeedsInfo : c.matchNotRun;
+                const noRooms = match?.resultCount === 0;
+                const ringLabel = match
+                  ? noRooms
+                    ? c.matchNone
+                    : c.matchLabel
+                  : needsInfo
+                    ? c.matchNeedsInfo
+                    : c.matchNotRun;
+                const emptyRing = match
+                  ? noRooms
+                    ? { icon: 'close' as const, iconColor: tokens.colors.danger, trackColor: STATUS_PILL_TONES.red.bg }
+                    : {}
+                  : { icon: 'sparkle' as const, iconColor: theme.textSecondary, dashed: true };
+                const viewingAt = status === 'viewing' ? lead.nextViewingAt : null;
                 return (
                   <MobileCompactListRow
                     key={lead.id}
@@ -339,8 +393,12 @@ export function AgentLeadsScreen({
                     meta={budget(lead)}
                     footer={
                       <>
-                        <LeadStatusBadge status={lead.status} />
-                        {match ? (
+                        <LeadStatusBadge status={status} />
+                        {viewingAt && lead.nextViewingRoom ? (
+                          <Text style={[styles.matchRooms, { color: theme.textHeading }]} numberOfLines={1}>
+                            {lead.nextViewingRoom}
+                          </Text>
+                        ) : match && !noRooms ? (
                           <Text style={[styles.matchRooms, { color: theme.textSecondary }]} numberOfLines={1}>
                             {c.matchRooms.replace('{count}', String(match.resultCount))}
                           </Text>
@@ -348,13 +406,29 @@ export function AgentLeadsScreen({
                       </>
                     }
                     aside={
-                      <MobileScoreRing
-                        value={match?.topScore ?? null}
-                        label={ringLabel}
-                        accessibilityLabel={
-                          match ? c.matchScoreA11y.replace('{score}', String(match.topScore ?? 0)) : ringLabel
-                        }
-                      />
+                      viewingAt ? (
+                        <ViewingDateTile at={viewingAt} />
+                      ) : !match && needsInfo ? (
+                        <View accessible accessibilityLabel={ringLabel} style={styles.matchState}>
+                          <View style={[styles.matchStateIcon, { backgroundColor: STATUS_PILL_TONES.yellow.bg }]}>
+                            <MobileIcon name="warning" size={20} color={tokens.colors.warning} />
+                          </View>
+                          <Text style={[styles.matchStateLabel, { color: theme.textSecondary }]} numberOfLines={1}>
+                            {ringLabel}
+                          </Text>
+                        </View>
+                      ) : (
+                        <MobileScoreRing
+                          value={match?.topScore ?? null}
+                          label={ringLabel}
+                          {...emptyRing}
+                          accessibilityLabel={
+                            match && !noRooms
+                              ? c.matchScoreA11y.replace('{score}', String(match.topScore ?? 0))
+                              : ringLabel
+                          }
+                        />
+                      )
                     }
                     accessibilityLabel={`${c.details}: ${lead.name}`}
                     onPress={() => onOpenLead(lead)}
@@ -521,6 +595,10 @@ export function AgentLeadsScreen({
 
 const styles = StyleSheet.create({
   list: { gap: 10 },
+  statusRow: { gap: 8, paddingRight: 4 },
+  matchState: { alignItems: 'center', gap: 2 },
+  matchStateIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  matchStateLabel: { fontFamily: tokens.typography.native.body, fontSize: 10, lineHeight: 15, maxWidth: 64 },
   matchRooms: {
     fontFamily: tokens.typography.native.body,
     fontSize: 12,

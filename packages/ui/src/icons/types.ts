@@ -101,7 +101,9 @@ export type AppIconName =
   | 'toilet'
   | 'thermometer'
   | 'wind'
-  | 'elevator';
+  | 'elevator'
+  | 'wallet'
+  | 'files';
 
 export type AppIconTone =
   | 'active'

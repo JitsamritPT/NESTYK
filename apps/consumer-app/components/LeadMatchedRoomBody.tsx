@@ -43,6 +43,7 @@ import {
 import type { LeadRoomMatch } from '../lib/lead-match-preview';
 import {
   COMPARE_KEYS,
+  criterionTone,
   roomLayoutValue,
   summarizeComparison,
   type CompareKey,
@@ -55,16 +56,6 @@ import { useMatchCopy } from './lead-match-copy';
 /** Lets the closing sheet's modal unmount before the next one opens (iOS can't stack them mid-animation). */
 const SHEET_HANDOFF_MS = 300;
 
-const STATUS_STYLE: Record<CompareStatus, { tone: MobileStatusPillToneKey; icon: AppIconName }> = {
-  pass: { tone: 'green', icon: 'check' },
-  near: { tone: 'yellow', icon: 'warning' },
-  mismatch: { tone: 'yellow', icon: 'warning' },
-  later: { tone: 'yellow', icon: 'warning' },
-  unspecified: { tone: 'slate', icon: 'info' },
-  unknown: { tone: 'slate', icon: 'info' },
-  notEvaluable: { tone: 'slate', icon: 'info' },
-};
-
 const ISSUES: CompareStatus[] = ['near', 'mismatch', 'later'];
 /** Rows that get a status pill; full passes and blanks the lead left unset speak through the % alone. */
 const PILLED: CompareStatus[] = [...ISSUES, 'unknown', 'notEvaluable'];
@@ -73,6 +64,7 @@ const PILLED: CompareStatus[] = [...ISSUES, 'unknown', 'notEvaluable'];
 const DARK_TONES: Partial<Record<MobileStatusPillToneKey, MobileStatusPillTone>> = {
   green: { bg: 'rgba(34,197,94,0.16)', fg: '#4ADE80' },
   yellow: { bg: 'rgba(245,158,11,0.18)', fg: '#FBBF24' },
+  red: { bg: 'rgba(220,38,38,0.18)', fg: '#F87171' },
   slate: { bg: 'rgba(148,163,184,0.16)', fg: '#CBD5E1' },
 };
 
@@ -213,7 +205,10 @@ export function LeadMatchedRoomBody({
     },
   ];
   const green = toneFor('green', isDark);
-  const yellow = toneFor('yellow', isDark);
+  const issueTone = toneFor(
+    summary.issues.some((key) => criterionTone(comparison[key].score) === 'red') ? 'red' : 'yellow',
+    isDark,
+  );
 
   const facts = room ? roomFacts(room, match, { t, m, months }) : [];
 
@@ -313,8 +308,8 @@ export function LeadMatchedRoomBody({
           </Text>
           {summary.issues.length ? (
             <View style={styles.inline}>
-              <MobileIcon name="warning" size={14} color={yellow.fg} />
-              <Text style={[styles.meta, styles.bold, { color: yellow.fg }]}>
+              <MobileIcon name="warning" size={14} color={issueTone.fg} />
+              <Text style={[styles.meta, styles.bold, { color: issueTone.fg }]}>
                 {m.issueCount.replace('{count}', String(summary.issues.length))}
               </Text>
             </View>
@@ -340,7 +335,9 @@ export function LeadMatchedRoomBody({
             const issue = ISSUES.includes(status);
             const pill = PILLED.includes(status) ? statusLabel[status] : null;
             const scoreText = rowScore == null ? '—' : `${Math.round(rowScore)}%`;
-            const scoreColor = rowScore == null ? tokens.colors.placeholder : rowScore >= 100 ? green.fg : yellow.fg;
+            const toneKey = criterionTone(rowScore);
+            const tone = toneFor(toneKey, isDark);
+            const scoreColor = rowScore == null ? tokens.colors.placeholder : tone.fg;
             const want = row.want ?? (status === 'unspecified' ? m.unspecified : null);
             const a11y =
               rowScore == null
@@ -363,7 +360,7 @@ export function LeadMatchedRoomBody({
                 style={[
                   styles.compareRow,
                   index > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border } : null,
-                  issue ? styles.issueRow : null,
+                  issue ? [styles.issueRow, toneKey === 'red' ? styles.issueRowRed : null] : null,
                 ]}
                 accessible
                 accessibilityLabel={[
@@ -377,12 +374,12 @@ export function LeadMatchedRoomBody({
                   .filter(Boolean)
                   .join(', ')}
               >
-                {issue ? <View style={[styles.issueBar, { backgroundColor: yellow.fg }]} /> : null}
+                {issue ? <View style={[styles.issueBar, { backgroundColor: tone.fg }]} /> : null}
                 <View style={styles.compareHead}>
                   <MobileIcon name={ROW_ICONS[row.key]} size={18} color={theme.textSecondary} />
                   <Text style={[styles.body, styles.bold, styles.flex1, { color: theme.textHeading }]}>{row.title}</Text>
                   <Text style={[styles.body, styles.bold, styles.scoreText, { color: scoreColor }]}>{scoreText}</Text>
-                  {pill ? <MobileStatusPill label={pill} tone={toneFor(STATUS_STYLE[status].tone, isDark)} /> : null}
+                  {pill ? <MobileStatusPill label={pill} tone={tone} /> : null}
                 </View>
                 <View style={styles.compareValues}>
                   <View style={styles.flex1}>
@@ -399,7 +396,7 @@ export function LeadMatchedRoomBody({
                       style={[
                         styles.body,
                         issue ? styles.bold : null,
-                        { color: !row.have ? tokens.colors.placeholder : issue ? yellow.fg : theme.textHeading },
+                        { color: !row.have ? tokens.colors.placeholder : issue ? tone.fg : theme.textHeading },
                       ]}
                       numberOfLines={2}
                     >
@@ -493,8 +490,6 @@ export function LeadMatchedRoomBody({
             { key: 'share', label: m.shareLink, onPress: () => afterMenuClose(() => setShareOpen(true)), disabled: !room },
             { key: 'room', label: m.viewRoom, onPress: () => afterMenuClose(() => onOpenRoom(match.room.id)) },
           ]}
-          cancelLabel={t.common.cancel}
-          onCancel={() => setMenuOpen(false)}
         />
       </MobileBottomSheet>
 
@@ -620,6 +615,7 @@ const styles = StyleSheet.create({
   valueDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch' },
   scoreText: { minWidth: 40, textAlign: 'right' },
   issueRow: { overflow: 'hidden', backgroundColor: 'rgba(245,158,11,0.08)' },
+  issueRowRed: { backgroundColor: 'rgba(220,38,38,0.07)' },
   issueBar: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   note: { paddingLeft: 26 },
   summaryBody: { padding: 16 },

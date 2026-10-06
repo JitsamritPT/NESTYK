@@ -8,9 +8,10 @@ import type { LeadMatchSettings } from '@nestyk/types';
  */
 export const SCORING_VERSION = 1;
 
-export const MATCH_MIN_SCORE_OPTIONS = [50, 60, 70, 80];
+/** Same as `LEAD_MATCH_MIN_SCORE` in @nestyk/types. */
+export const MATCH_MIN_SCORE_RANGE = { min: 0, max: 100, step: 5, gap: 5 };
 export const MATCH_MAX_RESULTS_OPTIONS = [10, 20, 50, 100];
-export const MATCH_DEFAULT_SETTINGS: LeadMatchSettings = { minScore: 50, maxResults: 10 };
+export const MATCH_DEFAULT_SETTINGS: LeadMatchSettings = { minScore: 50, maxScore: 100, maxResults: 10 };
 
 /** Rooms up to this multiple of the lead's radius still qualify, with a falling distance score. */
 export const RADIUS_MULTIPLIER = 2;
@@ -70,13 +71,30 @@ export function leadMatchReady(lead: MatchLead): boolean {
   return !!lead.budgetMax && lead.budgetMax > 0 && lead.pins.length > 0 && lead.radiusKm != null;
 }
 
+function isScore(value: unknown): value is number {
+  const { min, max, step } = MATCH_MIN_SCORE_RANGE;
+  return Number.isInteger(value) && (value as number) >= min && (value as number) <= max && ((value as number) - min) % step === 0;
+}
+
+/** The merged settings must leave a score range of at least `gap`. */
+export function assertScoreRange(settings: LeadMatchSettings): void {
+  if (settings.maxScore - settings.minScore < MATCH_MIN_SCORE_RANGE.gap) {
+    throw new BadRequestException(`maxScore must be at least ${MATCH_MIN_SCORE_RANGE.gap} above minScore`);
+  }
+}
+
 export function validateMatchSettings(input: unknown): Partial<LeadMatchSettings> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Match settings are required');
   const body = input as Record<string, unknown>;
   const result: Partial<LeadMatchSettings> = {};
-  if (body.minScore != null) {
-    if (!MATCH_MIN_SCORE_OPTIONS.includes(body.minScore as number)) throw new BadRequestException(`minScore must be one of ${MATCH_MIN_SCORE_OPTIONS.join(', ')}`);
-    result.minScore = body.minScore as number;
+  for (const key of ['minScore', 'maxScore'] as const) {
+    if (body[key] == null) continue;
+    const score = body[key];
+    if (!isScore(score)) {
+      const { min, max, step } = MATCH_MIN_SCORE_RANGE;
+      throw new BadRequestException(`${key} must be ${min}–${max} in steps of ${step}`);
+    }
+    result[key] = score;
   }
   if (body.maxResults != null) {
     if (!MATCH_MAX_RESULTS_OPTIONS.includes(body.maxResults as number)) throw new BadRequestException(`maxResults must be one of ${MATCH_MAX_RESULTS_OPTIONS.join(', ')}`);
@@ -88,8 +106,11 @@ export function validateMatchSettings(input: unknown): Partial<LeadMatchSettings
 /** Saved values over defaults; anything stored that is no longer an option falls back to the default. */
 export function effectiveMatchSettings(saved: unknown): LeadMatchSettings {
   const raw = saved && typeof saved === 'object' && !Array.isArray(saved) ? (saved as Record<string, unknown>) : {};
+  const { max, gap } = MATCH_MIN_SCORE_RANGE;
+  const minScore = isScore(raw.minScore) && raw.minScore <= max - gap ? raw.minScore : MATCH_DEFAULT_SETTINGS.minScore;
   return {
-    minScore: MATCH_MIN_SCORE_OPTIONS.includes(raw.minScore as number) ? (raw.minScore as number) : MATCH_DEFAULT_SETTINGS.minScore,
+    minScore,
+    maxScore: isScore(raw.maxScore) && raw.maxScore - minScore >= gap ? raw.maxScore : MATCH_DEFAULT_SETTINGS.maxScore,
     maxResults: MATCH_MAX_RESULTS_OPTIONS.includes(raw.maxResults as number) ? (raw.maxResults as number) : MATCH_DEFAULT_SETTINGS.maxResults,
   };
 }
@@ -106,6 +127,8 @@ export function matchInputHash(lead: MatchLead, settings: LeadMatchSettings): st
     moveIn: lead.moveInPlan?.trim() || null,
     minScore: settings.minScore,
     maxResults: settings.maxResults,
+    // Only when set, so runs saved before `maxScore` existed keep their fingerprint.
+    ...(settings.maxScore !== MATCH_MIN_SCORE_RANGE.max ? { maxScore: settings.maxScore } : {}),
   };
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
@@ -273,5 +296,7 @@ export function matchLeadRooms(lead: MatchLead, rooms: MatchRoom[]): RoomMatch[]
 }
 
 export function applyMatchSettings(matches: RoomMatch[], settings: LeadMatchSettings): RoomMatch[] {
-  return matches.filter((m) => m.score >= settings.minScore).slice(0, settings.maxResults);
+  return matches
+    .filter((m) => m.score >= settings.minScore && m.score <= settings.maxScore)
+    .slice(0, settings.maxResults);
 }

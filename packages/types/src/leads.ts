@@ -74,16 +74,27 @@ export type AgentLead = Required<Omit<CreateLeadInput, 'budgetMin' | 'budgetMax'
   status: LeadStatus; lostReason: string | null; createdAt: string;
   /** Latest manual room-matching run; only on list responses, null when never matched. */
   lastMatch?: LeadMatchSummary | null;
+  /** Earliest upcoming scheduled viewing (ISO); drives the derived "viewing booked" status. */
+  nextViewingAt?: string | null;
+  /** Room of that viewing, "title · room number". */
+  nextViewingRoom?: string | null;
+  /** Set once the lead is booked: the tenant created from it. */
+  tenantId?: number | null;
+  /** Set once the lead is booked: the room it took. */
+  rentRoomId?: number | null;
 };
 
 /** Per-lead room-matching preferences (docs/new-project/agent/leads/match-settings.md). */
 export type LeadMatchSettings = {
   /** Rooms scoring below this (0–100) are left out. */
   minScore: number;
+  /** Rooms scoring above this are left out; 100 keeps every room from `minScore` up. */
+  maxScore: number;
   /** Most rooms kept per run. */
   maxResults: number;
 };
-export const LEAD_MATCH_MIN_SCORE_OPTIONS = [50, 60, 70, 80] as const;
+/** Allowed `minScore` / `maxScore`: whole numbers from `min` to `max` in `step`s, at least `gap` apart. */
+export const LEAD_MATCH_MIN_SCORE = { min: 0, max: 100, step: 5, gap: 5 } as const;
 export const LEAD_MATCH_MAX_RESULTS_OPTIONS = [10, 20, 50, 100] as const;
 
 export type LeadMatchSettingsResponse = {
@@ -106,7 +117,17 @@ export type LeadMatchRun = LeadMatchSummary & {
   /** Rooms that passed budget + distance before the score threshold and result cap. */
   candidateCount: number;
 };
-export type AgentLeadsPage = { items: AgentLead[]; total: number; page: number; limit: number };
+/** Status as shown on a lead row: an open lead with an upcoming viewing reads as `viewing`. */
+export type LeadDisplayStatus = LeadStatus | 'viewing';
+
+export type AgentLeadsPage = {
+  items: AgentLead[];
+  total: number;
+  page: number;
+  limit: number;
+  /** Leads per display status under the same search and area filters, ignoring the status filter. */
+  statusCounts: Record<LeadDisplayStatus, number>;
+};
 
 /** Room viewing booked for a lead (docs/new-project/agent/leads/viewings.md). */
 export type LeadViewingStatus = 'scheduled' | 'done' | 'cancelled';
@@ -132,4 +153,5 @@ export type LeadFilters = {
   locations?: string[];
   includeUnspecified?: boolean;
   sort?: AgentLeadsSort;
+  status?: LeadDisplayStatus;
 };

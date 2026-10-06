@@ -3217,8 +3217,6 @@ export const MobileCreateListingWizardBody: React.FC<
               <MobileBottomSheet visible={photoMenuUri != null} onClose={() => setPhotoMenuUri(null)}>
                 <MobileActionSheetBody
                   title={cr.steps.photos}
-                  cancelLabel={t.common.cancel}
-                  onCancel={() => setPhotoMenuUri(null)}
                   actions={[
                     ...(photoMenuUri && photos[0]?.uri !== photoMenuUri
                       ? [

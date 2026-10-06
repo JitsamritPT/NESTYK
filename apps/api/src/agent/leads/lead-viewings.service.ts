@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, MoreThan, Not, Repository } from 'typeorm';
+import { Between, EntityManager, MoreThan, Not, Repository } from 'typeorm';
 import type { LeadViewing } from '@nestyk/types';
 import { LeadEntity } from '../../entities/lead.entity';
 import { LeadViewingEntity, type LeadViewingStatus } from '../../entities/lead-viewing.entity';
@@ -15,6 +15,39 @@ const MAX_RANGE_MS = 62 * 24 * 60 * 60 * 1000;
 
 type ViewingInput = { rentRoomId: number; scheduledAt: Date; note: string | null };
 type ViewingPatch = { scheduledAt?: Date; status?: LeadViewingStatus; note?: string | null };
+
+export type NextViewing = { at: string; room: string };
+
+function roomTitle(row: LeadViewingEntity): string {
+  const room = row.rent_room;
+  return room?.property?.name || room?.listing_title || `#${row.rent_room_id}`;
+}
+
+/** Earliest upcoming scheduled viewing per lead, behind the derived "viewing booked" status. */
+export async function loadNextViewings(em: EntityManager, leadIds: number[]): Promise<Map<number, NextViewing>> {
+  const result = new Map<number, NextViewing>();
+  if (!leadIds.length) return result;
+  const rows = await em
+    .getRepository(LeadViewingEntity)
+    .createQueryBuilder('viewing')
+    .leftJoinAndSelect('viewing.rent_room', 'room')
+    .leftJoinAndSelect('room.property', 'property')
+    .distinctOn(['viewing.lead_id'])
+    .where('viewing.lead_id IN (:...ids)', { ids: leadIds })
+    .andWhere("viewing.status = 'scheduled'")
+    .andWhere('viewing.scheduled_at > now()')
+    .orderBy('viewing.lead_id')
+    .addOrderBy('viewing.scheduled_at', 'ASC')
+    .getMany();
+  for (const row of rows) {
+    const number = row.rent_room?.room_id;
+    result.set(Number(row.lead_id), {
+      at: new Date(row.scheduled_at).toISOString(),
+      room: number ? `${roomTitle(row)} · ${number}` : roomTitle(row),
+    });
+  }
+  return result;
+}
 
 function asObject(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new BadRequestException('Body must be an object');
@@ -55,14 +88,13 @@ export function validateViewingPatch(input: unknown, now = Date.now()): ViewingP
 }
 
 function toViewing(row: LeadViewingEntity): LeadViewing {
-  const room = row.rent_room;
   return {
     id: row.id,
     leadId: row.lead_id,
     leadName: row.lead?.name ?? '',
     rentRoomId: row.rent_room_id,
-    roomTitle: room?.property?.name || room?.listing_title || `#${row.rent_room_id}`,
-    roomNumber: room?.room_id ?? null,
+    roomTitle: roomTitle(row),
+    roomNumber: row.rent_room?.room_id ?? null,
     scheduledAt: new Date(row.scheduled_at).toISOString(),
     status: row.status,
     note: row.note ?? null,
@@ -110,6 +142,7 @@ export class LeadViewingsService {
           note: body.note,
         }),
       );
+      await em.getRepository(LeadEntity).update({ id: leadId }, { updated_at: new Date() });
       return saved.id;
     });
     return this.view(agentId, id);
@@ -145,14 +178,17 @@ export class LeadViewingsService {
     if (row.status !== 'scheduled' && (patch.scheduledAt || (patch.status && patch.status !== row.status))) {
       throw new ConflictException({ code: 'VIEWING_CLOSED', message: 'Only scheduled viewings can be moved or change status' });
     }
-    await this.viewings.update(
-      { id, created_by_user_id: agentId },
-      {
-        ...(patch.scheduledAt ? { scheduled_at: patch.scheduledAt } : {}),
-        ...(patch.status ? { status: patch.status } : {}),
-        ...(patch.note !== undefined ? { note: patch.note } : {}),
-      },
-    );
+    await this.viewings.manager.transaction(async (em) => {
+      await em.getRepository(LeadViewingEntity).update(
+        { id, created_by_user_id: agentId },
+        {
+          ...(patch.scheduledAt ? { scheduled_at: patch.scheduledAt } : {}),
+          ...(patch.status ? { status: patch.status } : {}),
+          ...(patch.note !== undefined ? { note: patch.note } : {}),
+        },
+      );
+      await em.getRepository(LeadEntity).update({ id: row.lead_id }, { updated_at: new Date() });
+    });
     return this.view(agentId, id);
   }
 

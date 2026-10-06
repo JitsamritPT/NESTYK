@@ -271,7 +271,7 @@ export class AgentListingsService {
   }
 
   /**
-   * Available scout rooms of the agent inside any of the lat/lng boxes whose starting rent fits the budget,
+   * Available scout rooms of the agent nobody has booked, inside any of the lat/lng boxes, whose starting rent fits the budget,
    * with just the facts scoring needs. Rooms priced only through the legacy JSON column are kept for the scorer.
    */
   async matchCandidates(
@@ -297,6 +297,8 @@ export class AgentListingsService {
       .where('room.is_scout_room = TRUE')
       .andWhere('room.created_by_user_id = :agentId')
       .andWhere("roomStatus.code = 'available'")
+      // A room one of the agent's leads has booked is taken, whatever its status code still says.
+      .andWhere("NOT EXISTS (SELECT 1 FROM leads booked WHERE booked.rent_room_id = room.id AND booked.status = 'booked')")
       .andWhere(`(${MIN_PRICE_SUBQUERY} IS NULL OR ${MIN_PRICE_SUBQUERY} <= :maxPrice)`)
       .andWhere(`(${boxSql.join(' OR ')})`)
       .setParameters(params)
