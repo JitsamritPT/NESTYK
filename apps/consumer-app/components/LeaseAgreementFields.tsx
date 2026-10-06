@@ -98,10 +98,78 @@ export const LEASE_AGREEMENT_REQUIRED: TextField[] = [
 
 const REQUIRED_MESSAGE = "กรุณากรอกข้อมูลนี้";
 
+/** Must match the `TEXT` limits in apps/api/src/agent/contracts/lease-agreement.ts. */
+export const LEASE_AGREEMENT_MAX_LENGTH: Record<TextField, number> = {
+  documentNo: 40,
+  issueDate: 32,
+  landlordName: 80,
+  landlordFirstName: 80,
+  landlordLastName: 80,
+  landlordNationality: 40,
+  landlordId: 40,
+  landlordAddress: 160,
+  landlordPhone: 40,
+  landlordEmail: 80,
+  tenantName: 80,
+  tenantFirstName: 80,
+  tenantLastName: 80,
+  tenantNationality: 40,
+  tenantId: 40,
+  tenantAddress: 160,
+  tenantPhone: 40,
+  tenantEmail: 80,
+  propertyType: 60,
+  project: 80,
+  houseNo: 40,
+  propertyAddress: 160,
+  roomType: 60,
+  floor: 20,
+  area: 20,
+  termMonths: 12,
+  termFrom: 32,
+  termTo: 32,
+  monthlyRent: 40,
+  monthlyRentWords: 80,
+  rentDueDay: 8,
+  graceDay: 8,
+  latePenalty: 24,
+  latePenaltyWords: 60,
+  bankName: 80,
+  accountName: 80,
+  accountNo: 40,
+  otherPaymentMethod: 160,
+  advanceMonths: 8,
+  advanceAmount: 40,
+  depositMonths: 8,
+  depositAmount: 40,
+  otherInitialPayment: 120,
+  additionalTerms: 800,
+  agentContact: 200,
+  landlordSignName: 60,
+  tenantSignName: 60,
+  witnessSignName: 60,
+};
+
+/** Fields without their own input report length errors on the input they are derived from. */
+const LENGTH_ERROR_FIELD: Partial<Record<TextField, TextField>> = {
+  landlordName: "landlordFirstName",
+  landlordSignName: "landlordFirstName",
+  tenantName: "tenantFirstName",
+  tenantSignName: "tenantFirstName",
+  witnessSignName: "agentContact",
+};
+
 export function leaseAgreementFieldErrors(
   value: LeaseAgreementInput,
 ): Partial<Record<TextField, string>> {
   const errors: Partial<Record<TextField, string>> = {};
+  for (const [key, max] of Object.entries(LEASE_AGREEMENT_MAX_LENGTH) as [TextField, number][]) {
+    if (key === "documentNo" || String(value[key] ?? "").trim().length <= max) continue;
+    const target = LENGTH_ERROR_FIELD[key];
+    errors[target ?? key] = target === "landlordFirstName" || target === "tenantFirstName"
+      ? `ชื่อและนามสกุลรวมกันต้องไม่เกิน ${max} ตัวอักษร`
+      : `ต้องไม่เกิน ${max} ตัวอักษร`;
+  }
   for (const key of LEASE_AGREEMENT_REQUIRED) {
     if (!String(value[key] ?? "").trim()) errors[key] = REQUIRED_MESSAGE;
   }
@@ -314,6 +382,7 @@ export function LeaseAgreementFields({
               }}
               placeholder={field.placeholder}
               editable={!disabled}
+              maxLength={LEASE_AGREEMENT_MAX_LENGTH[field.key]}
               multiline={field.multiline}
               autoCapitalize={key.endsWith("Email") ? "none" : "sentences"}
               keyboardType={
