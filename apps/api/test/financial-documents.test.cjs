@@ -123,6 +123,7 @@ function serviceFixture({ denied = false, failUpdate = false } = {}) {
     contract_no: "RS202600002",
     agreement_type: { form_kind: "reservation" },
     status: "draft",
+    start_date: "2026-09-16",
     tenant: { name: "Tenant", phone: "0812345678", email: "t@example.com" },
     party_snapshot: { ownerName: "Owner", ownerPhone: "029999999" },
     reservation_fee: "20000",
@@ -184,18 +185,12 @@ test("defaults prefill known values; receipt reuses invoice; generation preserve
     () => service.financialDocumentDefaults(7, 11, "receipt"),
     /ใบแจ้งหนี้/,
   );
-  await assert.rejects(
-    () =>
-      service.generateFinancialDocument(7, 11, "invoice", {
-        ...sample,
-        documentNo: "INV-test",
-        paymentMethod: "",
-        receiverName: "",
-      }),
-    /หนังสือจอง/,
-  );
+  const invoice = await service.generateFinancialDocument(7, 11, "invoice", {
+    ...sample, documentNo: "HACKED", items: [{ description: "hack", quantity: 1, unitPrice: 1 }],
+  });
+  assert.equal(row.data.financialDocuments.invoice.documentNo, "INV-RS202600002");
+  assert.equal(row.data.financialDocuments.invoice.items[0].unitPrice, 20000);
   assert.equal(row.data.untouched, true);
-  assert.equal(row.data.financialDocuments, undefined);
   seedContractInvoice(row);
   const receipt = await service.financialDocumentDefaults(7, 11, "receipt");
   assert.equal(receipt.reference, "INV-test");
@@ -245,30 +240,21 @@ test("inaccessible contract uploads nothing and failed persistence cleans upload
   );
   assert.deepEqual(failed.counts(), { uploads: 1, removed: 1 });
 });
-test("finalized reservation letter rejects financial create/edit", async () => {
+test("finalized reservation accepts a booking receipt without changing the signed letter", async () => {
   const { service, row, counts } = serviceFixture();
-  row.document_url =
-    "7/11/generated/reservation_letter/letter-v1/reservation.pdf";
-  row.owner_signed_at = new Date();
-  row.tenant_signed_at = new Date();
-  row.agent_signed_at = new Date();
-  row.owner_signature_url = "7/11/signatures/o.png";
-  row.tenant_signature_url = "7/11/signatures/t.png";
-  row.agent_signature_url = "7/11/signatures/a.png";
+  row.document_url = "7/11/generated/reservation_letter/letter-v1/reservation.pdf";
+  row.status = "active";
   seedContractInvoice(row);
-  await assert.rejects(
-    () =>
-      service.generateFinancialDocument(7, 11, "receipt", {
-        documentNo: "REC-test",
-        issueDate: "2026-09-16",
-        paymentMethod: "transfer",
-        paymentDetails: "bank",
-        receiverName: "Receiver",
-        notes: "",
-      }),
-    /สร้างเอกสารหนังสือจองแล้ว/,
-  );
-  assert.equal(counts().uploads, 0);
+  await service.generateFinancialDocument(7, 11, "receipt", {
+    issueDate: "2026-09-16", paymentMethod: "cash", receiverName: "Receiver",
+  });
+  assert.equal(counts().uploads, 1);
+  assert.equal(row.document_url, "7/11/generated/reservation_letter/letter-v1/reservation.pdf");
+  assert.equal(row.status, "active");
+  const first = row.receipt_url;
+  await service.generateFinancialDocument(7, 11, "receipt", { paymentMethod: "cash", receiverName: "other" });
+  assert.equal(row.receipt_url, first);
+  assert.equal(counts().uploads, 1);
 });
 test("standalone invoice number is generated and ignores the submitted number", async () => {
   let saved = null;

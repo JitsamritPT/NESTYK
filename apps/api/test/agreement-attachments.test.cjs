@@ -29,6 +29,21 @@ test('assertReady blocks signing when required checklist documents are missing',
  rows.push({id:1,subject:'tenant',document_type_code:'passport',removed_at:null});
  await service.assertReady({id:11,template_id:1});
 });
+test('a party can sign once their own documents are attached',async()=>{
+ const service=new AgreementAttachmentsService({
+  manager:{
+   find:async()=>[
+    {group_key:'tenant_identity',subject:'tenant',document_type_code:'passport'},
+    {group_key:'owner_identity',subject:'owner',document_type_code:'national_id'},
+    {group_key:'ownership',subject:'property',document_type_code:'ownership_proof'},
+   ],
+  },
+ }, {});
+ service.rows=async()=>[{id:1,subject:'owner',document_type_code:'national_id',removed_at:null}];
+ await assert.rejects(()=>service.assertReadyForSubject({id:11,template_id:1},'tenant'),e=>e.getStatus()===400);
+ await service.assertReadyForSubject({id:11,template_id:1},'owner');
+ await assert.rejects(()=>service.assertReady({id:11,template_id:1}),e=>e.getStatus()===400);
+});
 test('attachments stay editable until contract is active or reservation letter is finalized',()=>{
  assert.equal(documentsEditable({status:'draft'}),true);
  assert.equal(documentsEditable({status:'awaiting_signatures',owner_signed_at:new Date()}),true);

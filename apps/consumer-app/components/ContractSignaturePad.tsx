@@ -21,10 +21,10 @@ const webStyle = `
 
 export const ContractSignaturePad = forwardRef<
   ContractSignaturePadHandle,
-  { onOK: (image: string) => void; onEmpty: () => void }
->(function ContractSignaturePad({ onOK, onEmpty }, ref) {
+  { onOK: (image: string) => void; onEmpty: () => void; height?: number }
+>(function ContractSignaturePad({ onOK, onEmpty, height = 220 }, ref) {
   return (
-    <View style={styles.box}>
+    <View style={[styles.box, { height }]}>
       <SignatureCanvas
         ref={ref as React.Ref<SignatureViewRef>}
         onOK={onOK}

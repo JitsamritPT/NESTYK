@@ -92,7 +92,11 @@ import {
   generateAgentBrokerAppointment,
   previewAgentLeaseAgreement,
   generateAgentLeaseAgreement,
+  generateFinancialDocument,
 } from "../lib/agent-contracts-api";
+import { ReservationPaymentCard } from "./ReservationPaymentCard";
+import { bookingPaymentBlocksSigning, BOOKING_PAYMENT_BEFORE_SIGNING } from "../lib/contract-signing";
+import { BookingInvoiceListCard, bookingInvoicesForTenant } from "./BookingInvoiceListCard";
 import { ContractDocumentPreview } from "./ContractDocumentPreview";
 import {
   ContractSignaturePad,
@@ -177,6 +181,7 @@ export function ContractsScreen({
   const shownInvoices = tenant
     ? invoices.filter((row) => row.tenantId === tenant.id)
     : invoices;
+  const bookingInvoices = bookingInvoicesForTenant(contracts, tenant?.id);
   const [viewingInvoice, setViewingInvoice] = useState<StandaloneInvoice | null>(
     null,
   );
@@ -359,7 +364,7 @@ export function ContractsScreen({
   const [previewDoc, setPreviewDoc] = useState<{
     name: string;
     url: string;
-    kind: AgentContractDocumentKind | "commission_confirmation";
+    kind: AgentContractDocumentKind | "commission_confirmation" | "payment_slip";
   } | null>(null);
   const [signPadKey, setSignPadKey] = useState(0);
   const padRef = useRef<ContractSignaturePadHandle>(null);
@@ -491,10 +496,26 @@ export function ContractsScreen({
   function openDocumentPreview(
     name: string,
     url: string,
-    kind: AgentContractDocumentKind | "commission_confirmation",
+    kind: AgentContractDocumentKind | "commission_confirmation" | "payment_slip",
   ) {
     setError("");
     setPreviewDoc({ name, url, kind });
+  }
+  async function createBookingInvoice() {
+    if (!selected || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await generateFinancialDocument(selected.id, "invoice", {});
+      setSelected(updated);
+      setContracts((rows) => rows.map((row) => row.id === updated.id ? updated : row));
+      setNotice("สร้างใบแจ้งหนี้ค่าจองแล้ว");
+      onChanged?.();
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy(false);
+    }
   }
   function openPaymentProof(invoice: StandaloneInvoice) {
     setNotice("");
@@ -516,6 +537,7 @@ export function ContractsScreen({
       previewDoc.kind === "reservation_letter" ||
       previewDoc.kind === "broker_appointment" ||
       previewDoc.kind === "lease_agreement" ||
+      previewDoc.kind === "payment_slip" ||
       previewDoc.kind === "commission_confirmation"
     )
       return;
@@ -714,6 +736,10 @@ export function ContractsScreen({
       !attachmentsReady
     )
       return;
+    if (selected && parties.some((party) => bookingPaymentBlocksSigning(selected, party))) {
+      setError(BOOKING_PAYMENT_BEFORE_SIGNING);
+      return;
+    }
     setError("");
     setSignPadKey((key) => key + 1);
     setSignParties(parties);
@@ -1332,7 +1358,7 @@ export function ContractsScreen({
       setCreating(false);
       setSelected(contract);
       setRenewing(null);
-      setNotice(editingDraft ? "บันทึกการแก้ไขแล้ว กรุณาสร้างลิงก์ลงนามใหม่หากเคยแชร์ไว้" : "บันทึกฉบับร่างแล้ว");
+      setNotice(editingDraft ? "บันทึกการแก้ไขแล้ว กรุณาสร้างลิงก์ลงนามใหม่หากเคยแชร์ไว้" : reservation ? "บันทึกฉบับร่างและสร้างใบแจ้งหนี้ค่าจองแล้ว" : "บันทึกฉบับร่างแล้ว");
       setEditingDraft(null);
       onChanged?.();
       setLeadId(null);
@@ -1503,7 +1529,7 @@ export function ContractsScreen({
         </Text>
         <Text style={[s.body, muted]}>
           {editingDraft
-            ? "แก้ไขเงื่อนไขได้โดยคงผู้เช่า ห้อง และเลขสัญญาเดิม เมื่อบันทึกจะล้าง PDF และเอกสารการเงินเดิมเพื่อให้สร้างจากข้อมูลล่าสุด"
+            ? "แก้ไขเงื่อนไขได้โดยคงผู้เช่า ห้อง และเลขสัญญาเดิม เมื่อบันทึกจะสร้างเอกสารการเงินจากข้อมูลล่าสุด"
             : steppedCreation
               ? "กรอกข้อมูลทีละขั้น แล้วตรวจสอบก่อนบันทึกฉบับร่าง"
               : "เลือกผู้เช่าและห้องเพื่อเตรียมฉบับร่างสัญญา"}
@@ -1810,6 +1836,10 @@ export function ContractsScreen({
             ))
           )}
           {(!steppedCreation || creationStep === 3) &&
+            reservation && (
+              <Text style={[s.body, muted]}>เมื่อบันทึก ระบบจะสร้างใบแจ้งหนี้ค่าจองที่ผูกกับหนังสือจองนี้ ผู้เช่าจะเปิดดูและส่งสลิปได้จากหน้าสัญญา</Text>
+            )}
+          {(!steppedCreation || creationStep === 3) &&
             customFields
               .filter(
                 ([key]) =>
@@ -1892,13 +1922,13 @@ export function ContractsScreen({
             )}
           {(!steppedCreation || creationStep === 3) && (
             <Text style={[s.small, muted]}>
-              บันทึกเป็นฉบับร่าง ยังไม่ส่งเอกสารให้คู่สัญญาลงนาม
+              บันทึกเป็นฉบับร่าง คู่สัญญาที่มีบัญชีจะเห็นสัญญานี้ทันที
             </Text>
           )}
         </View>
       </View>
     );
-  if (selected && financialKind && !reservationLocked && !draftCancelled)
+  if (selected && financialKind && !draftCancelled && !["expired", "terminated"].includes(selected.status))
     return <FinancialDocumentForm key={`${selected.id}:${financialKind}`} contractId={selected.id} kind={financialKind} payer={tenantPayer}
       onBack={() => setFinancialKind(null)}
       onStandaloneCreated={(invoice) => {
@@ -1975,7 +2005,7 @@ export function ContractsScreen({
             <Text style={[s.body, muted]}>{selected.notes}</Text>
           )}
         </View>
-        {selected.status === "draft" && !selected.ownerSignedAt && !selected.tenantSignedAt && !selected.agentSignedAt && !documentLocked && (
+        {selected.status === "draft" && !selected.ownerSignedAt && !selected.tenantSignedAt && !selected.agentSignedAt && !documentLocked && !selected.receiptUrl && selected.reservationPayment?.status !== "submitted" && (
           <View style={[s.card, card]}>
             {button("แก้ไขฉบับร่าง", () => { void editDraft(selected); })}
             {button("ยกเลิกฉบับร่าง", () => { setCancellingDraft(true); setCancelReason(""); setError(""); })}
@@ -2221,6 +2251,18 @@ export function ContractsScreen({
             })}
           </View>
         )}
+        {selected.formKind === "reservation" && (
+          <ReservationPaymentCard
+            contract={selected}
+            busy={busy}
+            onOpen={(kind) => {
+              const url = kind === "invoice" ? selected.invoiceUrl : kind === "receipt" ? selected.receiptUrl : selected.reservationPayment?.paymentSlipUrl;
+              if (url) openDocumentPreview(kind === "invoice" ? "ใบแจ้งหนี้ค่าจอง" : kind === "receipt" ? "ใบเสร็จค่าจอง" : "สลิปชำระค่าจอง", url, kind === "payment-slip" ? "payment_slip" : kind);
+            }}
+            onIssueReceipt={() => { setError(""); setFinancialKind("receipt"); }}
+            onCreateInvoice={() => void createBookingInvoice()}
+          />
+        )}
         {(selected.formKind === "reservation" ||
           selected.formKind === "lease") && (
           <AgreementAttachments
@@ -2247,6 +2289,9 @@ export function ContractsScreen({
                     ? `✓ ${new Date(party.signed).toLocaleString("th-TH")}`
                     : docs.unsigned}
                 </Text>
+                {!party.signed && bookingPaymentBlocksSigning(selected, party.key) && (
+                  <Text style={[s.small, muted]}>{BOOKING_PAYMENT_BEFORE_SIGNING}</Text>
+                )}
               </View>
               {party.signed && party.signatureUrl ? (
                 <MobileButton
@@ -2276,7 +2321,7 @@ export function ContractsScreen({
                         !attachmentsReady ||
                         !!partyDeliveredAt(selected, party.key)
                       }
-                      onPress={() => confirmShare(party.key)}
+                      onPress={() => confirmShare(party.key === "owner" ? "owner" : "tenant")}
                     >
                       {partyDeliveredAt(selected, party.key)
                         ? docs.shareSignSent
@@ -2285,7 +2330,7 @@ export function ContractsScreen({
                   )}
                   <MobileButton
                     style={s.signatureButton}
-                    disabled={busy || !attachmentsReady}
+                    disabled={busy || !attachmentsReady || bookingPaymentBlocksSigning(selected, party.key)}
                     onPress={() => openSignSheet([party.key])}
                   >
                     {docs.signFor}
@@ -2442,9 +2487,8 @@ export function ContractsScreen({
               ) : null}
               {previewDoc ? (
                 <View style={[s.previewActions, { padding: 12 }]}>
-                  {(previewDoc.kind === "invoice" ||
-                    previewDoc.kind === "receipt") &&
-                    !reservationLocked && !draftCancelled && (
+                  {previewDoc.kind === "receipt" && !selected.receiptUrl &&
+                    !draftCancelled && (
                       <MobileButton
                         disabled={busy}
                         onPress={() => {
@@ -2823,8 +2867,32 @@ export function ContractsScreen({
         <>
           <Text style={[s.subtitle, title]}>
             ใบแจ้งหนี้
-            {!loadingList ? ` (${shownInvoices.length})` : ""}
+            {!loadingList ? ` (${shownInvoices.length + bookingInvoices.length})` : ""}
           </Text>
+          {!loadingList && bookingInvoices.map((contract) => (
+            <BookingInvoiceListCard
+              key={`booking-invoice-${contract.id}`}
+              contract={contract}
+              busy={busy}
+              onOpen={async () => {
+                setBusy(true);
+                setError("");
+                setNotice("");
+                setFocusDocuments(false);
+                try {
+                  const latest = await getAgentContract(contract.id);
+                  if (!latest.invoiceUrl) throw new Error("ไม่พบใบแจ้งหนี้ค่าจอง กรุณาโหลดรายการอีกครั้ง");
+                  setSelected(latest);
+                  setContracts((current) => current.map((item) => item.id === latest.id ? latest : item));
+                  openDocumentPreview(`ใบแจ้งหนี้ค่าจอง ${latest.reservationPayment?.invoiceDocumentNo ?? latest.contractNo}`, latest.invoiceUrl, "invoice");
+                } catch (e) {
+                  setError(message(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          ))}
           {!loadingList &&
             shownInvoices.map((invoice) => (
               <View key={invoice.id} style={[s.card, card]}>
@@ -2874,7 +2942,7 @@ export function ContractsScreen({
                 ) : null}
               </View>
             ))}
-          {!loadingList && !shownInvoices.length && (
+          {!loadingList && !shownInvoices.length && !bookingInvoices.length && (
             <Text style={[s.body, muted]}>ยังไม่มีใบแจ้งหนี้</Text>
           )}
           <Text style={[s.subtitle, title]}>

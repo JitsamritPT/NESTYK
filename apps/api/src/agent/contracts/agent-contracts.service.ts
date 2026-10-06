@@ -1,5 +1,6 @@
 import { financialKind, validateFinancialDocument, buildReceiptFromInvoice, financialTotals } from "./financial-document";
 import { createFinancialPdf } from "./financial-pdf";
+import { reservationInvoice } from "./reservation-invoice";
 import { validateCommissionConfirmation } from "./commission-confirmation";
 import { createCommissionConfirmationPdf } from "./commission-confirmation-pdf";
 import {
@@ -15,6 +16,7 @@ import { MasterAgreementTypeEntity } from "../../entities/master-agreement-type.
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Optional,
   NotFoundException,
@@ -550,6 +552,8 @@ export class AgentContractsService {
   ): AgentContract {
     const url = (path: string | null | undefined) =>
       (path && signed.get(path)) || null;
+    const financial = c.data?.financialDocuments as Partial<Record<string, FinancialDocumentInput>> | undefined;
+    const payment = c.data?.reservationPayment as { slipPath?: string; submittedAt?: string } | undefined;
     return {
       id: c.id,
       tenantId: c.tenant_id,
@@ -615,6 +619,14 @@ export class AgentContractsService {
       leaseAgreementStatus: this.leaseDocument(c)?.status ?? null,
       invoiceUrl: url(c.invoice_url),
       receiptUrl: url(c.receipt_url),
+      reservationPayment: financial?.invoice ? {
+        invoiceDocumentNo: financial.invoice.documentNo,
+        receiptDocumentNo: financial.receipt?.documentNo ?? null,
+        total: financialTotals(financial.invoice).total,
+        status: c.receipt_url ? "paid" : payment?.slipPath ? "submitted" : "unpaid",
+        paymentSlipUrl: url(payment?.slipPath),
+        submittedAt: payment?.submittedAt ?? null,
+      } : null,
     };
   }
   private documentPaths(c: LeaseContractEntity) {
@@ -627,6 +639,7 @@ export class AgentContractsService {
           : null),
       c.invoice_url,
       c.receipt_url,
+      (c.data?.reservationPayment as { slipPath?: string } | undefined)?.slipPath,
       c.owner_signature_url,
       c.tenant_signature_url,
       c.agent_signature_url,
@@ -1010,8 +1023,8 @@ export class AgentContractsService {
         documentNo: prev?.documentNo || base.documentNo,
         issueDate: prev?.issueDate || today,
         reference: saved.invoice.documentNo,
-        paymentMethod: prev?.paymentMethod || '',
-        paymentDetails: prev?.paymentDetails || '',
+        paymentMethod: prev?.paymentMethod || (c.payment_submitted_at ? 'transfer' : ''),
+        paymentDetails: prev?.paymentDetails || (c.payment_submitted_at ? saved.invoice.paymentDetails || 'ตามสลิปการชำระเงินที่แนบ' : ''),
         receiverName: prev?.receiverName || '',
         notes: prev?.notes || '',
       };
@@ -1019,65 +1032,64 @@ export class AgentContractsService {
     return base;
   }
 
+  private assertReservationFinancialOpen(c: LeaseContractEntity) {
+    if ((c.template?.form_kind ?? c.agreement_type?.form_kind ?? c.agreement_type_code) !== "reservation")
+      throw new BadRequestException("เอกสารค่าจองใช้ได้เฉพาะหนังสือจองห้อง");
+    if (["cancelled", "expired", "terminated"].includes(c.status))
+      throw new BadRequestException("ไม่สามารถรับชำระหรือออกเอกสารให้สัญญาที่ปิดแล้ว");
+  }
+
   async generateFinancialDocument(agentId: number, id: number, kindInput: string, input: unknown) {
     const kind = financialKind(kindInput);
-    if (kind === "invoice")
-      throw new BadRequestException("ใบแจ้งหนี้สร้างแยกจากหนังสือจอง และคนเดียวกันสร้างได้หลายใบ");
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
     if (!c) throw new NotFoundException("ไม่พบสัญญา");
-    this.assertDocumentMutable(c);
-    const saved = (c.data?.financialDocuments ?? {}) as Partial<Record<string, FinancialDocumentInput>>;
-    let data: FinancialDocumentInput;
-    if (kind === "receipt") {
-      if (!saved.invoice || !c.invoice_url)
-        throw new BadRequestException("กรุณาสร้างใบแจ้งหนี้ก่อนสร้างใบเสร็จ");
-      const defaults = await this.financialDocumentDefaults(agentId, id, kind);
-      const body =
-        input && typeof input === "object" && !Array.isArray(input)
-          ? (input as Partial<FinancialDocumentInput>)
-          : {};
-      data = buildReceiptFromInvoice(saved.invoice, body, {
-        documentNo: defaults.documentNo,
-        issueDate: defaults.issueDate,
-      });
-    } else {
-      data = validateFinancialDocument(input, kind);
-    }
+    this.assertReservationFinancialOpen(c);
     if (!this.documents) throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
-    let bytes: Buffer;
-    try { bytes = await createFinancialPdf(kind, data); }
-    catch (error) { throw new BadRequestException(error instanceof Error ? error.message : "สร้าง PDF ไม่สำเร็จ"); }
-    const stored = await this.documents.upload(agentId, id, kind, { buffer: bytes, size: bytes.length });
+    const documents = this.documents;
+    let storedPath: string | null = null;
     try {
       await this.db.transaction(async (manager) => {
         const repo = manager.getRepository(LeaseContractEntity);
-        const current = await repo.findOne({ where: { id, created_by_user_id: agentId }, lock: { mode: 'pessimistic_write' } });
+        const current = await repo.findOne({ where: { id, created_by_user_id: agentId }, lock: { mode: "pessimistic_write" } });
         if (!current) throw new NotFoundException("ไม่พบสัญญา");
-        if (['cancelled', 'expired', 'terminated'].includes(current.status)) throw new BadRequestException("ไม่สามารถสร้างเอกสารให้สัญญาที่ปิดแล้ว");
-        this.assertDocumentMutable(current);
+        this.assertReservationFinancialOpen({ ...current, template: c.template, agreement_type: c.agreement_type });
+        // A repeat request returns the same document. Invoice amounts are server-owned.
         const existing = current.data ?? {};
-        const financialDocuments = {
-          ...((existing.financialDocuments as object) ?? {}),
-          [kind]: data,
-        } as Record<string, FinancialDocumentInput>;
-        const documentFileNames = {
-          ...((existing.documentFileNames as object) ?? {}),
-          [kind]: `${kind}-${data.documentNo.replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`,
-        } as Record<string, string>;
-        await repo.update(
-          { id, created_by_user_id: agentId },
-          {
-            [DOCUMENT_COLUMNS[kind]]: stored.path,
-            data: {
-              ...existing,
-              financialDocuments,
-              documentFileNames,
+        const financial = (existing.financialDocuments ?? {}) as Partial<Record<string, FinancialDocumentInput>>;
+        if (kind === "invoice" && current.invoice_url && financial.invoice) return;
+        if (kind === "invoice" && (current.receipt_url || existing.reservationPayment))
+          throw new BadRequestException("มีข้อมูลการชำระแล้ว ไม่สามารถเปลี่ยนใบแจ้งหนี้ได้");
+        if (kind === "receipt" && current.receipt_url) return;
+        let data: FinancialDocumentInput;
+        if (kind === "invoice") {
+          data = reservationInvoice({ ...c, ...current });
+        } else {
+          if (!financial.invoice || !current.invoice_url)
+            throw new BadRequestException("กรุณาสร้างใบแจ้งหนี้ก่อนสร้างใบเสร็จ");
+          const body = input && typeof input === "object" && !Array.isArray(input)
+            ? input as Partial<FinancialDocumentInput> : {};
+          data = buildReceiptFromInvoice(financial.invoice, {
+            ...body,
+            documentNo: `REC-${current.contract_no || `RS${current.id}`}`,
+          }, { documentNo: `REC-${current.contract_no || `RS${current.id}`}`, issueDate: bangkokDate() });
+        }
+        const bytes = await createFinancialPdf(kind, data);
+        const stored = await documents.upload(agentId, id, kind, { buffer: bytes, size: bytes.length });
+        storedPath = stored.path;
+        await repo.update({ id, created_by_user_id: agentId }, {
+          [DOCUMENT_COLUMNS[kind]]: stored.path,
+          data: {
+            ...existing,
+            financialDocuments: { ...financial, [kind]: data },
+            documentFileNames: {
+              ...((existing.documentFileNames as object) ?? {}),
+              [kind]: `${kind}-${data.documentNo}.pdf`,
             },
           },
-        );
+        });
       });
     } catch (error) {
-      await this.documents.remove(stored.path).catch(() => undefined);
+      if (storedPath) await documents.remove(storedPath).catch(() => undefined);
       throw error;
     }
     return this.view(agentId, id);
@@ -1419,6 +1431,8 @@ export class AgentContractsService {
     this.assertDocumentMutable(c);
     const formKind =
       c.template?.form_kind ?? c.agreement_type?.form_kind ?? "lease";
+    if ((documentKind === "invoice" || documentKind === "receipt") && c.data?.financialDocuments)
+      throw new BadRequestException("เอกสารค่าจองต้องสร้างจากใบแจ้งหนี้ที่ผูกกับหนังสือจอง");
     if (documentKind === "lease_agreement") {
       if (formKind !== "lease")
         throw new BadRequestException("อัปโหลดสัญญาเช่าได้เฉพาะสัญญาเช่า");
@@ -1448,6 +1462,16 @@ export class AgentContractsService {
       );
     return this.view(agentId, c.id);
   }
+  private reservationSigningBlockedReason(c: LeaseContractEntity, parties: AgentContractSignParty[]) {
+    const formKind = c.template?.form_kind ?? c.agreement_type?.form_kind ?? "lease";
+    return formKind === "reservation" && parties.includes("tenant") && !c.receipt_url
+      ? "ผู้เช่าต้องชำระค่าจอง และรอเอเจนต์ตรวจสอบการชำระพร้อมออกใบเสร็จก่อนลงนาม"
+      : null;
+  }
+  private assertReservationPaidForSigning(c: LeaseContractEntity, parties: AgentContractSignParty[]) {
+    const reason = this.reservationSigningBlockedReason(c, parties);
+    if (reason) throw new BadRequestException(reason);
+  }
   async sign(agentId: number, id: number, input: unknown) {
     const { parties, png } = validateSign(input);
     const c = await this.query(agentId).andWhere("c.id = :id", { id }).getOne();
@@ -1465,6 +1489,7 @@ export class AgentContractsService {
       throw new BadRequestException(
         "สัญญาเช่าลงนามได้เฉพาะผู้ให้เช่าและผู้เช่า",
       );
+    this.assertReservationPaidForSigning(c, parties);
     if (this.attachments) await this.attachments.assertReady(c);
     const pending = parties.filter((party) => !c[SIGN_COLUMNS[party].at]);
     if (!pending.length) throw new BadRequestException("ฝ่ายที่เลือกลงนามแล้ว");
@@ -1506,6 +1531,7 @@ export class AgentContractsService {
       const result = await this.db
         .getRepository(LeaseContractEntity)
         .update({ id: c.id, created_by_user_id: agentId, status: c.status,
+          receipt_url: c.receipt_url ?? IsNull(),
           data: Raw(alias => `${alias} = :expectedData`, { expectedData: JSON.stringify(c.data ?? {}) }),
         }, patch);
       if (result.affected !== 1) throw new ConflictException("สัญญาถูกเปลี่ยนแล้ว กรุณาเปิดใหม่ก่อนลงนาม");
@@ -1610,6 +1636,167 @@ export class AgentContractsService {
       throw new ConflictException("สัญญาถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
     return { party, userId, deliveredAt: now.toISOString() };
   }
+  async contractForParty(userId: number, id: number) {
+    const c = await this.inboxQuery().andWhere("c.id = :id", { id }).getOne();
+    const parties = c ? this.partiesFor(userId, c) : [];
+    if (!c || !parties.length) throw new NotFoundException("ไม่พบสัญญา");
+    return { contract: c, parties };
+  }
+  async financialDocumentForParty(userId: number, id: number, kind: string) {
+    const { contract: c } = await this.contractForParty(userId, id);
+    const path = kind === "invoice" ? c.invoice_url
+      : kind === "receipt" ? c.receipt_url
+      : kind === "payment-slip" ? (c.data?.reservationPayment as { slipPath?: string } | undefined)?.slipPath
+      : null;
+    if (!path) throw new NotFoundException("ไม่พบเอกสารการชำระเงิน");
+    if (!this.documents) throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
+    const signed = await this.documents.signPaths([path]);
+    const url = signed.get(path);
+    if (!url) throw new ServiceUnavailableException("เปิดเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง");
+    return { url };
+  }
+
+  async uploadReservationPaymentSlip(userId: number, id: number, file: { buffer: Buffer; size: number; originalname?: string } | undefined) {
+    const { contract: c, parties } = await this.contractForParty(userId, id);
+    if (!parties.includes("tenant")) throw new ForbiddenException("เฉพาะผู้เช่าในหนังสือจองเท่านั้นที่ส่งสลิปได้");
+    this.assertReservationFinancialOpen(c);
+    if (!c.invoice_url) throw new BadRequestException("ยังไม่มีใบแจ้งหนี้ค่าจอง");
+    if (!(c.data?.financialDocuments as { invoice?: FinancialDocumentInput } | undefined)?.invoice)
+      throw new BadRequestException("กรุณาให้เอเจนต์สร้างใบแจ้งหนี้ค่าจองที่ผูกกับหนังสือจองก่อน");
+    if (c.receipt_url) throw new BadRequestException("ออกใบเสร็จแล้ว ไม่สามารถเปลี่ยนสลิปได้");
+    if (!this.documents) throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
+    const documents = this.documents;
+    const stored = await documents.uploadPaymentSlip(c.created_by_user_id, file);
+    let oldPath: string | undefined;
+    try {
+      await this.db.transaction(async (manager) => {
+        const repo = manager.getRepository(LeaseContractEntity);
+        const current = await repo.findOne({ where: { id, created_by_user_id: c.created_by_user_id }, lock: { mode: "pessimistic_write" } });
+        if (!current || !current.tenant_delivered_at || current.tenant_id !== c.tenant_id)
+          throw new NotFoundException("ไม่พบสัญญา");
+        const tenant = await manager.findOneBy(TenantEntity, { id: current.tenant_id, user_id: userId });
+        if (!tenant) throw new NotFoundException("ไม่พบสัญญา");
+        this.assertReservationFinancialOpen({ ...current, template: c.template, agreement_type: c.agreement_type });
+        if (!current.invoice_url) throw new BadRequestException("ยังไม่มีใบแจ้งหนี้ค่าจอง");
+        if (current.receipt_url) throw new ConflictException("ออกใบเสร็จแล้ว ไม่สามารถเปลี่ยนสลิปได้");
+        if (current.invoice_url !== c.invoice_url)
+          throw new ConflictException("ใบแจ้งหนี้เปลี่ยนแล้ว กรุณาเปิดตรวจสอบยอดก่อนส่งสลิปใหม่");
+        oldPath = (current.data?.reservationPayment as { slipPath?: string } | undefined)?.slipPath;
+        const now = new Date();
+        await repo.update({ id }, {
+          payment_submitted_at: now,
+          data: {
+            ...current.data,
+            reservationPayment: {
+              slipPath: stored.path,
+              submittedAt: now.toISOString(),
+              submittedBy: userId,
+              fileName: file?.originalname?.slice(0, 255) || "สลิปชำระค่าจอง",
+            },
+          },
+        });
+      });
+    } catch (error) {
+      await documents.remove(stored.path).catch(() => undefined);
+      throw error;
+    }
+    if (oldPath) await documents.remove(oldPath).catch(() => undefined);
+    const { contract: updated, parties: mine } = await this.contractForParty(userId, id);
+    return { ...this.serialize(updated, await this.signedFor([updated])), myParties: mine };
+  }
+  async documentForParty(userId: number, id: number) {
+    const c = await this.inboxQuery().andWhere("c.id = :id", { id }).getOne();
+    if (!c || !this.partiesFor(userId, c).length)
+      throw new NotFoundException("ไม่พบสัญญา");
+    if (!this.documents)
+      throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสารสัญญา");
+    const existing = this.partyDocumentPath(c);
+    const path = existing ?? (await this.storePartyPreview(c)).path;
+    const signed = await this.documents.signPaths([path]);
+    const url = signed.get(path);
+    if (!url)
+      throw new ServiceUnavailableException("ไม่สามารถเปิดเอกสารได้ กรุณาลองอีกครั้ง");
+    return { url };
+  }
+  private partyDocumentPath(c: LeaseContractEntity) {
+    return (
+      this.reservationDocument(c)?.path ??
+      this.brokerDocument(c)?.path ??
+      this.leaseDocument(c)?.path ??
+      null
+    );
+  }
+  private async storePartyPreview(c: LeaseContractEntity) {
+    const formKind =
+      c.template?.form_kind ?? c.agreement_type?.form_kind ?? "lease";
+    const pdf =
+      formKind === "reservation"
+        ? await createReservationMock(this.reservationPreviewContract(c))
+        : formKind === "broker_appointment"
+          ? await createBrokerAppointmentPdf(this.brokerPreviewInput(c))
+          : await createLeaseAgreementPdf(this.leasePreviewInput(c));
+    return this.documents!.uploadPartyPreview(
+      c.created_by_user_id,
+      c.id,
+      formKind,
+      pdf,
+    );
+  }
+  private reservationPreviewContract(c: LeaseContractEntity): AgentContract {
+    const serialized = this.serialize(c);
+    const snap = (c.party_snapshot ?? {}) as Record<string, unknown>;
+    const existing = (serialized.data?.reservationLetter ?? null) as
+      | Record<string, unknown>
+      | null;
+    if (!existing || typeof existing !== "object") {
+      serialized.data = {
+        ...serialized.data,
+        reservationLetter: {
+          tenantPhone: String(snap.tenantPhone ?? ""),
+          tenantId: String(snap.tenantIdNumber ?? ""),
+          tenantNationality: String(snap.tenantNationality ?? ""),
+          landlordName: String(snap.ownerName ?? ""),
+          landlordPhone: String(snap.ownerPhone ?? ""),
+          landlordId: String(snap.ownerIdNumber ?? ""),
+          agentName: String(snap.agentName ?? ""),
+          agentPhone: String(snap.agentPhone ?? ""),
+          address: String(snap.propertyAddress ?? ""),
+          payee: String(snap.ownerName ?? ""),
+          landlordSignName: String(snap.ownerName ?? ""),
+          agentSignName: String(snap.agentName ?? ""),
+        },
+      };
+    }
+    return serialized;
+  }
+  private leasePreviewInput(c: LeaseContractEntity): LeaseAgreementInput {
+    const saved = (c.data?.leaseAgreement ?? null) as LeaseAgreementInput | null;
+    if (!saved) throw new BadRequestException("ไม่พบข้อมูลฟอร์มสัญญาเช่า");
+    return {
+      ...saved,
+      documentNo: saved.documentNo || c.contract_no || `LS-${c.id}`,
+      landlordSignName: saved.landlordName || saved.landlordSignName || "",
+      tenantSignName: saved.tenantName || saved.tenantSignName || "",
+      witnessSignName: saved.witnessSignName || saved.agentContact || "",
+      landlordSignaturePng: "",
+      tenantSignaturePng: "",
+    };
+  }
+  private brokerPreviewInput(c: LeaseContractEntity): BrokerAppointmentInput {
+    const saved = (c.data?.brokerAppointment ?? null) as
+      | BrokerAppointmentInput
+      | null;
+    if (!saved)
+      throw new BadRequestException("ไม่พบข้อมูลฟอร์มแต่งตั้งนายหน้า");
+    return {
+      ...saved,
+      documentNo: saved.documentNo || c.contract_no || `BA-${c.id}`,
+      landlordSignName: saved.landlordName || saved.landlordSignName || "",
+      brokerSignName: saved.brokerSignName || saved.brokerContact || "",
+      landlordSignaturePng: "",
+      brokerSignaturePng: "",
+    };
+  }
   async listForUser(userId: number) {
     const rows = await this.inboxQuery()
       .andWhere(
@@ -1636,7 +1823,9 @@ export class AgentContractsService {
       throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
     if (c[SIGN_COLUMNS[party].at])
       throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
-    if (this.attachments) await this.attachments.assertReady(c);
+    this.assertReservationPaidForSigning(c, [party]);
+    if (this.attachments)
+      await this.attachments.assertReadyForSubject(c, party);
     const { png } = validateSign({
       parties: [party],
       signaturePng:
@@ -1684,6 +1873,7 @@ export class AgentContractsService {
         {
           id: c.id,
           status: c.status,
+          receipt_url: c.receipt_url ?? IsNull(),
           data: Raw((alias) => `${alias} = :expectedData`, {
             expectedData: JSON.stringify(c.data ?? {}),
           }),
@@ -1695,7 +1885,7 @@ export class AgentContractsService {
     } catch (error) {
       await this.documents.remove(stored.path).catch(() => undefined);
       if ((error as { code?: string }).code === "23514")
-        throw new BadRequestException("กรุณาแนบเอกสารที่จำเป็นให้ครบก่อนลงนาม");
+        throw new BadRequestException("กรุณาแนบเอกสารของคุณให้ครบก่อนลงนาม");
       throw error;
     }
     const latest = await this.inboxQuery().andWhere("c.id = :id", { id }).getOne();
@@ -1780,6 +1970,7 @@ export class AgentContractsService {
       tenant: c.tenant?.name ?? "",
       agreementTypeName: c.agreement_type?.name_th ?? c.agreement_type_code,
       alreadySigned,
+      signingBlockedReason: this.reservationSigningBlockedReason(c, [invite.party]),
       expiresAt: invite.expires_at.toISOString(),
     };
   }
@@ -1790,6 +1981,7 @@ export class AgentContractsService {
       throw new BadRequestException("สัญญานี้ไม่สามารถลงนามได้");
     if (c[SIGN_COLUMNS[invite.party].at])
       throw new BadRequestException("ฝ่ายนี้ลงนามแล้ว");
+    this.assertReservationPaidForSigning(c, [invite.party]);
     if (this.attachments) await this.attachments.assertReady(c);
     const { png } = validateSign({
       parties: [invite.party],
@@ -1845,6 +2037,7 @@ export class AgentContractsService {
         if (!current || CLOSED_STATUSES.includes(current.status as (typeof CLOSED_STATUSES)[number]) ||
             JSON.stringify(current.data) !== JSON.stringify(c.data))
           throw new ConflictException("สัญญาถูกเปลี่ยนแล้ว กรุณาขอลิงก์ลงนามใหม่");
+        this.assertReservationPaidForSigning({ ...current, template: c.template, agreement_type: c.agreement_type }, [invite.party]);
         const locked = await manager.findOne(AgreementSignInviteEntity, {
           where: { id: invite.id },
           lock: { mode: "pessimistic_write" },
@@ -2199,6 +2392,8 @@ export class AgentContractsService {
     if (c.status !== "draft" || c.owner_signed_at || c.tenant_signed_at || c.agent_signed_at ||
         c.owner_signature_url || c.tenant_signature_url || c.agent_signature_url)
       throw new BadRequestException("แก้ไขหรือยกเลิกได้เฉพาะฉบับร่างที่ยังไม่มีผู้ลงนาม");
+    if ((c.data?.reservationPayment as { slipPath?: string } | undefined)?.slipPath || c.receipt_url)
+      throw new BadRequestException("มีหลักฐานชำระเงินหรือใบเสร็จแล้ว ไม่สามารถแก้ไขหรือยกเลิกฉบับร่างได้");
     this.assertDocumentMutable(c);
   }
 
@@ -2300,6 +2495,9 @@ export class AgentContractsService {
       raw.data && typeof raw.data === "object" && !Array.isArray(raw.data)
         ? { ...(raw.data as Record<string, unknown>) }
         : {};
+    for (const key of ["financialDocuments", "reservationPayment", "documentFileNames", "draftRevision", "draftCancellation"])
+      if (key in rawData)
+        throw new BadRequestException("ไม่สามารถกำหนดข้อมูลเอกสารการเงินหรือสถานะระบบเองได้");
     let reservationLetter: ReservationLetterInput | undefined;
     let brokerAppointment: BrokerAppointmentInput | undefined;
     let leaseAgreement: LeaseAgreementInput | undefined;
@@ -2323,6 +2521,8 @@ export class AgentContractsService {
         letter.tenantNationality = pulled.tenantNationality;
       }
       reservationLetter = validateReservationLetter(stamped);
+      if (Number(reservationLetter.reservationPayment.replace(/,/g, "")) !== b.reservationFee)
+        throw new BadRequestException("ยอดเงินจองในหนังสือจองต้องตรงกับยอดใบแจ้งหนี้");
       delete rawData.reservationLetter;
     }
     const reservationParties = reservationLetter
@@ -2398,6 +2598,7 @@ export class AgentContractsService {
       data.brokerAppointment = brokerAppointmentSnapshot(brokerAppointment);
     if (leaseAgreement)
       data.leaseAgreement = leaseAgreementSnapshot(leaseAgreement);
+    let storedInvoicePath: string | null = null;
     const id = await this.db.transaction(async (manager) => {
       const lead = await manager.findOne(LeadEntity, {
         where: { id: b.leadId, created_by_user_id: agentId },
@@ -2555,9 +2756,33 @@ export class AgentContractsService {
             created_by_user_id: agentId,
           })
         : null;
-      const ownerUser = room.owner_id
-        ? await manager.findOneBy(UserEntity, { id: room.owner_id })
+      let ownerUserId = reservationParties?.ownerUserId ?? room.owner_id ?? null;
+      if (ownerUserId == null && type.form_kind !== "reservation") {
+        const bookedOwner = await manager
+          .getRepository(LeaseContractEntity)
+          .createQueryBuilder("c")
+          .leftJoin("c.template", "contractTemplate")
+          .leftJoin("c.agreement_type", "agreementType")
+          .where("c.lead_id = :leadId", { leadId: lead.id })
+          .andWhere("c.rent_room_id = :roomId", { roomId: room.id })
+          .andWhere("c.owner_user_id IS NOT NULL")
+          .andWhere("c.status NOT IN (:...closed)", {
+            closed: ["cancelled", "expired", "terminated"],
+          })
+          .andWhere(
+            "COALESCE(contractTemplate.form_kind, agreementType.form_kind) = 'reservation'",
+          )
+          .orderBy("c.id", "DESC")
+          .getOne();
+        ownerUserId = bookedOwner?.owner_user_id ?? null;
+      }
+      const ownerUser = ownerUserId
+        ? await manager.findOneBy(UserEntity, { id: ownerUserId })
         : null;
+      const deliveredAt = new Date();
+      const deliverTenant =
+        type.form_kind !== "broker_appointment" && tenant.user_id != null;
+      const deliverOwner = ownerUserId != null;
       const property = await manager.findOneBy(PropertyEntity, {
         id: room.properties_id,
       });
@@ -2634,7 +2859,13 @@ export class AgentContractsService {
           rent_room_id: room.id,
           room_tenancy_id: tenancy.id,
           property_owner_id: room.property_owner_id,
-          owner_user_id: reservationParties?.ownerUserId ?? room.owner_id,
+          owner_user_id: ownerUserId,
+          tenant_delivered_at: deliverTenant
+            ? (existing?.tenant_delivered_at ?? deliveredAt)
+            : (existing?.tenant_delivered_at ?? null),
+          owner_delivered_at: deliverOwner
+            ? (existing?.owner_delivered_at ?? deliveredAt)
+            : (existing?.owner_delivered_at ?? null),
           created_by_user_id: agentId,
           start_date: contractInput.startDate,
           end_date:
@@ -2669,6 +2900,27 @@ export class AgentContractsService {
           status: "draft",
         }),
       );
+      if (type.form_kind === "reservation") {
+        if (!this.documents)
+          throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสารใบแจ้งหนี้ค่าจอง");
+        // Keep the same invoice number/date on a draft edit; amounts follow the reservation.
+        const previousFinancial = existing?.data?.financialDocuments as { invoice?: FinancialDocumentInput } | undefined;
+        const invoice = reservationInvoice({
+          ...contract,
+          data: { ...data, financialDocuments: previousFinancial },
+        } as LeaseContractEntity);
+        const pdf = await createFinancialPdf("invoice", invoice);
+        const stored = await this.documents.upload(agentId, contract.id, "invoice", { buffer: pdf, size: pdf.length });
+        storedInvoicePath = stored.path;
+        await manager.update(LeaseContractEntity, { id: contract.id }, {
+          invoice_url: stored.path,
+          data: {
+            ...data,
+            financialDocuments: { invoice },
+            documentFileNames: { invoice: `invoice-${invoice.documentNo}.pdf` },
+          },
+        });
+      }
       if (existing) await this.revokeDraftInvites(manager, existing.id);
       if (!previous)
         await manager.update(
@@ -2677,7 +2929,12 @@ export class AgentContractsService {
           { root_agreement_id: contract.id },
         );
       return contract.id;
+    }).catch(async (error) => {
+      if (storedInvoicePath) await this.documents?.remove(storedInvoicePath).catch(() => undefined);
+      throw error;
     });
+    if (existing?.invoice_url && storedInvoicePath && existing.invoice_url !== storedInvoicePath)
+      await this.documents?.remove(existing.invoice_url).catch(() => undefined);
     return this.view(agentId, id);
   }
 }

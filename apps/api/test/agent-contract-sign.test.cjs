@@ -94,11 +94,29 @@ test('proxy sign stamps unsigned parties and moves draft to awaiting signatures'
 });
 
 test('signing every remaining party moves the contract to agent review', async () => {
-  const { service, updates } = serviceFor(row());
+  const { service, updates } = serviceFor(row({ receipt_url: '7/11/receipt/paid.pdf' }));
   const result = await service.sign(7, 11, { parties: ['owner', 'tenant', 'agent'], signaturePng });
   assert.equal(updates[0][1].status, 'awaiting_agent_review');
   assert.ok(updates[0][1].owner_signed_at && updates[0][1].tenant_signed_at && updates[0][1].agent_signed_at);
   assert.equal(result.status, 'awaiting_agent_review');
+});
+
+test('proxy signing cannot bypass booking payment, including a submitted slip', async () => {
+  for (const data of [{}, { reservationPayment: { slipPath: 'slip.jpg' } }]) {
+    const { service, updates, current } = serviceFor(row({ data }));
+    await assert.rejects(() => service.sign(7, 11, { parties: ['owner', 'tenant', 'agent'], signaturePng }), /ต้องชำระค่าจอง/);
+    assert.equal(updates.length, 0);
+    assert.equal(current.tenant_signed_at, null);
+    await service.sign(7, 11, { parties: ['owner', 'agent'], signaturePng });
+    assert.ok(current.owner_signed_at && current.agent_signed_at);
+    assert.equal(current.tenant_signed_at, null);
+  }
+});
+
+test('payment gate does not block ordinary lease tenant signatures', async () => {
+  const { service, current } = serviceFor(row({ agreement_type: { form_kind: 'lease' } }));
+  await service.sign(7, 11, { parties: ['tenant'], signaturePng });
+  assert.ok(current.tenant_signed_at);
 });
 
 test('closed contracts cannot be signed', async () => {
