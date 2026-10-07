@@ -1,6 +1,16 @@
 import { AgentCalendarScreen, emptyCalendarDraft } from '../components/AgentCalendarScreen';
-import { calendarDateKey, createCalendarDemoEvents } from '../lib/agent-calendar-demo';
-import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
+import { calendarDateKey, createCalendarDemoEvents, type CalendarDemoEvent } from '../lib/agent-calendar-demo';
+import { calendarViewingRange, viewingToCalendarEvent } from '../lib/agent-calendar-viewings';
+import { getAgentLead, listAgentViewings } from '../lib/agent-leads-api';
+import { useLeadRoomViewing } from '../lib/use-lead-room-viewing';
+import {
+  AgentTenantsScreen,
+  TENANT_DETAIL_CLOSED,
+  TenantEditBar,
+  type TenantDetailActions,
+  type TenantDetailState,
+  type TenantEntry,
+} from '../components/AgentTenantsScreen';
 import { PartyContractsScreen, type PartyContractRoom } from '../components/PartyContractsScreen';
 import { TenantBillsScreen } from '../components/TenantBillsScreen';
 import { TenantNextBillCard } from '../components/TenantNextBillCard';
@@ -10,7 +20,11 @@ import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import { CreateLeadForm, type LeadFormTab } from '../components/CreateLeadForm';
 import { AgentLeadDetailBody } from '../components/AgentLeadDetailBody';
 import { LeadFullInfoBody } from '../components/LeadFullInfoBody';
-import { LeadMatchedRoomBody, LeadMatchedRoomCta } from '../components/LeadMatchedRoomBody';
+import { LeadMatchedRoomBody } from '../components/LeadMatchedRoomBody';
+import { LeadRoomActions } from '../components/LeadRoomActions';
+import { LeadRoomViewingBanner } from '../components/LeadRoomViewingBanner';
+import { AgentMoreToolsBody } from '../components/AgentMoreToolsBody';
+import { AgentRoomDetailModal, type RoomSharePreview } from '../components/AgentRoomDetailModal';
 import type { LeadRoomMatch } from '../lib/lead-match-preview';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Alert, BackHandler } from 'react-native';
@@ -36,7 +50,7 @@ import {
   getDefaultTabForRole,
   tokens,
 } from '@nestyk/ui/native';
-import { UserRole, type AgentLead, type PartyContract } from '@nestyk/types';
+import { UserRole, type AgentLead, type AgentTenant, type PartyContract } from '@nestyk/types';
 import {
   MobileCreateListingWizardBody,
   MobileAgentDashboardBody,
@@ -125,6 +139,7 @@ export default function AppHomeScreen() {
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => calendarDateKey(new Date()));
   const [calendarMonth, setCalendarMonth] = useState(() => calendarDateKey(new Date()).slice(0, 7) + '-01');
   const [calendarDraft, setCalendarDraft] = useState(emptyCalendarDraft);
+  const [calendarViewings, setCalendarViewings] = useState<CalendarDemoEvent[]>([]);
   const [activeTab, setActiveTab] = useState<MobileAppTab>(() =>
     getDefaultTabForRole(APP_CONFIG.defaultRole),
   );
@@ -147,9 +162,14 @@ export default function AppHomeScreen() {
   const pendingRefresh = useRef<number | null>(null);
   const [leadsReloadToken, setLeadsReloadToken] = useState(0);
   const [roomsReloadToken, setRoomsReloadToken] = useState(0);
+  const [creatingTenant, setCreatingTenant] = useState(false);
+  const [createTenantBusy, setCreateTenantBusy] = useState(false);
+  const [createdTenant, setCreatedTenant] = useState<AgentTenant | null>(null);
+  const createTenantBackRef = useRef<(() => boolean) | null>(null);
+  const [tenantDetail, setTenantDetail] = useState<TenantDetailState>(TENANT_DETAIL_CLOSED);
+  const tenantDetailActionsRef = useRef<TenantDetailActions | null>(null);
   const [partyContractsReloadToken, setPartyContractsReloadToken] = useState(0);
   const [billsReloadToken, setBillsReloadToken] = useState(0);
-  const [clientsSearchOpen, setClientsSearchOpen] = useState(false);
   /** Where header/hardware back should return from secondary screens (e.g. create listing). */
   const [secondaryReturnTab, setSecondaryReturnTab] = useState<MobileAppTab | null>(null);
   const createListingBackRef = useRef<(() => boolean) | null>(null);
@@ -157,13 +177,37 @@ export default function AppHomeScreen() {
   const [activeLead, setActiveLead] = useState<AgentLead | null>(null);
   /** Set while `createLead` edits `activeLead` instead of creating a new lead. */
   const [leadEdit, setLeadEdit] = useState<{ tab: LeadFormTab; returnTab: MobileAppTab } | null>(null);
-  /** Room opened from a lead's matched rooms; its detail closes back to `returnTab`. */
-  const [roomFocus, setRoomFocus] = useState<{ id: number; returnTab: MobileAppTab } | null>(null);
+  /** Room detail opened over a lead's matched room; saving an edit bumps the version so that page re-reads the room. */
+  const [matchRoomId, setMatchRoomId] = useState<number | null>(null);
+  const [matchRoomPreview, setMatchRoomPreview] = useState<RoomSharePreview | null>(null);
+  const [matchRoomVersion, setMatchRoomVersion] = useState(0);
   const [activeMatch, setActiveMatch] = useState<LeadRoomMatch | null>(null);
   /** Bumped by the header "⋯" on lead pages; the body opens its own actions sheet. */
   const [leadMenuRequest, setLeadMenuRequest] = useState(0);
+  /** Tenant page opened from a lead page (just booked, or a booked lead); back returns to `returnTab`. */
+  const [tenantEntry, setTenantEntry] = useState<(TenantEntry & { returnTab: MobileAppTab }) | null>(null);
+  const leadRoomViewing = useLeadRoomViewing(
+    activeTab === 'leadRoom' ? activeLead : null,
+    activeMatch?.room.id ?? null,
+    setActiveLead,
+  );
 
   const unreadCount = [...notifications, ...messages].filter((n) => n.unread).length;
+
+  const calendarOpen = activeTab === 'calendar' && activeRole === 'agent';
+  useEffect(() => {
+    if (!calendarOpen) return;
+    let active = true;
+    const { from, to } = calendarViewingRange(calendarMonth);
+    listAgentViewings(from, to)
+      .then((rows) => {
+        if (active) setCalendarViewings(rows.map(viewingToCalendarEvent));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [calendarOpen, calendarMonth]);
 
   const handleSearchPlaces = useCallback(
     (query: string) => searchPlaces(query, locale),
@@ -224,7 +268,8 @@ export default function AppHomeScreen() {
     if (tab !== 'clients') setClientsWorkFilter(null);
     setSecondaryReturnTab(null);
     setLeadEdit(null);
-    setRoomFocus(null);
+    setMatchRoomId(null);
+    setMatchRoomPreview(null);
     setActiveTab(tab);
   };
 
@@ -240,20 +285,6 @@ export default function AppHomeScreen() {
     },
     [activeTab],
   );
-
-  const openFocusedRoom = useCallback(
-    (id: number) => {
-      setRoomFocus({ id, returnTab: activeTab });
-      setActiveTab('listingRoom');
-    },
-    [activeTab],
-  );
-
-  const closeFocusedRoom = useCallback(() => {
-    if (!roomFocus) return;
-    setRoomFocus(null);
-    setActiveTab(roomFocus.returnTab);
-  }, [roomFocus]);
 
   const openLeadMatch = useCallback((match: LeadRoomMatch) => {
     setActiveMatch(match);
@@ -349,6 +380,87 @@ export default function AppHomeScreen() {
   }, [activeTab, handleCreateLeadBack]);
 
   useEffect(() => {
+    if (activeTab !== 'clients') {
+      setCreatingTenant(false);
+      setCreatedTenant(null);
+      setTenantEntry(null);
+      setTenantDetail(TENANT_DETAIL_CLOSED);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (creatingTenant) {
+      setCreatedTenant(null);
+      setTenantEntry(null);
+    }
+  }, [creatingTenant]);
+
+  /** The open lead booked the room on its matched-room page: show it as booked now, then re-read it. */
+  const handleRoomReserved = useCallback(
+    (tenant: AgentTenant) => {
+      const rentRoomId = activeMatch?.room.id ?? null;
+      setActiveLead((current) =>
+        current?.id === tenant.leadId ? { ...current, status: 'booked', tenantId: tenant.id, rentRoomId } : current,
+      );
+      setLeadsReloadToken((n) => n + 1);
+      getAgentLead(tenant.leadId)
+        .then((lead) => setActiveLead((current) => (current?.id === lead.id ? lead : current)))
+        .catch(() => {});
+    },
+    [activeMatch],
+  );
+
+  /** Opens a tenant's page from a lead page; back from it returns to that page. */
+  const openTenantPage = useCallback(
+    (entry: TenantEntry) => {
+      setClientsWorkFilter(null);
+      setCreatingTenant(false);
+      setCreatedTenant(null);
+      setTenantEntry({ ...entry, returnTab: activeTab });
+      setActiveTab('clients');
+    },
+    [activeTab],
+  );
+
+  const handleTenantEntryBack = useCallback(() => {
+    if (tenantEntry) setActiveTab(tenantEntry.returnTab);
+  }, [tenantEntry]);
+
+  const handleCreateTenantBack = useCallback(() => {
+    if (createTenantBusy) return;
+    if (createTenantBackRef.current?.()) return;
+    setCreatingTenant(false);
+  }, [createTenantBusy]);
+
+  const handleTenantCreated = useCallback((tenant: AgentTenant) => {
+    setCreatedTenant(tenant);
+    // Its lead is `booked` now.
+    setLeadsReloadToken((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!creatingTenant) {
+      setCreateTenantBusy(false);
+      return;
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleCreateTenantBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [creatingTenant, handleCreateTenantBack]);
+
+  const isTenantDetail = activeTab === 'clients' && !creatingTenant && tenantDetail.open;
+  useEffect(() => {
+    if (!isTenantDetail) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      tenantDetailActionsRef.current?.back();
+      return true;
+    });
+    return () => sub.remove();
+  }, [isTenantDetail]);
+
+  useEffect(() => {
     if (!partyInbox || !selectedPartyRoom || openedPartyContract) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       setSelectedPartyRoom(null);
@@ -431,10 +543,6 @@ export default function AppHomeScreen() {
     'leadRoom',
   ];
 
-  useEffect(() => {
-    setClientsSearchOpen(false);
-  }, [activeTab]);
-
   const renderAgentHeader = () => {
     const workspace = t.agent.dashboard.workspaceLabel;
     const accent = tokens.colors.roles.agent;
@@ -454,13 +562,12 @@ export default function AppHomeScreen() {
 
     if (agentSectionTabs.includes(activeTab)) {
       const isCreateLead = activeTab === 'createLead';
+      const isCreateTenant = activeTab === 'clients' && creatingTenant;
       const isLeadPage = activeTab === 'leadDetail' || activeTab === 'leadInfo' || activeTab === 'leadRoom';
       const hasLeadMenu = activeTab === 'leadDetail' || activeTab === 'leadRoom';
-      const isSecondary = activeTab === 'createListing' || isCreateLead || isLeadPage;
-      const showSearch =
-        !isSecondary &&
-        activeTab === 'clients';
-      const searchActive = activeTab === 'clients' && clientsSearchOpen;
+      const isSecondary =
+        activeTab === 'createListing' || isCreateLead || isCreateTenant || isTenantDetail || isLeadPage;
+      const canEditTenant = isTenantDetail && tenantDetail.canEdit;
 
       return (
         <MobileSectionHeader
@@ -469,6 +576,10 @@ export default function AppHomeScreen() {
               ? leadEdit
                 ? t.agent.leads.editLead
                 : t.agent.leads.create
+              : isCreateTenant
+                ? t.agent.tenants.create
+              : isTenantDetail
+                ? t.agent.tenants.detailTitle
               : isLeadPage
                 ? getScreenTitle(activeTab, t)
                 : isSecondary
@@ -482,36 +593,56 @@ export default function AppHomeScreen() {
           onBackPress={
             isCreateLead
               ? handleCreateLeadBack
+              : isCreateTenant
+                ? handleCreateTenantBack
+              : isTenantDetail
+                ? () => tenantDetailActionsRef.current?.back()
               : isLeadPage
                 ? goBackFromLead
                 : isSecondary
                   ? handleCreateListingBack
                   : undefined
           }
-          backDisabled={isCreateLead && createLeadBusy}
+          backDisabled={
+            (isCreateLead && createLeadBusy) ||
+            (isCreateTenant && createTenantBusy) ||
+            (isTenantDetail && tenantDetail.saving)
+          }
           onActionPress={
             activeTab === 'leadInfo' && activeLead
               ? () => openLeadEdit('profile')
               : hasLeadMenu
                 ? () => setLeadMenuRequest((n) => n + 1)
-                : undefined
+                : canEditTenant
+                  ? () => tenantDetailActionsRef.current?.edit()
+                  : undefined
           }
           actionLabel={
-            activeTab === 'leadInfo' ? t.agent.leads.editLead : hasLeadMenu ? t.agent.leads.moreActions : undefined
+            activeTab === 'leadInfo'
+              ? t.agent.leads.editLead
+              : hasLeadMenu
+                ? t.agent.leads.moreActions
+                : canEditTenant
+                  ? t.agent.tenants.edit
+                  : undefined
           }
-          actionIcon={activeTab === 'leadInfo' ? 'pencil' : hasLeadMenu ? 'dots-vertical' : undefined}
-          actionVariant={activeTab === 'leadInfo' || hasLeadMenu ? 'icon' : undefined}
+          actionIcon={
+            activeTab === 'leadInfo' || canEditTenant ? 'pencil' : hasLeadMenu ? 'dots-vertical' : undefined
+          }
+          actionVariant={activeTab === 'leadInfo' || hasLeadMenu || canEditTenant ? 'icon' : undefined}
           onAddPress={
             !isSecondary && activeTab === 'listingRoom'
               ? openCreateListing
               : !isSecondary && activeTab === 'listingLead'
                 ? openCreateLead
-                : undefined
+                : !isSecondary && activeTab === 'clients'
+                  ? () => setCreatingTenant(true)
+                  : undefined
           }
           addVariant={
             activeTab === 'listingRoom'
               ? 'room'
-              : activeTab === 'listingLead'
+              : activeTab === 'listingLead' || activeTab === 'clients'
                 ? 'lead'
                 : undefined
           }
@@ -520,16 +651,9 @@ export default function AppHomeScreen() {
               ? t.agent.listings.addRoom
               : activeTab === 'listingLead'
                 ? t.agent.leads.create
+              : activeTab === 'clients'
+                ? t.agent.tenants.create
                 : undefined
-          }
-          searchActive={searchActive}
-          searchAccessibilityLabel={t.agent.dashboard.clientsTitle}
-          onSearchPress={
-            showSearch
-              ? () => {
-                  setClientsSearchOpen((v) => !v);
-                }
-              : undefined
           }
         />
       );
@@ -853,6 +977,7 @@ export default function AppHomeScreen() {
             onOpenInfo={() => setActiveTab('leadInfo')}
             onEditMatching={() => openLeadEdit('matching')}
             onOpenMatch={openLeadMatch}
+            onOpenTenant={(tenantId) => openTenantPage({ tenantId })}
             menuRequest={leadMenuRequest}
           />
         </Animated.View>
@@ -862,11 +987,29 @@ export default function AppHomeScreen() {
     if (activeTab === 'leadRoom' && activeLead && activeMatch) {
       return (
         <Animated.View entering={SlideInRight.duration(200)} style={styles.bodyContainer}>
+          <LeadRoomViewingBanner viewing={leadRoomViewing.viewing} />
           <LeadMatchedRoomBody
             lead={activeLead}
             match={activeMatch}
-            onOpenRoom={openFocusedRoom}
+            onOpenRoom={(roomId) => {
+              setMatchRoomPreview(null);
+              setMatchRoomId(roomId);
+            }}
+            onPreviewRoom={(roomId, visibility, contactId) => {
+              setMatchRoomPreview({ visibility, contactId });
+              setMatchRoomId(roomId);
+            }}
+            roomVersion={matchRoomVersion}
             menuRequest={leadMenuRequest}
+          />
+          <AgentRoomDetailModal
+            roomId={matchRoomId}
+            preview={matchRoomPreview}
+            onClose={() => {
+              setMatchRoomId(null);
+              setMatchRoomPreview(null);
+            }}
+            onSaved={() => setMatchRoomVersion((n) => n + 1)}
           />
         </Animated.View>
       );
@@ -895,9 +1038,10 @@ export default function AppHomeScreen() {
               : clientsWorkFilter === 'lead_follow_up'
                 ? dash.leadsFollowUp
                 : null;
+      // One wrapper for both layouts so the tenants screen keeps its state when the form closes.
       return (
-        <View style={styles.bodyContainer}>
-          {clientsFilterLabel ? (
+        <View style={creatingTenant ? [styles.wizardBody, styles.fullBleedBody] : styles.bodyContainer}>
+          {!creatingTenant && !tenantDetail.open && clientsFilterLabel ? (
             <View
               style={{
                 flexDirection: 'row',
@@ -921,43 +1065,26 @@ export default function AppHomeScreen() {
             </View>
           ) : null}
           <AgentTenantsScreen
-            searchOpen={clientsSearchOpen}
-            onSearchOpenChange={setClientsSearchOpen}
             workFilter={clientsWorkFilter}
             reloadToken={billsReloadToken}
             onReloadSettled={finishPageRefresh}
+            creating={creatingTenant}
+            onCreatingChange={setCreatingTenant}
+            onCreateBusy={setCreateTenantBusy}
+            createBackRef={createTenantBackRef}
+            createdTenant={createdTenant}
+            onTenantCreated={handleTenantCreated}
+            entry={tenantEntry}
+            onEntryBack={handleTenantEntryBack}
+            detailActionsRef={tenantDetailActionsRef}
+            onDetailStateChange={setTenantDetail}
           />
         </View>
       );
     }
 
     if (activeTab === 'more') {
-      const tools: Array<{ label: string; tab: MobileAppTab }> = [
-        { label: t.agent.dashboard.openCalendar, tab: 'calendar' },
-        { label: t.agent.dashboard.openContacts, tab: 'contact' },
-        { label: t.agent.dashboard.openServices, tab: 'services' },
-        { label: t.agent.dashboard.openContracts, tab: 'contracts' },
-      ];
-      return (
-        <View style={styles.bodyContainer}>
-          <Text style={[styles.sectionDesc, secondaryText]}>{t.agent.dashboard.moreToolsHint}</Text>
-          {tools.map((tool) => (
-            <View key={tool.tab} style={{ marginTop: 10 }}>
-              <MobileButton variant="outline" onPress={() => setActiveTab(tool.tab)}>
-                {tool.label}
-              </MobileButton>
-            </View>
-          ))}
-          <View style={{ marginTop: 10 }}>
-            <MobileButton
-              variant="outline"
-              onPress={() => Alert.alert(t.agent.dashboard.openCommission, t.agent.dashboard.unavailableSection)}
-            >
-              {t.agent.dashboard.openCommission}
-            </MobileButton>
-          </View>
-        </View>
-      );
+      return <AgentMoreToolsBody onOpen={setActiveTab} />;
     }
 
     if (activeTab === 'contact') {
@@ -986,7 +1113,7 @@ export default function AppHomeScreen() {
 
     if (activeTab === 'calendar' && activeRole === 'agent') {
       return <AgentCalendarScreen
-        events={calendarEvents}
+        events={[...calendarViewings, ...calendarEvents]}
         onAdd={event => setCalendarEvents(previous => [...previous, event])}
         selectedDate={calendarSelectedDate}
         onSelectDate={setCalendarSelectedDate}
@@ -1043,11 +1170,8 @@ export default function AppHomeScreen() {
       return (
         <View style={styles.bodyContainer}>
           <AgentRoomsScreen
-            onCreate={openCreateListing}
             reloadToken={roomsReloadToken}
             onReloadSettled={finishPageRefresh}
-            focusRoomId={roomFocus?.id ?? null}
-            onFocusRoomClosed={closeFocusedRoom}
           />
         </View>
       );
@@ -1177,6 +1301,7 @@ export default function AppHomeScreen() {
     activeTab === 'createListing' ||
     activeTab === 'createLead' ||
     activeTab === 'leadInfo' ||
+    (activeTab === 'clients' && creatingTenant) ||
     (activeTab === 'listings' && activeRole === 'owner');
 
   return (
@@ -1225,19 +1350,48 @@ export default function AppHomeScreen() {
         }
         bottomBar={
           activeTab === 'leadRoom' && activeLead && activeMatch ? (
-            <LeadMatchedRoomCta onPress={() => openFocusedRoom(activeMatch.room.id)} />
-          ) : ['createListing', 'createLead', 'leadDetail', 'leadInfo', 'leadRoom'].includes(activeTab) ? null : <MobileBottomTabBar
-            activeRole={activeRole}
-            activeTab={activeTab}
-            onTabPress={handleTabPress}
-            accentColor={accentColor}
-            {...(activeRole === 'agent'
-              ? {
-                  activeTintColor: theme.screenTitle,
-                  indicatorColor: tokens.colors.brand[500],
-                }
-              : {})}
-          />
+            <LeadRoomActions
+              lead={activeLead}
+              match={activeMatch}
+              viewing={leadRoomViewing.viewing}
+              ready={leadRoomViewing.ready}
+              onViewingSaved={leadRoomViewing.onSaved}
+              onReserved={handleRoomReserved}
+              onContinue={(tenant, next) =>
+                openTenantPage({
+                  tenantId: tenant.id,
+                  tenant,
+                  startContract: next === 'reservation' ? 'reservation' : null,
+                })
+              }
+              onOpenTenant={(tenantId) => openTenantPage({ tenantId })}
+            />
+          ) : isTenantDetail && tenantDetail.editing ? (
+            <TenantEditBar
+              saving={tenantDetail.saving}
+              error={tenantDetail.error}
+              onCancel={() => tenantDetailActionsRef.current?.back()}
+              onSave={() => tenantDetailActionsRef.current?.save()}
+            />
+          ) : null
+        }
+        tabBar={
+          ['createListing', 'createLead', 'leadDetail', 'leadInfo', 'leadRoom'].includes(activeTab) ||
+          (activeTab === 'clients' && creatingTenant) ||
+          isTenantDetail ? null : (
+            <MobileBottomTabBar
+              activeRole={activeRole}
+              activeTab={activeTab}
+              onTabPress={handleTabPress}
+              accentColor={accentColor}
+              {...(activeRole === 'agent'
+                ? {
+                    activeTintColor: theme.screenTitle,
+                    indicatorColor: tokens.colors.brand[500],
+                  }
+                : {})}
+            />
+          )
         }
       >
         <React.Fragment key={`${activeRole}-${activeTab}-${partyInbox ? 'inbox' : 'tab'}`}>

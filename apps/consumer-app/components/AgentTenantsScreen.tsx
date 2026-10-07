@@ -3,18 +3,30 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { MobileBrandLoader, MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
+import {
+  MobileBrandLoader,
+  MobileButton,
+  MobileIcon,
+  MobileInput,
+  MobileFilterChip,
+  MobileListSearchRow,
+  tokens,
+  useMobileTheme,
+} from "@nestyk/ui/native";
 import type { AgentContract, AgentTenant } from "@nestyk/types";
 import { useLocale } from "@nestyk/i18n";
 import { getAgentTenant, listAgentTenants, updateAgentTenant } from "../lib/agent-tenants-api";
+import { nextIdentityNumberDraft } from "../lib/identity-number";
 import { TenantForm } from "./TenantForm";
 import { ContractsScreen } from "./ContractsScreen";
 import { AgentRentSlips } from "./AgentRentSlips";
+import type { CreateDocumentKind } from "./ContractTypePicker";
 
 type Filter = "all" | "signing" | "active";
 const filters: Record<Filter, string> = {
@@ -62,15 +74,65 @@ const renewal = (t: AgentTenant) =>
     return days != null && days >= 0 && days <= 30;
   });
 
+/** Detail/edit state the shell needs for its header, bottom bar and hardware back. */
+export type TenantDetailState = {
+  open: boolean;
+  editing: boolean;
+  canEdit: boolean;
+  saving: boolean;
+  error: string;
+};
+export const TENANT_DETAIL_CLOSED: TenantDetailState = {
+  open: false,
+  editing: false,
+  canEdit: false,
+  saving: false,
+  error: "",
+};
+export type TenantDetailActions = {
+  /** Cancels an edit first, otherwise closes the detail. */
+  back: () => void;
+  edit: () => void;
+  save: () => void;
+};
+/** A tenant whose page opens as soon as the screen mounts, e.g. from a lead that booked a room. */
+export type TenantEntry = {
+  tenantId: number;
+  /** Already at hand (just booked); otherwise the tenant is read by id. */
+  tenant?: AgentTenant;
+  /** Go straight into creating this document for the tenant. */
+  startContract?: CreateDocumentKind | null;
+};
+
 export function AgentTenantsScreen({
-  searchOpen = false,
-  onSearchOpenChange,
   workFilter = null,
   reloadToken = 0,
   onReloadSettled,
+  creating: creatingProp,
+  onCreatingChange,
+  onCreateBusy,
+  createBackRef,
+  createdTenant = null,
+  onTenantCreated,
+  entry = null,
+  onEntryBack,
+  detailActionsRef,
+  onDetailStateChange,
 }: {
-  searchOpen?: boolean;
-  onSearchOpenChange?: (open: boolean) => void;
+  /** Controlled by the shell so its header/back/tab bar switch to the create-tenant layout. */
+  creating?: boolean;
+  onCreatingChange?: (creating: boolean) => void;
+  onCreateBusy?: (busy: boolean) => void;
+  createBackRef?: React.MutableRefObject<(() => boolean) | null>;
+  /** The shell remounts this screen when the form closes; reopen the tenant just created. */
+  createdTenant?: AgentTenant | null;
+  onTenantCreated?: (tenant: AgentTenant) => void;
+  /** Read on mount: open this tenant's page instead of the list. */
+  entry?: TenantEntry | null;
+  /** Back from the `entry` tenant's page: return to where the shell came from, not to the list. */
+  onEntryBack?: () => void;
+  detailActionsRef?: React.MutableRefObject<TenantDetailActions | null>;
+  onDetailStateChange?: (state: TenantDetailState) => void;
   workFilter?:
     | "overdue_payment"
     | "awaiting_signature"
@@ -81,14 +143,26 @@ export function AgentTenantsScreen({
   onReloadSettled?: (token: number) => void;
 } = {}) {
   const { t } = useLocale();
+  const c = t.agent.tenants;
   const { theme } = useMobileTheme();
-  const headerSearch = onSearchOpenChange != null;
   const [items, setItems] = useState<AgentTenant[]>([]);
-  const [selected, setSelected] = useState<AgentTenant | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [tab, setTab] = useState<"overview" | "contracts">("overview");
+  const [selected, setSelected] = useState<AgentTenant | null>(
+    entry?.tenant ?? createdTenant,
+  );
+  const [creatingLocal, setCreatingLocal] = useState(false);
+  const creating = creatingProp ?? creatingLocal;
+  const setCreating = onCreatingChange ?? setCreatingLocal;
+  const [tab, setTab] = useState<"overview" | "contracts">(
+    entry?.startContract ? "contracts" : "overview",
+  );
+  /** Document the contracts tab starts creating when it opens (the reservation letter after a booking). */
+  const [contractStart, setContractStart] = useState<CreateDocumentKind | null>(
+    entry?.startContract ?? null,
+  );
   const [tabsWidth, setTabsWidth] = useState(0);
-  const tabPosition = useRef(new Animated.Value(0)).current;
+  const tabPosition = useRef(
+    new Animated.Value(tab === "overview" ? 0 : 1),
+  ).current;
   useEffect(() => {
     const animation = Animated.timing(tabPosition, {
       toValue: tab === "overview" ? 0 : 1,
@@ -105,7 +179,9 @@ export function AgentTenantsScreen({
   const [gateOpen, setGateOpen] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(
+    createdTenant && !entry ? c.createdNotice : "",
+  );
   const [editing, setEditing] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -155,33 +231,12 @@ export function AgentTenantsScreen({
       refreshVersion.current++;
     };
   }, [reloadToken]);
-  const button = (
-    label: string,
-    action: () => void,
-    primary = false,
-    disabled = false,
-  ) => (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      accessibilityState={{ disabled }}
-      onPress={action}
-      style={({ pressed }) => [
-        s.button,
-        {
-          backgroundColor: primary ? "#FFBF19" : theme.surface,
-          borderColor: primary ? "#FFBF19" : theme.border,
-          opacity: pressed || disabled ? 0.6 : 1,
-        },
-      ]}
-    >
-      <Text
-        style={[s.body, { color: primary ? "#202631" : theme.textHeading }]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
+  // A tenant the shell asks for by id opens the same way as a tap on its row.
+  useEffect(() => {
+    if (entry && !entry.tenant) void open(entry.tenantId);
+    // Read once: the shell mounts this screen for the entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const badge = (t: AgentTenant) => (
     <Text
       style={[
@@ -204,14 +259,14 @@ export function AgentTenantsScreen({
       </Text>
     </View>
   );
-  async function open(t: AgentTenant) {
+  async function open(id: number) {
     if (opening) return;
     setOpening(true);
     setError("");
     setNotice("");
     setEditing(false);
     try {
-      setSelected(await getAgentTenant(t.id));
+      setSelected(await getAgentTenant(id));
       setTab("overview");
     } catch (e) {
       setError(e instanceof Error ? e.message : "โหลดรายละเอียดไม่สำเร็จ");
@@ -277,12 +332,61 @@ export function AgentTenantsScreen({
       setSavingEdit(false);
     }
   }
+  const detailOpen = !creating && !!selected;
+  useEffect(() => {
+    onDetailStateChange?.(
+      detailOpen
+        ? {
+            open: true,
+            editing,
+            canEdit: tab === "overview" && !editing,
+            saving: savingEdit,
+            error: editing ? error : "",
+          }
+        : TENANT_DETAIL_CLOSED,
+    );
+  }, [detailOpen, editing, tab, savingEdit, error, onDetailStateChange]);
+  useEffect(
+    () => () => onDetailStateChange?.(TENANT_DETAIL_CLOSED),
+    [onDetailStateChange],
+  );
+  useEffect(() => {
+    if (!detailActionsRef) return;
+    detailActionsRef.current = {
+      back: () => {
+        if (savingEdit) return;
+        setError("");
+        if (editing) {
+          setEditing(false);
+          return;
+        }
+        if (onEntryBack && entry && selected?.id === entry.tenantId) {
+          onEntryBack();
+          return;
+        }
+        setSelected(null);
+        setNotice("");
+      },
+      edit: () => {
+        if (selected) beginEdit(selected);
+      },
+      save: () => {
+        void saveEdit();
+      },
+    };
+  });
+  useEffect(
+    () => () => {
+      if (detailActionsRef) detailActionsRef.current = null;
+    },
+    [detailActionsRef],
+  );
   if (!gateOpen && !creating && !selected) {
     return (
       <MobileBrandLoader
         fill
         size="md"
-        done={!loading}
+        done={!loading && !opening}
         onComplete={() => setGateOpen(true)}
       />
     );
@@ -290,29 +394,25 @@ export function AgentTenantsScreen({
   if (creating)
     return (
       <TenantForm
-        onBack={() => setCreating(false)}
+        onBusy={onCreateBusy}
+        backRef={createBackRef}
         onCreated={(tenant) => {
           setItems((current) => [
             tenant,
             ...current.filter((t) => t.id !== tenant.id),
           ]);
+          onTenantCreated?.(tenant);
           setCreating(false);
           setSelected(tenant);
           setTab("overview");
           setError("");
-          setNotice("สร้างผู้เช่าแล้ว พร้อมเริ่มเตรียมสัญญา");
+          setNotice(c.createdNotice);
         }}
       />
     );
   if (selected) {
     return (
       <View style={s.root}>
-        {button("← ผู้เช่าทั้งหมด", () => {
-          setSelected(null);
-          setEditing(false);
-          setNotice("");
-          setError("");
-        })}
         {!!notice && (
           <Text
             accessibilityRole="alert"
@@ -321,7 +421,7 @@ export function AgentTenantsScreen({
             {notice}
           </Text>
         )}
-        {!!error && (
+        {!!error && !editing && (
           <Text
             accessibilityRole="alert"
             style={[s.body, { color: "#C43D4C" }]}
@@ -381,10 +481,33 @@ export function AgentTenantsScreen({
             ]}
           />
         </View>
+        {tab === "overview" && !editing && !selected.contracts.length && (
+          <View style={[s.card, panel]}>
+            <Text style={[s.subtitle, title]}>{c.nextStepTitle}</Text>
+            <Text style={[s.body, muted]}>
+              {selected.email ? c.nextStepBody : c.reservedNeedsEmail}
+            </Text>
+            <MobileButton
+              onPress={() => {
+                if (!selected.email) {
+                  beginEdit(selected);
+                  return;
+                }
+                setNotice("");
+                setContractStart("reservation");
+                setTab("contracts");
+              }}
+            >
+              {selected.email ? c.makeReservation : c.addEmail}
+            </MobileButton>
+          </View>
+        )}
         {tab === "contracts" ? (
           <ContractsScreen
             key={selected.id}
             tenant={selected}
+            startCreate={contractStart}
+            onStartCreateHandled={() => setContractStart(null)}
             onChanged={() => {
               void refreshTenant(selected.id);
             }}
@@ -412,7 +535,10 @@ export function AgentTenantsScreen({
                   accessibilityLabel={label}
                   value={editForm[key]}
                   onChangeText={(value) =>
-                    setEditForm((current) => ({ ...current, [key]: value }))
+                    setEditForm((current) => ({
+                      ...current,
+                      [key]: key === "identityNumber" ? nextIdentityNumberDraft(value) : value,
+                    }))
                   }
                   placeholder={placeholder}
                   maxLength={
@@ -434,10 +560,13 @@ export function AgentTenantsScreen({
                         : "default"
                   }
                   autoCapitalize={
-                    key === "email" || key === "identityNumber"
+                    key === "email"
                       ? "none"
-                      : "sentences"
+                      : key === "identityNumber"
+                        ? "characters"
+                        : "sentences"
                   }
+                  autoCorrect={key === "identityNumber" ? false : undefined}
                   editable={!savingEdit}
                 />
               </View>
@@ -448,24 +577,6 @@ export function AgentTenantsScreen({
                 ? ` · ${selected.property}${selected.room ? ` · ห้อง ${selected.room}` : ""}`
                 : ""}
             </Text>
-            {button(
-              savingEdit ? "กำลังบันทึก…" : "บันทึก",
-              () => {
-                void saveEdit();
-              },
-              true,
-              savingEdit,
-            )}
-            {button(
-              "ยกเลิก",
-              () => {
-                if (savingEdit) return;
-                setEditing(false);
-                setError("");
-              },
-              false,
-              savingEdit,
-            )}
           </View>
         ) : (
           <View style={[s.card, panel]}>
@@ -491,7 +602,6 @@ export function AgentTenantsScreen({
                 </Text>
               </View>
             ))}
-            {button("แก้ไขข้อมูลผู้เช่า", () => beginEdit(selected), true)}
           </View>
         )}
       </View>
@@ -508,59 +618,28 @@ export function AgentTenantsScreen({
   });
   return (
     <View style={s.root}>
-      <Text style={[s.subtitle, title]}>ดูแลทุกสัญญาในที่เดียว</Text>
       <AgentRentSlips reloadToken={reloadToken} />
-      {button(
-        "＋ สร้างผู้เช่า",
-        () => {
-          setCreating(true);
-          setError("");
-        },
-        true,
-      )}
-      {(headerSearch ? searchOpen || !!query.trim() : true) ? (
-        <MobileInput
-          value={query}
-          onChangeText={setQuery}
-          placeholder="ค้นหาผู้เช่า โครงการ หรือเลขสัญญา"
-          autoFocus={headerSearch && searchOpen && !query.trim()}
-          onBlur={
-            headerSearch
-              ? () => {
-                  if (!query.trim()) onSearchOpenChange?.(false);
-                }
-              : undefined
-          }
-        />
-      ) : null}
+      <MobileListSearchRow
+        value={query}
+        onChangeText={setQuery}
+        placeholder={c.search}
+        onClear={() => setQuery("")}
+        clearAccessibilityLabel={c.clearSearch}
+      />
       <View style={s.filters}>
         {(Object.keys(filters) as Filter[]).map((key) => (
-          <Pressable
+          <MobileFilterChip
             key={key}
-            accessibilityRole="button"
-            accessibilityState={{ selected: filter === key }}
-            onPress={() => setFilter(key)}
-            style={[
-              s.chip,
-              {
-                borderColor: filter === key ? "#FFBF19" : theme.border,
-                backgroundColor: filter === key ? "#FFE29A" : theme.surface,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                s.small,
-                { color: filter === key ? "#202631" : theme.textSecondary },
-              ]}
-            >
-              {filters[key]}{" "}
-              {loading
+            label={filters[key]}
+            count={
+              loading
                 ? "–"
                 : items.filter((t) => key === "all" || stateOf(t) === key)
-                    .length}
-            </Text>
-          </Pressable>
+                    .length
+            }
+            selected={filter === key}
+            onPress={() => setFilter(key)}
+          />
         ))}
       </View>
       {opening ? (
@@ -580,7 +659,7 @@ export function AgentTenantsScreen({
               accessibilityRole="button"
               accessibilityLabel={`ดูผู้เช่า ${t.name}`}
               onPress={() => {
-                void open(t);
+                void open(t.id);
               }}
               style={({ pressed }) => [
                 s.card,
@@ -626,21 +705,20 @@ export function AgentTenantsScreen({
           ))}
           {!visible.length && (
             <View style={[s.card, panel]}>
-              <Text style={[s.subtitle, title]}>
-                {items.length
-                  ? "ไม่พบผู้เช่าที่ตรงกัน"
-                  : "เริ่มต้นผู้เช่าคนแรก"}
+              <Text style={[s.body, muted, { textAlign: "center" }]}>
+                {t.common.noData}
               </Text>
-              <Text style={[s.body, muted]}>
-                {items.length
-                  ? "ลองเปลี่ยนคำค้นหาหรือสถานะที่เลือก"
-                  : "เลือก Lead แล้วเติมข้อมูลผู้เช่า รายชื่อจะมาแสดงที่นี่"}
-              </Text>
-              {items.length > 0 &&
-                button("ล้างตัวกรอง", () => {
-                  setQuery("");
-                  setFilter("all");
-                })}
+              {items.length > 0 ? (
+                <MobileButton
+                  variant="outline"
+                  onPress={() => {
+                    setQuery("");
+                    setFilter("all");
+                  }}
+                >
+                  {c.clearFilters}
+                </MobileButton>
+              ) : null}
             </View>
           )}
           <Text style={[s.small, muted, { textAlign: "center" }]}>
@@ -651,6 +729,57 @@ export function AgentTenantsScreen({
     </View>
   );
 }
+
+/** Save / cancel for tenant edit mode, rendered in the shell's bottom bar so it stays reachable. */
+export function TenantEditBar({
+  saving,
+  error,
+  onCancel,
+  onSave,
+}: {
+  saving: boolean;
+  error: string;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  const { t } = useLocale();
+  const c = t.agent.tenants;
+  const { theme } = useMobileTheme();
+  return (
+    <View style={[s.editBar, { borderTopColor: theme.border }]}>
+      {!!error && (
+        <Text
+          accessibilityRole="alert"
+          style={[s.editBarError, { color: tokens.colors.danger }]}
+        >
+          {error}
+        </Text>
+      )}
+      <View style={s.editBarRow}>
+        <MobileButton
+          variant="outline"
+          onPress={onCancel}
+          disabled={saving}
+          style={s.editBarCancel}
+        >
+          {c.cancel}
+        </MobileButton>
+        <MobileButton
+          onPress={onSave}
+          disabled={saving}
+          isLoading={saving}
+          style={s.editBarSave}
+        >
+          <View style={s.editBarSaveInner}>
+            <MobileIcon name="check" size={18} color={tokens.colors.primary} />
+            <Text style={s.editBarSaveText}>{c.save}</Text>
+          </View>
+        </MobileButton>
+      </View>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   root: {
     gap: 16,
@@ -711,13 +840,7 @@ const s = StyleSheet.create({
     overflow: "hidden",
     alignSelf: "flex-start",
   },
-  filters: { flexDirection: "row", gap: 7, flexWrap: "wrap" },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 13,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-  },
+  filters: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   renewal: {
     borderWidth: 1,
     borderRadius: 13,
@@ -729,11 +852,26 @@ const s = StyleSheet.create({
     flexWrap: "wrap",
   },
   footer: { borderTopWidth: 1, paddingTop: 12, gap: 5 },
-  button: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 13,
-    alignItems: "center",
+  editBar: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    gap: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  editBarError: {
+    fontFamily: tokens.typography.native.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  editBarRow: { flexDirection: "row", gap: 10 },
+  editBarCancel: { flex: 1, minHeight: 50, borderRadius: 12 },
+  editBarSave: { flex: 2, minHeight: 50, borderRadius: 12 },
+  editBarSaveInner: { flexDirection: "row", alignItems: "center", gap: 8 },
+  editBarSaveText: {
+    fontFamily: tokens.typography.native.headingTh,
+    fontSize: 16,
+    lineHeight: 24,
+    color: tokens.colors.primary,
   },
   tabs: { flexDirection: "row", borderBottomWidth: 1 },
   tab: { flex: 1, alignItems: "center", padding: 12, paddingBottom: 15 },
