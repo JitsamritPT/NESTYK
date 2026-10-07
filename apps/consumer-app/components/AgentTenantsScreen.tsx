@@ -14,6 +14,7 @@ import { useLocale } from "@nestyk/i18n";
 import { getAgentTenant, listAgentTenants, updateAgentTenant } from "../lib/agent-tenants-api";
 import { TenantForm } from "./TenantForm";
 import { ContractsScreen } from "./ContractsScreen";
+import { AgentRentSlips } from "./AgentRentSlips";
 
 type Filter = "all" | "signing" | "active";
 const filters: Record<Filter, string> = {
@@ -65,6 +66,8 @@ export function AgentTenantsScreen({
   searchOpen = false,
   onSearchOpenChange,
   workFilter = null,
+  reloadToken = 0,
+  onReloadSettled,
 }: {
   searchOpen?: boolean;
   onSearchOpenChange?: (open: boolean) => void;
@@ -74,6 +77,8 @@ export function AgentTenantsScreen({
     | "renewal"
     | "lead_follow_up"
     | null;
+  reloadToken?: number;
+  onReloadSettled?: (token: number) => void;
 } = {}) {
   const { t } = useLocale();
   const { theme } = useMobileTheme();
@@ -141,11 +146,15 @@ export function AgentTenantsScreen({
     }
   }
   useEffect(() => {
-    void reload();
+    let cancelled = false;
+    void reload().finally(() => {
+      if (!cancelled) onReloadSettled?.(reloadToken);
+    });
     return () => {
+      cancelled = true;
       refreshVersion.current++;
     };
-  }, []);
+  }, [reloadToken]);
   const button = (
     label: string,
     action: () => void,
@@ -500,6 +509,7 @@ export function AgentTenantsScreen({
   return (
     <View style={s.root}>
       <Text style={[s.subtitle, title]}>ดูแลทุกสัญญาในที่เดียว</Text>
+      <AgentRentSlips reloadToken={reloadToken} />
       {button(
         "＋ สร้างผู้เช่า",
         () => {

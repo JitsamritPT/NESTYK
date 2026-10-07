@@ -4,6 +4,7 @@ import { AgentTenantsScreen } from '../components/AgentTenantsScreen';
 import { PartyContractsScreen, type PartyContractRoom } from '../components/PartyContractsScreen';
 import { TenantBillsScreen } from '../components/TenantBillsScreen';
 import { TenantNextBillCard } from '../components/TenantNextBillCard';
+import { OwnerConfirmedRent } from '../components/OwnerConfirmedRent';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import { CreateLeadForm, type LeadFormTab } from '../components/CreateLeadForm';
@@ -656,7 +657,9 @@ export default function AppHomeScreen() {
       setPartyContractsReloadToken(token);
     } else if (activeRole === 'agent' && activeTab === 'dashboard') {
       setDashboardRefreshKey(token);
-    } else if (activeRole === 'tenant' && activeTab === 'dashboard') {
+    } else if ((activeRole === 'tenant' || activeRole === 'owner') && activeTab === 'dashboard') {
+      setBillsReloadToken(token);
+    } else if (activeTab === 'clients') {
       setBillsReloadToken(token);
     } else if (activeTab === 'listingLead') {
       setLeadsReloadToken(token);
@@ -736,6 +739,11 @@ export default function AppHomeScreen() {
               reloadToken={billsReloadToken}
               onReloadSettled={finishPageRefresh}
               onOpenBills={() => handleTabPress('bills')}
+            />
+          ) : activeRole === 'owner' ? (
+            <OwnerConfirmedRent
+              reloadToken={billsReloadToken}
+              onReloadSettled={finishPageRefresh}
             />
           ) : (
             <Text style={[styles.sectionDesc, secondaryText]}>{summary.desc}</Text>
@@ -916,6 +924,8 @@ export default function AppHomeScreen() {
             searchOpen={clientsSearchOpen}
             onSearchOpenChange={setClientsSearchOpen}
             workFilter={clientsWorkFilter}
+            reloadToken={billsReloadToken}
+            onReloadSettled={finishPageRefresh}
           />
         </View>
       );

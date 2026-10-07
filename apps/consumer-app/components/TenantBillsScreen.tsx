@@ -5,7 +5,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocale } from "@nestyk/i18n";
 import { MobileBottomSheet, MobileButton, MobileIcon, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { TenantBill, TenantBillStatus } from "@nestyk/types";
-import { confirmMyBill, listMyBills, listReceivedBills, openMyBillSlip, openReceivedBillSlip, uploadMyBillSlip } from "../lib/tenant-bills-api";
+import { listMyBills, listReceivedBills, openMyBillSlip, openReceivedBillSlip, uploadMyBillSlip } from "../lib/tenant-bills-api";
 import { billFormatters } from "../lib/bill-format";
 import { ContractDocumentPreview } from "./ContractDocumentPreview";
 
@@ -42,7 +42,6 @@ export function TenantBillsScreen({
   const [retryKey, setRetryKey] = useState(0);
   const [slipFor, setSlipFor] = useState<TenantBill | null>(null);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
-  const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
@@ -101,22 +100,6 @@ export function TenantBillsScreen({
       setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
     } finally {
       setUploadingId(null);
-    }
-  }
-
-  async function confirmSlip(bill: TenantBill) {
-    if (confirmingId != null || uploadingId != null) return;
-    setError("");
-    setNotice("");
-    setConfirmingId(bill.id);
-    try {
-      const updated = await confirmMyBill(bill.id);
-      setRows((current) => current.map((row) => (row.id === updated.id ? updated : row)));
-      setNotice(tenantCopy.slipConfirmed);
-    } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : tenantCopy.loadFailed);
-    } finally {
-      setConfirmingId(null);
     }
   }
 
@@ -200,7 +183,7 @@ export function TenantBillsScreen({
             </View>
           ) : null}
           {canUpload && !bill.hasPaymentSlip ? (
-            <MobileButton isLoading={uploadingId === bill.id} disabled={uploadingId != null || confirmingId != null} onPress={() => setSlipFor(bill)}>
+            <MobileButton isLoading={uploadingId === bill.id} disabled={uploadingId != null} onPress={() => setSlipFor(bill)}>
               {tenantCopy.uploadSlip}
             </MobileButton>
           ) : null}
@@ -210,16 +193,14 @@ export function TenantBillsScreen({
                 <MobileButton variant="outline" onPress={() => void viewSlip(bill)}>{copy.viewSlip}</MobileButton>
               </View>
               <View style={styles.flex}>
-                <MobileButton variant="outline" disabled={uploadingId != null || confirmingId != null} onPress={() => setSlipFor(bill)}>
+                <MobileButton variant="outline" disabled={uploadingId != null} onPress={() => setSlipFor(bill)}>
                   {tenantCopy.replaceSlip}
                 </MobileButton>
               </View>
             </View>
           ) : null}
           {canUpload && bill.hasPaymentSlip ? (
-            <MobileButton isLoading={confirmingId === bill.id} disabled={uploadingId != null || confirmingId != null} onPress={() => void confirmSlip(bill)}>
-              {tenantCopy.confirmPayment}
-            </MobileButton>
+            <Text style={[styles.caption, body]}>{tenantCopy.slipUploaded}</Text>
           ) : null}
           {!canUpload && bill.status === "paid" && bill.hasPaymentSlip ? (
             <MobileButton variant="outline" onPress={() => void viewSlip(bill)}>{copy.viewSlip}</MobileButton>

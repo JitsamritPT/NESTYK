@@ -310,6 +310,8 @@ export interface TranslationSchema {
       loadFailed: string;
       retry: string;
       close: string;
+      confirmedTitle: string;
+      confirmedEmpty: string;
     };
   };
   agent: {
@@ -1442,6 +1444,10 @@ export interface TranslationSchema {
       clientsFilterOverdue: string;
       clientsFilterSigning: string;
       clientsFilterRenewal: string;
+      rentSlipsTitle: string;
+      rentSlipsConfirm: string;
+      rentSlipsConfirmed: string;
+      rentSlipsLoadFailed: string;
       moreTitle: string;
       openServices: string;
       openCalendar: string;

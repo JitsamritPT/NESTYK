@@ -22,8 +22,16 @@ export function openReceivedBillSlip(id: number): Promise<{ url: string }> {
   return apiGet(`/bills/received/${id}/payment-slip`);
 }
 
-export function confirmMyBill(id: number): Promise<TenantBill> {
-  return apiPost(`/bills/mine/${id}/confirm`, {});
+export function listAgentRentSlips(): Promise<TenantBill[]> {
+  return apiGet("/bills/agent");
+}
+
+export function openAgentRentSlip(id: number): Promise<{ url: string }> {
+  return apiGet(`/bills/agent/${id}/payment-slip`);
+}
+
+export function confirmAgentRentSlip(id: number): Promise<TenantBill> {
+  return apiPost(`/bills/agent/${id}/confirm`, {});
 }
 
 export async function uploadMyBillSlip(

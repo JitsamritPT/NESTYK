@@ -300,8 +300,41 @@ export class TenantBillingService {
     return this.serialize(await this.mine(userId, id));
   }
 
-  async confirmPayment(userId: number, id: number) {
-    const bill = await this.mine(userId, id);
+  private agentBills(agentId: number) {
+    return this.billsQuery()
+      .leftJoin("c.template", "template")
+      .leftJoin("c.agreement_type", "agreementType")
+      .where("(c.created_by_user_id = :agentId OR tenant.created_by_user_id = :agentId)", { agentId })
+      .andWhere("COALESCE(template.form_kind, agreementType.form_kind) = 'lease'");
+  }
+
+  private async forAgent(agentId: number, id: number) {
+    const bill = await this.agentBills(agentId).andWhere("b.id = :id", { id }).getOne();
+    if (!bill) throw new NotFoundException("ไม่พบบิล");
+    return bill;
+  }
+
+  async listForAgent(agentId: number) {
+    const rows = await this.agentBills(agentId)
+      .andWhere("b.status = 'pending'")
+      .andWhere("b.payment_slip_path IS NOT NULL")
+      .orderBy("b.due_date", "ASC")
+      .addOrderBy("b.id", "ASC")
+      .getMany();
+    return rows.map((bill) => this.serialize(bill));
+  }
+
+  async agentSlipUrl(agentId: number, id: number) {
+    const bill = await this.forAgent(agentId, id);
+    if (!bill.payment_slip_path) throw new NotFoundException("ยังไม่ได้แนบสลิป");
+    if (!this.documents) throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
+    const url = (await this.documents.signPaths([bill.payment_slip_path])).get(bill.payment_slip_path);
+    if (!url) throw new ServiceUnavailableException("เปิดเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง");
+    return { url };
+  }
+
+  async confirmForAgent(agentId: number, id: number) {
+    const bill = await this.forAgent(agentId, id);
     if (bill.status === "paid") return this.serialize(bill);
     if (!bill.payment_slip_path) throw new BadRequestException("กรุณาแนบสลิปก่อนยืนยัน");
     const result = await this.db.getRepository(TenantBillEntity).update(
@@ -309,6 +342,6 @@ export class TenantBillingService {
       { status: "paid", paid_at: new Date() },
     );
     if (result.affected !== 1) throw new ConflictException("บิลถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
-    return this.serialize(await this.mine(userId, id));
+    return this.serialize(await this.forAgent(agentId, id));
   }
 }

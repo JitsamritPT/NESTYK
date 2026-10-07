@@ -102,9 +102,13 @@ test('status is pending through the grace day, then overdue; paid stays paid', (
 function fixture(row) {
   const uploaded = [], removed = [], updates = [];
   const qb = { params: {} };
-  for (const key of ['innerJoinAndSelect', 'leftJoinAndSelect']) qb[key] = () => qb;
+  for (const key of ['innerJoinAndSelect', 'leftJoinAndSelect', 'leftJoin', 'orderBy', 'addOrderBy']) qb[key] = () => qb;
   qb.where = qb.andWhere = (_sql, params) => { Object.assign(qb.params, params); return qb; };
-  qb.getOne = async () => (qb.params.id === row.id && qb.params.userId === row.tenant.user_id ? structuredClone(row) : null);
+  qb.getOne = async () => {
+    if (qb.params.id !== row.id) return null;
+    if (qb.params.agentId != null) return qb.params.agentId === row.lease_contract.created_by_user_id ? structuredClone(row) : null;
+    return qb.params.userId === row.tenant.user_id ? structuredClone(row) : null;
+  };
   const repo = {
     createQueryBuilder: () => { qb.params = {}; return qb; },
     update: async (where, patch) => {
@@ -123,7 +127,7 @@ function fixture(row) {
 
 const file = { buffer: Buffer.from([0xff, 0xd8, 0xff]), size: 3, originalname: 'slip.jpg' };
 
-test('uploading a slip keeps the bill unpaid until the tenant confirms', async () => {
+test('uploading a slip keeps the bill unpaid until the agent confirms', async () => {
   const row = bill({ payment_slip_path: '7/payment-slips/old.jpg' });
   const f = fixture(row);
   const view = await f.service.uploadPaymentSlip(8, 5, file);
@@ -134,7 +138,8 @@ test('uploading a slip keeps the bill unpaid until the tenant confirms', async (
   assert.equal(f.updates[0].where.status, 'pending');
   assert.equal((await f.service.paymentSlipUrl(8, 5)).url, 'https://signed.example/7/payment-slips/0.jpg');
   await assert.rejects(() => f.service.receivedSlipUrl(8, 5), (e) => e.getStatus() === 404);
-  const confirmed = await f.service.confirmPayment(8, 5);
+  await assert.rejects(() => f.service.confirmForAgent(99, 5), (e) => e.getStatus() === 404);
+  const confirmed = await f.service.confirmForAgent(7, 5);
   assert.equal(confirmed.status, 'paid');
   assert.equal((await f.service.receivedSlipUrl(8, 5)).url, 'https://signed.example/7/payment-slips/0.jpg');
   await assert.rejects(() => f.service.uploadPaymentSlip(8, 5, file), (e) => e.getStatus() === 400);
