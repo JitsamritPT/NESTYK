@@ -59,6 +59,8 @@ import {
 } from "./lease-agreement";
 import { validateReservationLetter, emptyReservationLetter, stampReservationDocumentHeader, bangkokDate } from "./reservation-letter";
 import { ensurePartyLogin } from "./party-login";
+import { upcomingRentPeriod } from "../../billing/tenant-billing.service";
+import { bangkokToday } from "../../billing/rent-schedule";
 import type {
   AgentContract,
   AgentContractDocumentKind,
@@ -1806,9 +1808,15 @@ export class AgentContractsService {
       .orderBy("c.id", "DESC")
       .getMany();
     const signed = await this.signedFor(rows);
+    const today = bangkokToday();
     return rows.map((row) => ({
       ...this.serialize(row, signed),
       myParties: this.partiesFor(userId, row),
+      nextRentBill:
+        row.status === "active" &&
+        (row.template?.form_kind ?? row.agreement_type?.form_kind ?? "lease") === "lease"
+          ? upcomingRentPeriod(row, today)
+          : null,
     }));
   }
   async signAsParty(userId: number, id: number, input: unknown) {

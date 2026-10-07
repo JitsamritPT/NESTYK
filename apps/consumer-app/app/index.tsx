@@ -13,6 +13,7 @@ import {
 } from '../components/AgentTenantsScreen';
 import { PartyContractsScreen, type PartyContractRoom } from '../components/PartyContractsScreen';
 import { TenantBillsScreen } from '../components/TenantBillsScreen';
+import { tenantWorkspaceCopy } from '../lib/tenant-workspace-copy';
 import { TenantNextBillCard } from '../components/TenantNextBillCard';
 import { OwnerConfirmedRent } from '../components/OwnerConfirmedRent';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
@@ -521,8 +522,9 @@ export default function AppHomeScreen() {
   const headingText = { color: theme.textHeading };
   const secondaryText = { color: theme.textSecondary };
 
+  const isTenantWorkspace = activeRole === 'tenant' && (partyInbox || activeTab === 'bills');
   const screenTitle =
-    activeRole === 'agent' || partyInbox
+    activeRole === 'agent' || partyInbox || isTenantWorkspace
       ? undefined
       : getScreenTitle(activeTab, t);
   const partyRole = activeRole === 'tenant' ? 'tenant' : 'owner';
@@ -1308,11 +1310,12 @@ export default function AppHomeScreen() {
     <>
       <MobileModePage
         role={activeRole}
+        backgroundColor={isTenantWorkspace ? theme.surface : undefined}
         screenTitle={screenTitle}
         scrollable={partyInbox || !isWizardTab}
         refreshing={pageRefreshing}
         onRefresh={
-          (partyInbox && activeRole !== 'agent') ||
+          isTenantWorkspace || (partyInbox && activeRole !== 'agent') ||
           (!partyInbox && !isWizardTab && activeRole === 'agent' &&
           ['dashboard', 'listingLead', 'listingRoom'].includes(activeTab))
             ? handlePageRefresh : undefined
@@ -1325,7 +1328,7 @@ export default function AppHomeScreen() {
               title={
                 selectedPartyRoom
                   ? (selectedPartyRoom.room ? `ห้อง ${selectedPartyRoom.room}` : selectedPartyRoom.property)
-                  : "สัญญาของฉัน"
+                  : (partyRole === 'tenant' ? tenantWorkspaceCopy(locale).myContracts : "สัญญาของฉัน")
               }
               workspaceLabel={
                 selectedPartyRoom?.room ? selectedPartyRoom.property : t.roles[partyRole]
@@ -1336,6 +1339,13 @@ export default function AppHomeScreen() {
                 setOpenedPartyContract(null);
                 setSelectedPartyRoom(null);
               }}
+              onMenuPress={() => setDrawerOpen(true)}
+            />
+          ) : isTenantWorkspace ? (
+            <MobileSectionHeader
+              title={t.mobile.tabs.bills}
+              workspaceLabel={t.roles.tenant}
+              accentColor={tokens.colors.roles.tenant}
               onMenuPress={() => setDrawerOpen(true)}
             />
           ) : (
@@ -1381,10 +1391,10 @@ export default function AppHomeScreen() {
           isTenantDetail ? null : (
             <MobileBottomTabBar
               activeRole={activeRole}
-              activeTab={activeTab}
+              activeTab={activeRole === 'tenant' && partyInbox ? 'menu' : activeTab}
               onTabPress={handleTabPress}
               accentColor={accentColor}
-              {...(activeRole === 'agent'
+              {...(activeRole === 'agent' || isTenantWorkspace
                 ? {
                     activeTintColor: theme.screenTitle,
                     indicatorColor: tokens.colors.brand[500],
@@ -1397,6 +1407,7 @@ export default function AppHomeScreen() {
         <React.Fragment key={`${activeRole}-${activeTab}-${partyInbox ? 'inbox' : 'tab'}`}>
           {partyInbox ? (
             <PartyContractsScreen
+              mode={partyRole}
               opened={openedPartyContract}
               onOpenedChange={setOpenedPartyContract}
               selectedRoom={selectedPartyRoom}

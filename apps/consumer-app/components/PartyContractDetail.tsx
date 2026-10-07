@@ -30,6 +30,7 @@ import {
 } from "./ContractSignaturePad";
 import { ContractDocumentPreview } from "./ContractDocumentPreview";
 import { ReservationPaymentCard } from "./ReservationPaymentCard";
+import { TenantContractAttachments } from "./TenantContractList";
 import { bookingPaymentBlocksSigning, BOOKING_PAYMENT_BEFORE_SIGNING } from "../lib/contract-signing";
 
 const CONTRACT_ICON: Record<PartyContract["formKind"], AppIconName> = {
@@ -98,6 +99,7 @@ export function PartyContractDetail({
   onReloadSettled,
   refreshError,
   refreshing = false,
+  mode = "owner",
 }: {
   contract: PartyContract;
   accentColor?: string;
@@ -105,6 +107,7 @@ export function PartyContractDetail({
   onReloadSettled?: (token: number) => void;
   refreshError?: string;
   refreshing?: boolean;
+  mode?: "owner" | "tenant";
   onUpdated: (next: PartyContract) => void;
 }) {
   const { theme } = useMobileTheme();
@@ -342,8 +345,8 @@ export function PartyContractDetail({
           </View>
         </View>
         <View style={styles.contractLine}>
-          <View style={[styles.kindIcon, { backgroundColor: `${accentColor}18` }]}>
-            <MobileIcon name={CONTRACT_ICON[contract.formKind]} size={18} color={accentColor} />
+          <View style={[styles.kindIcon, { backgroundColor: mode === "tenant" ? theme.background : `${accentColor}18` }]}>
+            <MobileIcon name={CONTRACT_ICON[contract.formKind]} size={18} color={mode === "tenant" ? theme.screenTitle : accentColor} />
           </View>
           <Text style={[styles.copy, title, styles.contractNoText]}>
             เลขที่สัญญา {contract.contractNo}
@@ -386,6 +389,13 @@ export function PartyContractDetail({
           onUpload={mine.includes("tenant") ? () => setSlipSourceOpen(true) : undefined}
         />
       )}
+
+      {mode === "tenant" && contract.formKind === "lease" ? <TenantContractAttachments
+        attachments={attachments}
+        loading={loading}
+        disabled={busy || previewBusy || refreshing}
+        onOpen={(id) => void openFile(id)}
+      /> : null}
 
       <View style={[styles.card, card]}>
         <Text style={[styles.contractNo, title]}>เอกสารที่จำเป็นของฉัน</Text>

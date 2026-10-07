@@ -1,3 +1,5 @@
+import type { TenantNextBill } from "./contracts";
+
 export interface AgreementTemplate {
   id: number;
   agreementTypeCode: string;
@@ -100,6 +102,8 @@ export interface ContractDelivery {
 }
 export interface PartyContract extends AgentContract {
   myParties: Array<"owner" | "tenant">;
+  /** Next scheduled rent round, independently of any outstanding bills. */
+  nextRentBill?: Pick<TenantNextBill, "period" | "issueDate" | "dueDate" | "graceUntil"> | null;
 }
 export interface ContractCandidate {
   leadId: number;

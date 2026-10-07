@@ -6,6 +6,7 @@ import type { AppIconName } from "@nestyk/ui/native";
 import type { AgentContractStatus, PartyContract } from "@nestyk/types";
 import { listMyContracts } from "../lib/party-contracts-api";
 import { PartyContractDetail } from "./PartyContractDetail";
+import { TenantContractList } from "./TenantContractList";
 
 const STATUS_LABEL: Record<AgentContractStatus, string> = {
   draft: "ฉบับร่าง",
@@ -97,6 +98,7 @@ export function PartyContractsScreen({
   selectedRoom,
   onSelectedRoomChange,
   accentColor = tokens.colors.roles.owner,
+  mode = "owner",
 }: {
   reloadToken?: number;
   onReloadSettled?: (token: number) => void;
@@ -106,6 +108,7 @@ export function PartyContractsScreen({
   selectedRoom: PartyContractRoom | null;
   onSelectedRoomChange: (room: PartyContractRoom | null) => void;
   accentColor?: string;
+  mode?: "owner" | "tenant";
 }) {
   const { theme } = useMobileTheme();
   const [rows, setRows] = useState<PartyContract[]>([]);
@@ -165,9 +168,15 @@ export function PartyContractsScreen({
         </Text>
       )}
       {loading ? <ActivityIndicator color={tokens.colors.brand[500]} /> : null}
-      {!loading && !rows.length && !error ? (
+      {mode !== "tenant" && !loading && !rows.length && !error ? (
         <Text style={[styles.copy, body]}>ยังไม่มีสัญญาที่ส่งเข้าบัญชีนี้</Text>
       ) : null}
+      {mode === "tenant" ? (rows.length || (!loading && !error) ? <TenantContractList
+        rows={rows}
+        selectedRoom={selectedRoom}
+        onSelectRoom={onSelectedRoomChange}
+        onOpen={onOpenedChange}
+      /> : null) : <>
       {!selectedRoom
         ? roomGroups(rows).map((room) => (
             <Pressable
@@ -247,6 +256,7 @@ export function PartyContractsScreen({
           </MobileButton>
         </View>
       ))}
+      </>}
       <Modal
         visible={opened != null}
         presentationStyle="fullScreen"
@@ -255,7 +265,7 @@ export function PartyContractsScreen({
       >
         {opened ? (
           <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-            <SafeAreaView style={[styles.detailRoot, { backgroundColor: theme.background }]}>
+            <SafeAreaView style={[styles.detailRoot, { backgroundColor: mode === "tenant" ? theme.surface : theme.background }]}>
               <View style={[styles.detailHeader, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
                 <MobileSectionHeader
                   title="รายละเอียดสัญญา"
@@ -278,6 +288,7 @@ export function PartyContractsScreen({
                 ) : undefined}
               >
                 <PartyContractDetail
+                  mode={mode}
                   key={opened.id}
                   contract={opened}
                   accentColor={accentColor}

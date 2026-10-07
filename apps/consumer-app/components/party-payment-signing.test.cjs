@@ -30,6 +30,7 @@ function harness(contract) {
     if (name === '../lib/party-contracts-api') return { listMyAttachments: async () => ({ requirements: [], documents: [], documentTypes: [] }) };
     if (name === '../lib/contract-signing') return load('../lib/contract-signing.ts');
     if (name === './ReservationPaymentCard') return { ReservationPaymentCard: () => null };
+    if (name === './TenantContractList') return { TenantContractAttachments: () => null };
     if (name === './ContractDocumentPreview') return { ContractDocumentPreview: () => null };
     if (name === './ContractSignaturePad') return { ContractSignaturePad: () => null };
     throw new Error(`Unexpected dependency: ${name}`);
