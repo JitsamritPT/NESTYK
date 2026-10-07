@@ -66,8 +66,10 @@ import { RoomTenancyEntity } from './room-tenancy.entity';
 import { LeaseContractEntity } from './lease-contract.entity';
 import { AgentInvoiceEntity } from './agent-invoice.entity';
 import { AgentCommissionConfirmationEntity } from './agent-commission-confirmation.entity';
+import { TenantBillEntity } from './tenant-bill.entity';
 export * from './agent-invoice.entity';
 export * from './agent-commission-confirmation.entity';
+export * from './tenant-bill.entity';
 
 /** All blueprint tables (docs/new-project) — public schema via DATABASE_URL */
 export const ALL_ENTITIES = [
@@ -108,6 +110,7 @@ export const ALL_ENTITIES = [
   LeaseContractEntity,
   AgentInvoiceEntity,
   AgentCommissionConfirmationEntity,
+  TenantBillEntity,
 ];
 
 /** @deprecated use ALL_ENTITIES */

@@ -257,6 +257,38 @@ export interface TranslationSchema {
     billsAndPayments: string;
     reportIssue: string;
     cleaningRequest: string;
+    bills: {
+      current: string;
+      history: string;
+      rentFor: string;
+      dueDate: string;
+      graceUntil: string;
+      paidAt: string;
+      payTo: string;
+      status: Record<'upcoming' | 'pending' | 'paid' | 'overdue', string>;
+      next: string;
+      issueOn: string;
+      issuedOn: string;
+      payWindow: string;
+      noUpcoming: string;
+      viewBills: string;
+      uploadSlip: string;
+      replaceSlip: string;
+      viewSlip: string;
+      slipSourceTitle: string;
+      fromPhotos: string;
+      fromFiles: string;
+      slipUploaded: string;
+      confirmPayment: string;
+      slipConfirmed: string;
+      photoPermission: string;
+      fileTooLarge: string;
+      empty: string;
+      emptyHint: string;
+      loadFailed: string;
+      retry: string;
+      close: string;
+    };
   };
   owner: {
     myListings: string;
@@ -264,6 +296,24 @@ export interface TranslationSchema {
     rentalIncome: string;
     coAgentSettings: string;
     requestMaintenance: string;
+    bills: {
+      current: string;
+      history: string;
+      rentFor: string;
+      tenant: string;
+      dueDate: string;
+      graceUntil: string;
+      paidAt: string;
+      status: Record<'pending' | 'paid' | 'overdue', string>;
+      viewSlip: string;
+      empty: string;
+      emptyHint: string;
+      loadFailed: string;
+      retry: string;
+      close: string;
+      confirmedTitle: string;
+      confirmedEmpty: string;
+    };
   };
   agent: {
     calendar: {
@@ -1535,6 +1585,10 @@ export interface TranslationSchema {
       clientsFilterOverdue: string;
       clientsFilterSigning: string;
       clientsFilterRenewal: string;
+      rentSlipsTitle: string;
+      rentSlipsConfirm: string;
+      rentSlipsConfirmed: string;
+      rentSlipsLoadFailed: string;
       moreTitle: string;
       openServices: string;
       openCalendar: string;

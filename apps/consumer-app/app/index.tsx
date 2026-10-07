@@ -12,6 +12,9 @@ import {
   type TenantEntry,
 } from '../components/AgentTenantsScreen';
 import { PartyContractsScreen, type PartyContractRoom } from '../components/PartyContractsScreen';
+import { TenantBillsScreen } from '../components/TenantBillsScreen';
+import { TenantNextBillCard } from '../components/TenantNextBillCard';
+import { OwnerConfirmedRent } from '../components/OwnerConfirmedRent';
 import { AgentLeadsScreen } from '../components/AgentLeadsScreen';
 import { AgentRoomsScreen } from '../components/AgentRoomsScreen';
 import { CreateLeadForm, type LeadFormTab } from '../components/CreateLeadForm';
@@ -166,6 +169,7 @@ export default function AppHomeScreen() {
   const [tenantDetail, setTenantDetail] = useState<TenantDetailState>(TENANT_DETAIL_CLOSED);
   const tenantDetailActionsRef = useRef<TenantDetailActions | null>(null);
   const [partyContractsReloadToken, setPartyContractsReloadToken] = useState(0);
+  const [billsReloadToken, setBillsReloadToken] = useState(0);
   /** Where header/hardware back should return from secondary screens (e.g. create listing). */
   const [secondaryReturnTab, setSecondaryReturnTab] = useState<MobileAppTab | null>(null);
   const createListingBackRef = useRef<(() => boolean) | null>(null);
@@ -777,10 +781,16 @@ export default function AppHomeScreen() {
       setPartyContractsReloadToken(token);
     } else if (activeRole === 'agent' && activeTab === 'dashboard') {
       setDashboardRefreshKey(token);
+    } else if ((activeRole === 'tenant' || activeRole === 'owner') && activeTab === 'dashboard') {
+      setBillsReloadToken(token);
+    } else if (activeTab === 'clients') {
+      setBillsReloadToken(token);
     } else if (activeTab === 'listingLead') {
       setLeadsReloadToken(token);
     } else if (activeTab === 'listingRoom') {
       setRoomsReloadToken(token);
+    } else if (activeTab === 'bills' || activeTab === 'income') {
+      setBillsReloadToken(token);
     } else {
       finishPageRefresh(token);
     }
@@ -817,29 +827,7 @@ export default function AppHomeScreen() {
 
   const renderBillsBody = () => (
     <View style={styles.bodyContainer}>
-      <View style={[styles.card, cardStyle]}>
-        <Text style={[styles.sectionHeader, headingText]}>Current Bill</Text>
-        <View style={styles.billRow}>
-          <Text style={[styles.billLabel, secondaryText]}>Rent (Sep 2026)</Text>
-          <Text style={[styles.billValue, headingText]}>14,500 THB</Text>
-        </View>
-        <View style={styles.billRow}>
-          <Text style={[styles.billLabel, secondaryText]}>Utilities</Text>
-          <Text style={[styles.billValue, headingText]}>850 THB</Text>
-        </View>
-        <View style={[styles.billRow, styles.billTotal, { borderTopColor: theme.border }]}>
-          <Text style={[styles.billLabel, secondaryText, { fontWeight: '600' }]}>Total Due</Text>
-          <Text style={[styles.billValue, { color: tokens.colors.danger, fontWeight: '700' }]}>15,350 THB</Text>
-        </View>
-        <View style={{ marginTop: 14 }}>
-          <MobileButton onPress={() => Alert.alert('Payment', 'Open PromptPay QR')}>
-            <View style={styles.buttonRow}>
-              <MobileIcon name="qr-code" size={16} color={tokens.colors.primary} />
-              <Text style={styles.buttonLabel}>{t.common.payWithQr}</Text>
-            </View>
-          </MobileButton>
-        </View>
-      </View>
+      <TenantBillsScreen reloadToken={billsReloadToken} onReloadSettled={finishPageRefresh} />
     </View>
   );
 
@@ -857,7 +845,7 @@ export default function AppHomeScreen() {
     }
     const summaries: Record<UserRole, { title: string; desc: string; badge: string }> = {
       guest: { title: 'Welcome to NESTYK', desc: 'Browse rooms and schedule viewings nearby.', badge: 'Guest' },
-      tenant: { title: 'Tenant Dashboard', desc: 'Lease active · Next bill due in 3 days', badge: 'Active Lease' },
+      tenant: { title: 'Tenant Dashboard', desc: '', badge: 'Active Lease' },
       owner: { title: 'Owner Dashboard', desc: '3 active listings · 2 tenants occupied', badge: '3 Listings' },
       agent: { title: 'Agent Dashboard', desc: '24 co-broke listings · 45,000 THB commission', badge: 'Partner' },
       admin: { title: 'Operations Dashboard', desc: 'Pending tickets: 3 · Inspections today: 2', badge: 'Ops' },
@@ -870,7 +858,20 @@ export default function AppHomeScreen() {
             <Text style={[styles.sectionHeader, headingText]}>{summary.title}</Text>
             <MobileBadge role={activeRole} label={summary.badge} />
           </View>
-          <Text style={[styles.sectionDesc, secondaryText]}>{summary.desc}</Text>
+          {activeRole === 'tenant' ? (
+            <TenantNextBillCard
+              reloadToken={billsReloadToken}
+              onReloadSettled={finishPageRefresh}
+              onOpenBills={() => handleTabPress('bills')}
+            />
+          ) : activeRole === 'owner' ? (
+            <OwnerConfirmedRent
+              reloadToken={billsReloadToken}
+              onReloadSettled={finishPageRefresh}
+            />
+          ) : (
+            <Text style={[styles.sectionDesc, secondaryText]}>{summary.desc}</Text>
+          )}
         </View>
       </View>
     );
@@ -934,10 +935,11 @@ export default function AppHomeScreen() {
     if (activeTab === 'income') {
       return (
         <View style={styles.bodyContainer}>
-          <View style={[styles.card, cardStyle]}>
-            <Text style={[styles.sectionHeader, headingText]}>Rental Income</Text>
-            <Text style={[styles.sectionDesc, secondaryText]}>Sep 2026 · 3 units · 43,500 THB collected</Text>
-          </View>
+          <TenantBillsScreen
+            mode="owner"
+            reloadToken={billsReloadToken}
+            onReloadSettled={finishPageRefresh}
+          />
         </View>
       );
     }
@@ -1064,6 +1066,8 @@ export default function AppHomeScreen() {
           ) : null}
           <AgentTenantsScreen
             workFilter={clientsWorkFilter}
+            reloadToken={billsReloadToken}
+            onReloadSettled={finishPageRefresh}
             creating={creatingTenant}
             onCreatingChange={setCreatingTenant}
             onCreateBusy={setCreateTenantBusy}
@@ -1514,18 +1518,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   listingActionRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  billRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
-  billTotal: { borderTopWidth: 1, paddingTop: 8 },
-  billLabel: {
-    fontFamily: tokens.typography.native.body,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  billValue: {
-    fontFamily: tokens.typography.native.body,
-    fontSize: 14,
-    lineHeight: 20,
-  },
   buttonRow: {
     flexDirection: 'row',
     alignItems: 'center',

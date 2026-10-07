@@ -25,6 +25,7 @@ import { getAgentTenant, listAgentTenants, updateAgentTenant } from "../lib/agen
 import { nextIdentityNumberDraft } from "../lib/identity-number";
 import { TenantForm } from "./TenantForm";
 import { ContractsScreen } from "./ContractsScreen";
+import { AgentRentSlips } from "./AgentRentSlips";
 import type { CreateDocumentKind } from "./ContractTypePicker";
 
 type Filter = "all" | "signing" | "active";
@@ -105,6 +106,8 @@ export type TenantEntry = {
 
 export function AgentTenantsScreen({
   workFilter = null,
+  reloadToken = 0,
+  onReloadSettled,
   creating: creatingProp,
   onCreatingChange,
   onCreateBusy,
@@ -136,6 +139,8 @@ export function AgentTenantsScreen({
     | "renewal"
     | "lead_follow_up"
     | null;
+  reloadToken?: number;
+  onReloadSettled?: (token: number) => void;
 } = {}) {
   const { t } = useLocale();
   const c = t.agent.tenants;
@@ -217,11 +222,15 @@ export function AgentTenantsScreen({
     }
   }
   useEffect(() => {
-    void reload();
+    let cancelled = false;
+    void reload().finally(() => {
+      if (!cancelled) onReloadSettled?.(reloadToken);
+    });
     return () => {
+      cancelled = true;
       refreshVersion.current++;
     };
-  }, []);
+  }, [reloadToken]);
   // A tenant the shell asks for by id opens the same way as a tap on its row.
   useEffect(() => {
     if (entry && !entry.tenant) void open(entry.tenantId);
@@ -609,6 +618,7 @@ export function AgentTenantsScreen({
   });
   return (
     <View style={s.root}>
+      <AgentRentSlips reloadToken={reloadToken} />
       <MobileListSearchRow
         value={query}
         onChangeText={setQuery}
