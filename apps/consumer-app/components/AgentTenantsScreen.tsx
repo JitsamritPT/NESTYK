@@ -12,7 +12,7 @@ import {
   useMobileTheme,
 } from "@nestyk/ui/native";
 import type { AgentContract, AgentTenant, AgentTenantBill, AgentTenantBilling, TenantBill } from "@nestyk/types";
-import { useLocale } from "@nestyk/i18n";
+import { localizedError, useLocale } from "@nestyk/i18n";
 import { getAgentTenant, listAgentTenants, updateAgentTenant } from "../lib/agent-tenants-api";
 import { nextIdentityNumberDraft } from "../lib/identity-number";
 import { billFormatters } from "../lib/bill-format";
@@ -222,7 +222,7 @@ export function AgentTenantsScreen({
       if (!waiting) setError(c.list.slipsLoadError);
     } catch (e) {
       if (version === refreshVersion.current)
-        setError(e instanceof Error ? e.message : c.list.loadError);
+        setError(localizedError(e, c.list.loadError, locale));
     } finally {
       if (version === refreshVersion.current) setLoading(false);
     }
@@ -253,7 +253,7 @@ export function AgentTenantsScreen({
       setSelected(await getAgentTenant(id));
       setSection(at);
     } catch (e) {
-      setError(e instanceof Error ? e.message : c.list.openError);
+      setError(localizedError(e, c.list.openError, locale));
     } finally {
       setOpening(false);
     }
@@ -264,9 +264,7 @@ export function AgentTenantsScreen({
       setSelected((current) => (current?.id === id ? latest : current));
       setItems((current) => current.map((t) => (t.id === id ? latest : t)));
     } catch {
-      setError(
-        "สัญญาบันทึกแล้ว แต่โหลดข้อมูลผู้เช่าล่าสุดไม่สำเร็จ กรุณาออกจากเมนูผู้เช่าแล้วเข้าใหม่",
-      );
+      setError(c.list.contractReloadFailed);
     }
   }
   function beginEdit(tenant: AgentTenant) {
@@ -309,9 +307,7 @@ export function AgentTenantsScreen({
       setEditing(false);
       setNotice(d.saved);
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง",
-      );
+      setError(localizedError(e, c.list.saveFailed, locale));
     } finally {
       setSavingEdit(false);
     }
@@ -446,7 +442,7 @@ export function AgentTenantsScreen({
         setBilling((current) => (current ? confirmBill(current, bill.id) : current));
         setPaymentNotice(d.confirmedNotice.replace("{month}", fmt.month(bill.period)));
       } catch (e) {
-        setError(e instanceof Error && e.message ? e.message : d.slipConfirmFailed);
+        setError(localizedError(e, d.slipConfirmFailed, locale));
       } finally {
         setConfirmingId(null);
       }
@@ -457,7 +453,7 @@ export function AgentTenantsScreen({
         const { url } = await openAgentRentSlip(bill.id);
         setSlipPreview({ url, title: bill.documentNo });
       } catch (e) {
-        setError(e instanceof Error && e.message ? e.message : c.list.slipsLoadError);
+        setError(localizedError(e, c.list.slipsLoadError, locale));
       }
     };
     return (

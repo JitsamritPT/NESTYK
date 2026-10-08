@@ -1,4 +1,7 @@
+import type { ContractCopy } from './locales/contracts/th';
+
 export type SupportedLocale = 'th' | 'en' | 'zh' | 'ja';
+export type { ContractCopy };
 
 export interface TranslationSchema {
   common: {
@@ -16,6 +19,9 @@ export interface TranslationSchema {
     schedule: string;
     signOut: string;
     signIn: string;
+    errorGeneric: string;
+    fileTooLarge: string;
+    photoPermission: string;
   };
   roles: {
     guest: string;
@@ -81,6 +87,42 @@ export interface TranslationSchema {
       title: string;
       activity: string;
       messages: string;
+      demo: {
+        viewingConfirmed: string;
+        rentDue: string;
+        repairUpdated: string;
+        leaseSigned: string;
+        moveInInspection: string;
+        welcome: string;
+      };
+    };
+    demoAlerts: {
+      viewingLink: string;
+      serviceRequestTitle: string;
+      serviceRequested: string;
+      openTickets: string;
+      emergencyBody: string;
+      moveTitle: string;
+      moveBody: string;
+      listingPublished: string;
+      comingSoon: string;
+    };
+    partyContracts: {
+      title: string;
+      room: string;
+      loadFailed: string;
+      loadDocumentsFailed: string;
+      attached: string;
+      attachFailed: string;
+      openContractFailed: string;
+      openDocumentFailed: string;
+      slipPermission: string;
+      slipSent: string;
+      slipUploadFailed: string;
+      signed: string;
+      signFailed: string;
+      drawSignatureFirst: string;
+      bookingPaymentBeforeSigning: string;
     };
     profile: {
       hubSubtitle: string;
@@ -564,6 +606,8 @@ export interface TranslationSchema {
         loadError: string;
         openError: string;
         slipsLoadError: string;
+        saveFailed: string;
+        contractReloadFailed: string;
       };
     };
     leads: {
@@ -978,6 +1022,37 @@ export interface TranslationSchema {
       };
     };
     contracts: {
+      notice: {
+        connectError: string;
+        selectTenantRoom: string;
+        selectTenant: string;
+        stepRequired: string;
+        invoiceCreated: string;
+        sharedOwner: string;
+        sharedTenant: string;
+        openDocumentFailed: string;
+        generatedReservation: string;
+        generatedBroker: string;
+        generatedLease: string;
+        noTemplate: string;
+        templateRequired: string;
+        draftCancelled: string;
+        reservationRequired: string;
+        brokerRequired: string;
+        leaseRequired: string;
+        financialRequired: string;
+        unsupportedFields: string;
+        draftEdited: string;
+        draftSavedWithInvoice: string;
+        draftSaved: string;
+        typeNotFound: string;
+        invoiceNotFound: string;
+        leaseRequiresReservation: string;
+        loadFormFailed: string;
+        createDocumentFailed: string;
+        loadAttachmentsFailed: string;
+        actionFailed: string;
+      };
       financial: {
         create: string;
         edit: string;
@@ -1761,6 +1836,7 @@ export interface TranslationSchema {
       comingSoon: string;
     };
   };
+  contracts: ContractCopy;
   masters: {
     facilities: Record<string, string>;
     facilityGroups: Record<string, string>;

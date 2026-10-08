@@ -77,7 +77,9 @@ import {
   MOCK_ACTIVITY_NOTIFICATIONS,
   MOCK_MESSAGE_NOTIFICATIONS,
   MOCK_SERVICE_TICKETS,
+  type DemoNotification,
 } from '../lib/mock-data';
+import { localeTag } from '../lib/lead-format';
 
 function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t']): string {
   switch (tab) {
@@ -150,8 +152,23 @@ export default function AppHomeScreen() {
   const [selectedPartyRoom, setSelectedPartyRoom] = useState<PartyContractRoom | null>(null);
   const [openedPartyContract, setOpenedPartyContract] = useState<PartyContract | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
-  const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
+  const [notificationsRead, setNotificationsRead] = useState(false);
+  const [notifications, messages] = useMemo(() => {
+    const time = new Intl.DateTimeFormat(localeTag(locale), {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const show = (items: DemoNotification[]) =>
+      items.map(({ text, at, unread, ...item }) => ({
+        ...item,
+        text: t.mobile.notifications.demo[text],
+        time: time.format(new Date(at)),
+        unread: unread && !notificationsRead,
+      }));
+    return [show(MOCK_ACTIVITY_NOTIFICATIONS), show(MOCK_MESSAGE_NOTIFICATIONS)];
+  }, [t, locale, notificationsRead]);
   const [createLeadBusy, setCreateLeadBusy] = useState(false);
   const [leadsWorkFilter, setLeadsWorkFilter] = useState<'lead_follow_up' | null>(null);
   const [clientsWorkFilter, setClientsWorkFilter] = useState<
@@ -248,7 +265,7 @@ export default function AppHomeScreen() {
       setActiveRole('guest');
       setActiveTab('home');
     } else if (hostOrPath.includes('viewing')) {
-      Alert.alert('Schedule Viewing', `Open viewing request from link: ${url}`);
+      Alert.alert(t.common.scheduleViewing, t.mobile.demoAlerts.viewingLink.replace('{url}', url));
     }
   };
 
@@ -822,7 +839,7 @@ export default function AppHomeScreen() {
           <Text style={[styles.listingSub, secondaryText]}>{item.roomType} • {item.floor}</Text>
           <View style={styles.listingActionRow}>
             <View style={{ flex: 1 }}>
-              <MobileButton variant="outline" onPress={() => Alert.alert('Schedule Viewing', item.title)}>
+              <MobileButton variant="outline" onPress={() => Alert.alert(t.common.scheduleViewing, item.title)}>
                 <View style={styles.buttonRow}>
                   <MobileIcon name="calendar-plus" size={16} color={tokens.colors.primary} />
                   <Text style={styles.buttonLabel}>{t.common.schedule}</Text>
@@ -830,7 +847,7 @@ export default function AppHomeScreen() {
               </MobileButton>
             </View>
             <View style={{ flex: 1 }}>
-              <MobileButton onPress={() => Alert.alert('Details', item.title)}>{t.common.viewDetails}</MobileButton>
+              <MobileButton onPress={() => Alert.alert(t.common.viewDetails, item.title)}>{t.common.viewDetails}</MobileButton>
             </View>
           </View>
         </View>
@@ -1136,11 +1153,13 @@ export default function AppHomeScreen() {
           <MobileServiceCatalogBody
             currentRole={activeRole}
             activeTickets={MOCK_SERVICE_TICKETS}
-            onRequestService={(cat) => Alert.alert('Service Request', `Requested: ${cat}`)}
+            onRequestService={(cat) =>
+              Alert.alert(t.mobile.demoAlerts.serviceRequestTitle, t.mobile.demoAlerts.serviceRequested.replace('{category}', t.services[cat]))
+            }
             onHubAction={(id) => {
-              if (id === 'tickets') Alert.alert('My Tickets', `${MOCK_SERVICE_TICKETS.length} open tickets`);
-              if (id === 'emergency') Alert.alert('Emergency', 'Call NESTYK 24h support');
-              if (id === 'move') Alert.alert('Move-in / Move-out', 'Schedule inspection and cleaning');
+              if (id === 'tickets') Alert.alert(t.services.myTickets, t.mobile.demoAlerts.openTickets.replace('{count}', String(MOCK_SERVICE_TICKETS.length)));
+              if (id === 'emergency') Alert.alert(t.services.emergency, t.mobile.demoAlerts.emergencyBody);
+              if (id === 'move') Alert.alert(t.mobile.demoAlerts.moveTitle, t.mobile.demoAlerts.moveBody);
             }}
           />
         </View>
@@ -1231,7 +1250,7 @@ export default function AppHomeScreen() {
               config={defaultOwnerListingConfig}
               searchPlaces={handleSearchPlaces}
               getPlaceDetails={handleGetPlaceDetails}
-              onSubmitListing={(data) => Alert.alert('Listing Published', JSON.stringify(data))}
+              onSubmitListing={() => Alert.alert(t.mobile.demoAlerts.listingPublished)}
             />
           </View>
         );
@@ -1305,8 +1324,10 @@ export default function AppHomeScreen() {
             <MobileSectionHeader
               title={
                 selectedPartyRoom
-                  ? (selectedPartyRoom.room ? `ห้อง ${selectedPartyRoom.room}` : selectedPartyRoom.property)
-                  : "สัญญาของฉัน"
+                  ? (selectedPartyRoom.room
+                      ? t.mobile.partyContracts.room.replace('{room}', selectedPartyRoom.room)
+                      : selectedPartyRoom.property)
+                  : t.mobile.partyContracts.title
               }
               workspaceLabel={
                 selectedPartyRoom?.room ? selectedPartyRoom.property : t.roles[partyRole]
@@ -1421,10 +1442,10 @@ export default function AppHomeScreen() {
               setPartyInbox(true);
               return;
             }
-            Alert.alert('Open', action.path);
+            Alert.alert(t.mobile.demoAlerts.comingSoon);
             return;
           }
-          Alert.alert('Action', action.id);
+          Alert.alert(t.mobile.demoAlerts.comingSoon);
         }}
       />
 
@@ -1437,8 +1458,7 @@ export default function AppHomeScreen() {
           messageItems={messages}
           onBack={() => setNotificationsOpen(false)}
           onClearAll={() => {
-            setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
-            setMessages((prev) => prev.map((n) => ({ ...n, unread: false })));
+            setNotificationsRead(true);
           }}
         />
       </MobileNotificationsPanel>

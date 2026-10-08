@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import { useLocale } from "@nestyk/i18n";
+import { localizedError, useLocale } from "@nestyk/i18n";
 import { MobileBottomSheet, MobileButton, MobileIcon, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { TenantBill, TenantBillStatus } from "@nestyk/types";
 import { listMyBills, listReceivedBills, openMyBillSlip, openReceivedBillSlip, uploadMyBillSlip } from "../lib/tenant-bills-api";
@@ -53,7 +53,7 @@ export function TenantBillsScreen({
         if (!cancelled) setRows(next);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
+        if (!cancelled) setError(localizedError(e, copy.loadFailed, locale));
       })
       .finally(() => {
         if (cancelled) return;
@@ -97,7 +97,7 @@ export function TenantBillsScreen({
       setRows((current) => current.map((row) => (row.id === updated.id ? updated : row)));
       setNotice(tenantCopy.slipUploaded);
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
+      setError(localizedError(e, copy.loadFailed, locale));
     } finally {
       setUploadingId(null);
     }
@@ -109,7 +109,7 @@ export function TenantBillsScreen({
       const { url } = await (mode === "owner" ? openReceivedBillSlip : openMyBillSlip)(bill.id);
       setPreview({ url, title: `${copy.viewSlip} · ${bill.documentNo}` });
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
+      setError(localizedError(e, copy.loadFailed, locale));
     }
   }
 

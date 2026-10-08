@@ -19,7 +19,7 @@ import {
   type LeadMatchSettings,
   type LeadViewing,
 } from '@nestyk/types';
-import { useLocale } from '@nestyk/i18n';
+import { localizedError, useLocale } from '@nestyk/i18n';
 import {
   getCardElevation,
   MobileActionSheetBody,
@@ -194,7 +194,7 @@ export function AgentLeadDetailBody({
         if (active) onLeadChange(latest);
       })
       .catch((err) => {
-        if (active) setLeadError(err instanceof Error ? err.message : String(err));
+        if (active) setLeadError(localizedError(err, t.common.errorGeneric, locale));
       });
     return () => {
       active = false;
@@ -253,7 +253,7 @@ export function AgentLeadDetailBody({
       try {
         setSettings((await saveLeadMatchSettings(lead.id, draft)).effective);
       } catch (err) {
-        Alert.alert(c.matchSettings.saveError, err instanceof Error ? err.message : String(err));
+        Alert.alert(c.matchSettings.saveError, localizedError(err, t.common.errorGeneric, locale));
         return;
       } finally {
         setSavingSettings(false);
@@ -265,7 +265,7 @@ export function AgentLeadDetailBody({
       setMatchError(false);
       setSheetOpen(false);
     } catch (err) {
-      Alert.alert(c.matchRunError, err instanceof Error ? err.message : String(err));
+      Alert.alert(c.matchRunError, localizedError(err, t.common.errorGeneric, locale));
     } finally {
       setRunning(false);
     }
@@ -279,7 +279,7 @@ export function AgentLeadDetailBody({
       setMatchResult({ run: null, items: [] });
       setSheetOpen(false);
     } catch (err) {
-      Alert.alert(c.matchClearError, err instanceof Error ? err.message : String(err));
+      Alert.alert(c.matchClearError, localizedError(err, t.common.errorGeneric, locale));
     } finally {
       setClearing(false);
     }
@@ -390,7 +390,7 @@ export function AgentLeadDetailBody({
       setSheetOpen(false);
       setLostReason('');
     } catch (err) {
-      Alert.alert(c.loadError, err instanceof Error ? err.message : String(err));
+      Alert.alert(c.loadError, localizedError(err, t.common.errorGeneric, locale));
     } finally {
       setStatusBusy(false);
     }
