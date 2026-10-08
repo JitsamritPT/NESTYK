@@ -38,6 +38,15 @@ export async function confirmAgentRentSlip(id: number): Promise<TenantBill> {
   return apiPost(`/bills/agent/${id}/confirm`, {});
 }
 
+export async function returnAgentRentSlip(id: number, reason: string): Promise<TenantBill> {
+  await ensureAgentSession();
+  return apiPost(`/bills/agent/${id}/return`, { reason });
+}
+
+export function submitMyBillSlip(id: number): Promise<TenantBill> {
+  return apiPost(`/bills/mine/${id}/confirm`, {});
+}
+
 export async function uploadMyBillSlip(
   id: number,
   file: { uri: string; name: string; mimeType: string; file?: File },

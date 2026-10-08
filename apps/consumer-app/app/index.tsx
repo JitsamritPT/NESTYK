@@ -148,6 +148,7 @@ export default function AppHomeScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [partyInbox, setPartyInbox] = useState(false);
   const [selectedPartyRoom, setSelectedPartyRoom] = useState<PartyContractRoom | null>(null);
+  const [contractHistory, setContractHistory] = useState(false);
   const [openedPartyContract, setOpenedPartyContract] = useState<PartyContract | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
@@ -462,13 +463,18 @@ export default function AppHomeScreen() {
   }, [isTenantDetail]);
 
   useEffect(() => {
-    if (!partyInbox || !selectedPartyRoom || openedPartyContract) return;
+    if (!partyInbox) setContractHistory(false);
+  }, [partyInbox]);
+
+  useEffect(() => {
+    if (!partyInbox || openedPartyContract || (!selectedPartyRoom && !contractHistory)) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setSelectedPartyRoom(null);
+      if (selectedPartyRoom) setSelectedPartyRoom(null);
+      else setContractHistory(false);
       return true;
     });
     return () => sub.remove();
-  }, [partyInbox, selectedPartyRoom, openedPartyContract]);
+  }, [partyInbox, selectedPartyRoom, openedPartyContract, contractHistory]);
 
   const handleRoleChange = (role: UserRole) => {
     if (roleRequiresAuth(role) && !isAuthenticated) {
@@ -1328,18 +1334,41 @@ export default function AppHomeScreen() {
               title={
                 selectedPartyRoom
                   ? (selectedPartyRoom.room ? `ห้อง ${selectedPartyRoom.room}` : selectedPartyRoom.property)
-                  : (partyRole === 'tenant' ? tenantWorkspaceCopy(locale).myContracts : "สัญญาของฉัน")
+                  : contractHistory && partyRole === 'tenant'
+                    ? tenantWorkspaceCopy(locale).roomHistory
+                    : (partyRole === 'tenant' ? tenantWorkspaceCopy(locale).myContracts : "สัญญาของฉัน")
               }
               workspaceLabel={
-                selectedPartyRoom?.room ? selectedPartyRoom.property : t.roles[partyRole]
+                selectedPartyRoom?.room
+                  ? selectedPartyRoom.property
+                  : contractHistory && partyRole === 'tenant'
+                    ? tenantWorkspaceCopy(locale).myContracts
+                    : t.roles[partyRole]
               }
               accentColor={tokens.colors.roles[partyRole]}
-              leading={selectedPartyRoom ? "back" : "menu"}
+              leading={selectedPartyRoom || (contractHistory && partyRole === 'tenant') ? "back" : "menu"}
               onBackPress={() => {
                 setOpenedPartyContract(null);
-                setSelectedPartyRoom(null);
+                if (selectedPartyRoom) setSelectedPartyRoom(null);
+                else setContractHistory(false);
               }}
               onMenuPress={() => setDrawerOpen(true)}
+              onActionPress={
+                partyRole === 'tenant' && !selectedPartyRoom && !contractHistory
+                  ? () => {
+                      setOpenedPartyContract(null);
+                      setSelectedPartyRoom(null);
+                      setContractHistory(true);
+                    }
+                  : undefined
+              }
+              actionLabel={
+                partyRole === 'tenant' && !selectedPartyRoom && !contractHistory
+                  ? tenantWorkspaceCopy(locale).roomHistory
+                  : undefined
+              }
+              actionIcon="archive"
+              actionVariant="icon"
             />
           ) : isTenantWorkspace ? (
             <MobileSectionHeader
@@ -1412,6 +1441,7 @@ export default function AppHomeScreen() {
               onOpenedChange={setOpenedPartyContract}
               selectedRoom={selectedPartyRoom}
               onSelectedRoomChange={setSelectedPartyRoom}
+              history={partyRole === 'tenant' && contractHistory}
               accentColor={tokens.colors.roles[partyRole]}
               reloadToken={partyContractsReloadToken}
               onReloadSettled={finishPageRefresh}

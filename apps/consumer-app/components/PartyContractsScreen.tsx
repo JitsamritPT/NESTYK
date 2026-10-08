@@ -97,6 +97,7 @@ export function PartyContractsScreen({
   onOpenedChange,
   selectedRoom,
   onSelectedRoomChange,
+  history = false,
   accentColor = tokens.colors.roles.owner,
   mode = "owner",
 }: {
@@ -107,6 +108,7 @@ export function PartyContractsScreen({
   onOpenedChange: (contract: PartyContract | null) => void;
   selectedRoom: PartyContractRoom | null;
   onSelectedRoomChange: (room: PartyContractRoom | null) => void;
+  history?: boolean;
   accentColor?: string;
   mode?: "owner" | "tenant";
 }) {
@@ -174,6 +176,7 @@ export function PartyContractsScreen({
       {mode === "tenant" ? (rows.length || (!loading && !error) ? <TenantContractList
         rows={rows}
         selectedRoom={selectedRoom}
+        history={history}
         onSelectRoom={onSelectedRoomChange}
         onOpen={onOpenedChange}
       /> : null) : <>

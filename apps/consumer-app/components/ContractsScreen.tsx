@@ -263,6 +263,7 @@ export function ContractsScreen({
   const [choosingType, setChoosingType] = useState(false);
   const [menuCreate, setMenuCreate] = useState<CreateDocumentKind | null>(null);
   const [creating, setCreating] = useState(false);
+  const [confirmingSave, setConfirmingSave] = useState(false);
   const [creationStep, setCreationStep] = useState(0);
   const creationAnchorRef = useRef<View>(null);
   const steppedCreation = reservation || lease;
@@ -1188,7 +1189,7 @@ export function ContractsScreen({
       setBusy(false);
     }
   }
-  async function save() {
+  async function save(confirmed = false) {
     if (saving.current || busy) return;
     if (!template) {
       setError("กรุณาโหลดแม่แบบสัญญาให้สำเร็จก่อนบันทึก");
@@ -1280,6 +1281,11 @@ export function ContractsScreen({
       setError("แบบสัญญานี้มีฟิลด์ที่ฟอร์มยังไม่รองรับ กรุณาเลือกแบบอื่น");
       return;
     }
+    if (!confirmed) {
+      setConfirmingSave(true);
+      return;
+    }
+    setConfirmingSave(false);
     saving.current = true;
     setBusy(true);
     setError("");
@@ -1516,6 +1522,7 @@ export function ContractsScreen({
           renewing || editingDraft ? "← กลับไปสัญญาเดิม" : "← เลือกประเภทสัญญา",
           () => {
             if (busy) return;
+            setConfirmingSave(false);
             setCreating(false);
             if (!renewing && !editingDraft) setChoosingType(true);
             setEditingDraft(null);
@@ -1926,6 +1933,45 @@ export function ContractsScreen({
             </Text>
           )}
         </View>
+        <MobileBottomSheet
+          visible={confirmingSave}
+          onClose={() => {
+            if (!busy) setConfirmingSave(false);
+          }}
+        >
+          <View style={s.saveConfirm}>
+            <Text style={[s.subtitle, title]}>
+              บันทึก{agreementType?.nameTh || "สัญญา"}นี้?
+            </Text>
+            <Text style={[s.body, muted]}>
+              {editingDraft
+                ? "หลังบันทึก การแก้ไขจะแทนที่ฉบับร่างเดิม และคู่สัญญาที่มีบัญชีจะเห็นข้อมูลล่าสุด"
+                : reservation
+                  ? "บันทึกเป็นฉบับร่างและสร้างใบแจ้งหนี้ค่าจอง คู่สัญญาที่มีบัญชีจะเห็นสัญญานี้ทันที"
+                  : "บันทึกเป็นฉบับร่าง คู่สัญญาที่มีบัญชีจะเห็นสัญญานี้ทันที"}
+            </Text>
+            <View style={s.saveConfirmActions}>
+              <MobileButton
+                style={s.saveConfirmButton}
+                variant="outline"
+                disabled={busy}
+                onPress={() => setConfirmingSave(false)}
+              >
+                ยกเลิก
+              </MobileButton>
+              <MobileButton
+                style={s.saveConfirmButton}
+                disabled={busy}
+                isLoading={busy}
+                onPress={() => {
+                  void save(true);
+                }}
+              >
+                บันทึกฉบับร่าง
+              </MobileButton>
+            </View>
+          </View>
+        </MobileBottomSheet>
       </View>
     );
   if (selected && financialKind && !draftCancelled && !["expired", "terminated"].includes(selected.status))
@@ -3088,6 +3134,9 @@ const s = StyleSheet.create({
     fontSize: 25,
     lineHeight: 37,
   },
+  saveConfirm: { paddingHorizontal: 20, paddingBottom: 8, gap: 12 },
+  saveConfirmActions: { flexDirection: "row", gap: 8 },
+  saveConfirmButton: { flexGrow: 1, flexBasis: 120 },
   heading: {
     fontFamily: tokens.typography.native.headingTh,
     fontSize: 22,

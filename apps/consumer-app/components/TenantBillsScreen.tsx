@@ -5,10 +5,12 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocale } from "@nestyk/i18n";
 import { MobileBottomSheet, MobileButton, MobileIcon, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { TenantBill, TenantBillStatus, TenantNextBill } from "@nestyk/types";
-import { getMyNextBill, listMyBills, listReceivedBills, openMyBillSlip, openReceivedBillSlip, uploadMyBillSlip } from "../lib/tenant-bills-api";
+import { listMyBills, listReceivedBills, openMyBillSlip, openReceivedBillSlip, submitMyBillSlip, uploadMyBillSlip } from "../lib/tenant-bills-api";
+import { listMyContracts } from "../lib/party-contracts-api";
+import { upcomingTenantBill } from "../lib/tenant-bill-upcoming";
 import { billFormatters } from "../lib/bill-format";
 import { ContractDocumentPreview } from "./ContractDocumentPreview";
-import { TenantBillsContent } from "./TenantBillsContent";
+import { TenantBillsContent, type SlipPreview } from "./TenantBillsContent";
 
 const MAX_SLIP_BYTES = 10 * 1024 * 1024;
 
@@ -43,6 +45,8 @@ export function TenantBillsScreen({
   const [notice, setNotice] = useState("");
   const [retryKey, setRetryKey] = useState(0);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [slipPreviews, setSlipPreviews] = useState<Record<number, SlipPreview>>({});
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
@@ -51,7 +55,7 @@ export function TenantBillsScreen({
     setError("");
     Promise.all([
       mode === "owner" ? listReceivedBills() : listMyBills(),
-      mode === "tenant" ? getMyNextBill().catch(() => null) : Promise.resolve(null),
+      mode === "tenant" ? listMyContracts().then(upcomingTenantBill).catch(() => null) : Promise.resolve(null),
     ])
       .then(([bills, upcoming]) => {
         if (!cancelled) {
@@ -96,11 +100,28 @@ export function TenantBillsScreen({
       setUploadingId(bill.id);
       const updated = await uploadMyBillSlip(bill.id, file);
       setRows((current) => current.map((row) => (row.id === updated.id ? updated : row)));
-      setNotice(tenantCopy.slipUploaded);
+      setSlipPreviews((current) => ({ ...current, [updated.id]: { uri: file.uri, mimeType: file.mimeType } }));
+      setNotice(tenantCopy.slipReady);
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
     } finally {
       setUploadingId(null);
+    }
+  }
+
+  async function submitSlip(bill: TenantBill) {
+    if (submittingId != null) return;
+    setError("");
+    setNotice("");
+    setSubmittingId(bill.id);
+    try {
+      const updated = await submitMyBillSlip(bill.id);
+      setRows((current) => current.map((row) => (row.id === updated.id ? updated : row)));
+      setNotice(tenantCopy.slipUploaded);
+    } catch (e) {
+      setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
+    } finally {
+      setSubmittingId(null);
     }
   }
 
@@ -156,8 +177,12 @@ export function TenantBillsScreen({
         rows={rows}
         next={next}
         uploadingId={uploadingId}
+        submittingId={submittingId}
+        error={error}
+        slipPreviews={slipPreviews}
         onUpload={(bill, source) => void uploadSlip(bill, source)}
         onViewSlip={(bill) => void viewSlip(bill)}
+        onSubmit={(bill) => void submitSlip(bill)}
       /> : null) : <>
       {open.length ? <Text style={[styles.section, heading]}>{copy.current}</Text> : null}
       {open.map((bill) => (

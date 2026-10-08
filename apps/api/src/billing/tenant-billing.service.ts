@@ -35,6 +35,17 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function returnReason(input: unknown) {
+  const reason = text(
+    input && typeof input === "object" && !Array.isArray(input)
+      ? (input as { reason?: unknown }).reason
+      : undefined,
+  );
+  if (!reason || reason.length > 500)
+    throw new BadRequestException("กรุณาระบุเหตุผลในการตีกลับ");
+  return reason;
+}
+
 export function billDocumentNo(leaseId: number, period: string) {
   return `RB${period.replace("-", "")}${String(leaseId).padStart(6, "0")}`;
 }
@@ -168,6 +179,8 @@ export class TenantBillingService {
       status: b.status === "paid" ? "paid" : today > b.grace_until ? "overdue" : "pending",
       paidAt: b.paid_at ? new Date(b.paid_at).toISOString() : null,
       hasPaymentSlip: !!b.payment_slip_path,
+      slipSubmitted: !!b.slip_submitted_at,
+      slipReturnReason: text(b.slip_return_note) || null,
       payTo: payTo.bankName || payTo.accountName || payTo.accountNo ? payTo : null,
     };
   }
@@ -281,14 +294,15 @@ export class TenantBillingService {
     file: { buffer: Buffer; size: number; originalname?: string } | undefined,
   ) {
     const bill = await this.mine(userId, id);
-    if (bill.status === "paid") throw new BadRequestException("ยืนยันการชำระแล้ว เปลี่ยนสลิปไม่ได้");
+    if (bill.status === "paid" || bill.slip_submitted_at)
+      throw new BadRequestException("ยืนยันแล้ว เปลี่ยนสลิปไม่ได้");
     if (!this.documents) throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
     const stored = await this.documents.uploadPaymentSlip(bill.lease_contract.created_by_user_id, file);
     const oldPath = bill.payment_slip_path;
     try {
       const result = await this.db.getRepository(TenantBillEntity).update(
-        { id, status: "pending", payment_slip_path: oldPath ?? IsNull() },
-        { payment_slip_path: stored.path },
+        { id, status: "pending", payment_slip_path: oldPath ?? IsNull(), slip_submitted_at: IsNull() },
+        { payment_slip_path: stored.path, slip_return_note: null },
       );
       if (result.affected !== 1)
         throw new ConflictException("บิลถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
@@ -297,6 +311,18 @@ export class TenantBillingService {
       throw error;
     }
     if (oldPath) await this.documents.remove(oldPath).catch(() => undefined);
+    return this.serialize(await this.mine(userId, id));
+  }
+
+  async submitForTenant(userId: number, id: number) {
+    const bill = await this.mine(userId, id);
+    if (bill.slip_submitted_at || bill.status === "paid") return this.serialize(bill);
+    if (!bill.payment_slip_path) throw new BadRequestException("กรุณาแนบสลิปก่อนยืนยัน");
+    const result = await this.db.getRepository(TenantBillEntity).update(
+      { id, status: "pending", payment_slip_path: bill.payment_slip_path, slip_submitted_at: IsNull() },
+      { slip_submitted_at: new Date() },
+    );
+    if (result.affected !== 1) throw new ConflictException("บิลถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
     return this.serialize(await this.mine(userId, id));
   }
 
@@ -318,6 +344,7 @@ export class TenantBillingService {
     const rows = await this.agentBills(agentId)
       .andWhere("b.status = 'pending'")
       .andWhere("b.payment_slip_path IS NOT NULL")
+      .andWhere("b.slip_submitted_at IS NOT NULL")
       .orderBy("b.due_date", "ASC")
       .addOrderBy("b.id", "ASC")
       .getMany();
@@ -326,7 +353,7 @@ export class TenantBillingService {
 
   async agentSlipUrl(agentId: number, id: number) {
     const bill = await this.forAgent(agentId, id);
-    if (!bill.payment_slip_path) throw new NotFoundException("ยังไม่ได้แนบสลิป");
+    if (!bill.payment_slip_path || !bill.slip_submitted_at) throw new NotFoundException("ยังไม่ได้ส่งสลิป");
     if (!this.documents) throw new ServiceUnavailableException("ยังไม่ได้ตั้งค่าที่เก็บเอกสาร");
     const url = (await this.documents.signPaths([bill.payment_slip_path])).get(bill.payment_slip_path);
     if (!url) throw new ServiceUnavailableException("เปิดเอกสารไม่สำเร็จ กรุณาลองอีกครั้ง");
@@ -336,12 +363,29 @@ export class TenantBillingService {
   async confirmForAgent(agentId: number, id: number) {
     const bill = await this.forAgent(agentId, id);
     if (bill.status === "paid") return this.serialize(bill);
-    if (!bill.payment_slip_path) throw new BadRequestException("กรุณาแนบสลิปก่อนยืนยัน");
+    if (!bill.payment_slip_path || !bill.slip_submitted_at)
+      throw new BadRequestException("ผู้เช่ายังไม่ได้ยืนยันสลิป");
     const result = await this.db.getRepository(TenantBillEntity).update(
       { id, status: "pending" },
-      { status: "paid", paid_at: new Date() },
+      { status: "paid", paid_at: new Date(), slip_return_note: null },
     );
     if (result.affected !== 1) throw new ConflictException("บิลถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
+    return this.serialize(await this.forAgent(agentId, id));
+  }
+
+  async returnForAgent(agentId: number, id: number, input: unknown) {
+    const bill = await this.forAgent(agentId, id);
+    if (bill.status === "paid") throw new BadRequestException("ยืนยันการชำระแล้ว ตีกลับไม่ได้");
+    if (!bill.payment_slip_path || !bill.slip_submitted_at)
+      throw new BadRequestException("ยังไม่มีสลิปที่ส่งมาให้ตีกลับ");
+    const reason = returnReason(input);
+    const oldPath = bill.payment_slip_path;
+    const result = await this.db.getRepository(TenantBillEntity).update(
+      { id, status: "pending", payment_slip_path: oldPath },
+      { payment_slip_path: null, slip_return_note: reason, slip_submitted_at: null },
+    );
+    if (result.affected !== 1) throw new ConflictException("บิลถูกเปลี่ยนแล้ว กรุณาเปิดใหม่");
+    if (this.documents) await this.documents.remove(oldPath).catch(() => undefined);
     return this.serialize(await this.forAgent(agentId, id));
   }
 }

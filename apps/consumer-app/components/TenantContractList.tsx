@@ -25,11 +25,13 @@ import { tenantWorkspaceCopy } from "../lib/tenant-workspace-copy";
 export function TenantContractList({
   rows,
   selectedRoom,
+  history = false,
   onSelectRoom,
   onOpen,
 }: {
   rows: PartyContract[];
   selectedRoom: PartyContractRoom | null;
+  history?: boolean;
   onSelectRoom: (room: PartyContractRoom) => void;
   onOpen: (contract: PartyContract) => void;
 }) {
@@ -66,21 +68,30 @@ export function TenantContractList({
           item.room.property === selectedRoom.property &&
           item.room.room === selectedRoom.room,
       )
-    : groups.length === 1
-      ? groups[0]
-      : undefined;
+    : history
+      ? undefined
+      : groups.length === 1
+        ? groups[0]
+        : undefined;
 
-  function roomHeader(room: PartyContractRoom, count: number) {
+  function roomHeader(room: PartyContractRoom, count: number, contracts: PartyContract[]) {
     return (
       <>
-        <View style={[s.roomIcon, { backgroundColor: theme.background }]}>
-          <MobileIcon name="home" size={22} color={theme.screenTitle} />
+        <View style={[s.roomIcon, { backgroundColor: "rgba(0, 198, 141, 0.14)" }]}>
+          <MobileIcon name="home" size={22} color={tokens.colors.roles.tenant} />
         </View>
         <View style={s.flex}>
           <Text style={[s.roomTitle, ink]}>{room.property}</Text>
           {room.room ? (
             <Text style={[s.caption, muted]}>
               {copy.room} {room.room}
+            </Text>
+          ) : null}
+          {history ? (
+            <Text style={[s.caption, muted]}>
+              {contracts.some((row) => row.formKind === "lease" && row.status === "active")
+                ? copy.currentStay
+                : copy.pastStay}
             </Text>
           ) : null}
         </View>
@@ -131,8 +142,9 @@ export function TenantContractList({
   if (!group)
     return (
       <View style={s.root}>
+        {history ? <Text style={[s.body, muted]}>{copy.roomHistoryHint}</Text> : null}
         {!rows.length ? (
-          <Text style={[s.body, muted]}>{copy.emptyContracts}</Text>
+          <Text style={[s.body, muted]}>{history ? copy.emptyHistory : copy.emptyContracts}</Text>
         ) : selectedRoom ? (
           <Text style={[s.body, muted]}>{copy.emptyRoom}</Text>
         ) : (
@@ -144,7 +156,7 @@ export function TenantContractList({
               onPress={() => onSelectRoom(room)}
               style={({ pressed }) => [s.room, surface, pressed && s.pressed]}
             >
-              {roomHeader(room, contracts.length)}
+              {roomHeader(room, contracts.length, contracts)}
               <MobileIcon
                 name="chevron-right"
                 size={18}
@@ -167,7 +179,7 @@ export function TenantContractList({
   return (
     <View style={s.root}>
       <View style={[s.room, surface]}>
-        {roomHeader(group.room, group.contracts.length)}
+        {roomHeader(group.room, group.contracts.length, group.contracts)}
       </View>
       {leases.map((row) => {
         const canSign =

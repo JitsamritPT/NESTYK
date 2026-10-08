@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useLocale } from "@nestyk/i18n";
-import { MobileBottomSheet, MobileButton, tokens, useMobileTheme } from "@nestyk/ui/native";
+import { MobileBottomSheet, MobileButton, MobileInput, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { TenantBill } from "@nestyk/types";
 import { billFormatters } from "../lib/bill-format";
-import { confirmAgentRentSlip, listAgentRentSlips, openAgentRentSlip } from "../lib/tenant-bills-api";
+import { confirmAgentRentSlip, listAgentRentSlips, openAgentRentSlip, returnAgentRentSlip } from "../lib/tenant-bills-api";
 import { ContractDocumentPreview } from "./ContractDocumentPreview";
 
 export function AgentRentSlips({ reloadToken = 0 }: { reloadToken?: number }) {
@@ -16,6 +16,8 @@ export function AgentRentSlips({ reloadToken = 0 }: { reloadToken?: number }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [decision, setDecision] = useState<{ bill: TenantBill; kind: "confirm" | "return" } | null>(null);
+  const [returnReason, setReturnReason] = useState("");
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
@@ -34,15 +36,18 @@ export function AgentRentSlips({ reloadToken = 0 }: { reloadToken?: number }) {
 
   if (!rows.length && !error && !notice) return null;
 
-  async function confirm(bill: TenantBill) {
+  async function submit(next: { bill: TenantBill; kind: "confirm" | "return" }) {
     if (confirmingId != null) return;
     setError("");
     setNotice("");
-    setConfirmingId(bill.id);
+    setConfirmingId(next.bill.id);
     try {
-      await confirmAgentRentSlip(bill.id);
-      setRows((current) => current.filter((row) => row.id !== bill.id));
-      setNotice(copy.rentSlipsConfirmed);
+      if (next.kind === "confirm") await confirmAgentRentSlip(next.bill.id);
+      else await returnAgentRentSlip(next.bill.id, returnReason.trim());
+      setRows((current) => current.filter((row) => row.id !== next.bill.id));
+      setNotice(next.kind === "confirm" ? copy.rentSlipsConfirmed : copy.rentSlipsReturned);
+      setReturnReason("");
+      setDecision(null);
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : copy.rentSlipsLoadFailed);
     } finally {
@@ -79,13 +84,67 @@ export function AgentRentSlips({ reloadToken = 0 }: { reloadToken?: number }) {
             </Text>
           </View>
           <View style={styles.actions}>
-            <MobileButton variant="outline" onPress={() => void viewSlip(bill)}>{t.owner.bills.viewSlip}</MobileButton>
-            <MobileButton isLoading={confirmingId === bill.id} disabled={confirmingId != null} onPress={() => void confirm(bill)}>
+            <MobileButton variant="outline" disabled={confirmingId != null} onPress={() => void viewSlip(bill)}>{t.owner.bills.viewSlip}</MobileButton>
+            <MobileButton variant="outline" disabled={confirmingId != null} onPress={() => { setReturnReason(""); setDecision({ bill, kind: "return" }); }}>
+              {copy.rentSlipsReturn}
+            </MobileButton>
+            <MobileButton disabled={confirmingId != null} onPress={() => setDecision({ bill, kind: "confirm" })}>
               {copy.rentSlipsConfirm}
             </MobileButton>
           </View>
         </View>
       ))}
+      <MobileBottomSheet
+        visible={decision != null}
+        avoidKeyboard
+        onClose={() => {
+          if (confirmingId == null) {
+            setReturnReason("");
+            setDecision(null);
+          }
+        }}
+      >
+        <View style={styles.decision}>
+          <Text style={[styles.heading, title]}>
+            {decision?.kind === "return" ? copy.rentSlipsReturnTitle : copy.rentSlipsConfirmTitle}
+          </Text>
+          <Text style={[styles.copy, body]}>
+            {decision?.kind === "return" ? copy.rentSlipsReturnBody : copy.rentSlipsConfirmBody}
+          </Text>
+          {decision?.kind === "return" ? (
+            <MobileInput
+              label={copy.rentSlipsReturnReason}
+              placeholder={copy.rentSlipsReturnReasonPlaceholder}
+              value={returnReason}
+              onChangeText={setReturnReason}
+              multiline
+              maxLength={500}
+              required
+            />
+          ) : null}
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <View style={styles.actions}>
+            <MobileButton
+              style={styles.decisionButton}
+              variant="outline"
+              disabled={confirmingId != null}
+              onPress={() => setDecision(null)}
+            >
+              {copy.rentSlipsCancel}
+            </MobileButton>
+            <MobileButton
+              style={styles.decisionButton}
+              isLoading={confirmingId != null}
+              disabled={decision == null || confirmingId != null || (decision.kind === "return" && !returnReason.trim())}
+              onPress={() => {
+                if (decision) void submit(decision);
+              }}
+            >
+              {decision?.kind === "return" ? copy.rentSlipsReturn : copy.rentSlipsConfirm}
+            </MobileButton>
+          </View>
+        </View>
+      </MobileBottomSheet>
       <MobileBottomSheet visible={preview != null} onClose={() => setPreview(null)} maxHeight="90%">
         <View style={styles.previewSheet}>
           <Text style={[styles.copy, title]} numberOfLines={1}>{preview?.title}</Text>
@@ -108,7 +167,9 @@ const styles = StyleSheet.create({
   grow: { gap: 2 },
   copy: { fontSize: 14, lineHeight: 22 },
   caption: { fontSize: 12, lineHeight: 18 },
-  actions: { flexDirection: "row", gap: 8 },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  decision: { paddingHorizontal: 20, paddingBottom: 8, gap: 12 },
+  decisionButton: { flexGrow: 1, flexBasis: 120 },
   notice: { fontFamily: tokens.typography.native.body, fontSize: 13, lineHeight: 20, color: "#166534" },
   error: { fontFamily: tokens.typography.native.body, fontSize: 13, lineHeight: 20, color: tokens.colors.danger },
   previewSheet: { height: "90%", paddingHorizontal: 16, gap: 8 },

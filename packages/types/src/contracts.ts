@@ -37,6 +37,10 @@ export interface TenantBill {
   status: TenantBillStatus;
   paidAt: string | null;
   hasPaymentSlip: boolean;
+  /** True after the tenant confirms and the slip is waiting for the agent. */
+  slipSubmitted: boolean;
+  /** Agent's return note. `invalid_image` is the legacy fixed reason. Cleared after a new upload. */
+  slipReturnReason: string | null;
   payTo: { bankName: string; accountName: string; accountNo: string } | null;
 }
 
