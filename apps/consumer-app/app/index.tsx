@@ -10,6 +10,7 @@ import {
   type TenantDetailActions,
   type TenantDetailState,
   type TenantEntry,
+  type TenantListView,
 } from '../components/AgentTenantsScreen';
 import { PartyContractsScreen, type PartyContractRoom } from '../components/PartyContractsScreen';
 import { TenantBillsScreen } from '../components/TenantBillsScreen';
@@ -156,6 +157,8 @@ export default function AppHomeScreen() {
   const [clientsWorkFilter, setClientsWorkFilter] = useState<
     'overdue_payment' | 'awaiting_signature' | 'renewal' | 'lead_follow_up' | null
   >(null);
+  const [clientsView, setClientsView] = useState<TenantListView>('work');
+  const clearClientsWorkFilter = useCallback(() => setClientsWorkFilter(null), []);
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
   const [pageRefreshing, setPageRefreshing] = useState(false);
   const refreshSequence = useRef(0);
@@ -579,14 +582,24 @@ export default function AppHomeScreen() {
               : isCreateTenant
                 ? t.agent.tenants.create
               : isTenantDetail
-                ? t.agent.tenants.detailTitle
+                ? tenantDetail.title || t.agent.tenants.detailTitle
               : isLeadPage
                 ? getScreenTitle(activeTab, t)
                 : isSecondary
                   ? createListingHeaderTitle || t.agent.listings.addRoom
                   : getScreenTitle(activeTab, t)
           }
-          workspaceLabel={isSecondary ? undefined : workspace}
+          workspaceLabel={
+            isTenantDetail
+              ? tenantDetail.subtitle || undefined
+              : isSecondary
+                ? undefined
+                : activeTab === 'clients'
+                  ? clientsView === 'work'
+                    ? t.agent.tenants.list.subtitleWork
+                    : t.agent.tenants.list.subtitleAll
+                  : workspace
+          }
           accentColor={accent}
           leading={isSecondary ? 'back' : 'menu'}
           onMenuPress={openMenu}
@@ -1027,45 +1040,13 @@ export default function AppHomeScreen() {
     }
 
     if (activeTab === 'clients') {
-      const dash = t.agent.dashboard;
-      const clientsFilterLabel =
-        clientsWorkFilter === 'overdue_payment'
-          ? dash.clientsFilterOverdue
-          : clientsWorkFilter === 'awaiting_signature'
-            ? dash.clientsFilterSigning
-            : clientsWorkFilter === 'renewal'
-              ? dash.clientsFilterRenewal
-              : clientsWorkFilter === 'lead_follow_up'
-                ? dash.leadsFollowUp
-                : null;
       // One wrapper for both layouts so the tenants screen keeps its state when the form closes.
       return (
         <View style={creatingTenant ? [styles.wizardBody, styles.fullBleedBody] : styles.bodyContainer}>
-          {!creatingTenant && !tenantDetail.open && clientsFilterLabel ? (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 10,
-                marginBottom: 12,
-                padding: 12,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: accentColor,
-                backgroundColor: theme.surface,
-                minHeight: 44,
-              }}
-            >
-              <Text style={{ flex: 1, color: theme.textHeading, fontSize: 13, lineHeight: 19 }}>
-                {dash.filterActive.replace('{label}', clientsFilterLabel)}
-              </Text>
-              <MobileButton variant="outline" onPress={() => setClientsWorkFilter(null)}>
-                {dash.clearFilter}
-              </MobileButton>
-            </View>
-          ) : null}
           <AgentTenantsScreen
             workFilter={clientsWorkFilter}
+            onWorkFilterHandled={clearClientsWorkFilter}
+            onListViewChange={setClientsView}
             reloadToken={billsReloadToken}
             onReloadSettled={finishPageRefresh}
             creating={creatingTenant}
