@@ -2,7 +2,7 @@ import { LeadLocationPicker } from './LeadLocationPicker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, ScrollView } from 'react-native';
 import type { AgentLead, AgentLeadsPage, AgentLeadsSort, LeadDisplayStatus } from '@nestyk/types';
-import { useLocale } from '@nestyk/i18n';
+import { localizedError, useLocale } from '@nestyk/i18n';
 import {
   MobileBottomSheet,
   MobileBrandLoader,
@@ -63,7 +63,7 @@ export function AgentLeadsScreen({
   onReloadSettled?: (token: number) => void;
   onOpenLead: (lead: AgentLead) => void;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const c = t.agent.leads;
   const dash = t.agent.dashboard;
   const { theme } = useMobileTheme();
@@ -181,7 +181,7 @@ export function AgentLeadsScreen({
           if (page > 1 && !result.items.length) setPage(Math.max(1, Math.ceil(result.total / 20)));
         })
         .catch((err) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+          if (!cancelled) setError(localizedError(err, c.loadError, locale));
         })
         .finally(() => {
           if (cancelled) return;

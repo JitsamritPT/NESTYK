@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import type { LeadViewing } from '@nestyk/types';
-import { useLocale } from '@nestyk/i18n';
+import { localizedError, useLocale } from '@nestyk/i18n';
 import { MobileBottomSheet, MobileButton, MobileIcon, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
 import { createLeadViewing, listAgentViewings, updateLeadViewing } from '../lib/agent-leads-api';
 import { calendarDateKey, calendarLocalDate } from '../lib/agent-calendar-demo';
@@ -167,7 +167,7 @@ export function LeadViewingSheet({
         : await createLeadViewing(leadId, { rentRoomId: roomId, scheduledAt, note: note.trim() || null });
       onSaved(saved);
     } catch (err) {
-      setError(`${c.saveError}: ${err instanceof Error ? err.message : String(err)}`);
+      setError(localizedError(err, c.saveError, locale));
     } finally {
       setBusy(false);
     }
@@ -180,7 +180,7 @@ export function LeadViewingSheet({
     try {
       onSaved(await updateLeadViewing(viewing.id, { status: 'cancelled' }));
     } catch (err) {
-      setError(`${c.cancelError}: ${err instanceof Error ? err.message : String(err)}`);
+      setError(localizedError(err, c.cancelError, locale));
     } finally {
       setBusy(false);
     }

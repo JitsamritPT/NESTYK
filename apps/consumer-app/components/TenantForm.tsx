@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { useLocale } from "@nestyk/i18n";
+import { localizedError, useLocale } from "@nestyk/i18n";
 import {
   MobileButton,
   MobileIcon,
@@ -44,7 +44,7 @@ export function TenantForm({
   /** Shell header / hardware back: returns true when it stepped back, false on the first step. */
   backRef?: React.MutableRefObject<(() => boolean) | null>;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const c = t.agent.tenants;
   const viewing = t.agent.leads.viewing;
   const { theme } = useMobileTheme();
@@ -81,7 +81,7 @@ export function TenantForm({
           if (!cancelled) setRooms(data);
         }
       } catch (e) {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : "");
+        if (!cancelled) setLoadError(localizedError(e, "", locale));
       } finally {
         if (!cancelled) setLoading(false);
       }

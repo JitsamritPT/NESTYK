@@ -32,7 +32,7 @@ import {
   tokens,
   useMobileTheme,
 } from '@nestyk/ui/native';
-import { useLocale } from '@nestyk/i18n';
+import { localizedError, useLocale } from '@nestyk/i18n';
 import { fetchMyAgentListings } from '../lib/agent-listings-api';
 
 type VisibilityFilter = '' | 'private' | 'published';
@@ -343,7 +343,7 @@ export function AgentRoomsScreen({
         })
         .catch((err) => {
           if (cancelled) return;
-          const message = err instanceof Error ? err.message : String(err);
+          const message = localizedError(err, copy.loadError, locale);
           if (append) setMoreError(message);
           else setError(message);
         })

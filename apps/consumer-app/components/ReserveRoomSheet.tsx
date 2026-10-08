@@ -9,7 +9,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import type { AgentTenant, TenantLeadOption, TenantRoomOption } from '@nestyk/types';
-import { useLocale } from '@nestyk/i18n';
+import { localizedError, useLocale } from '@nestyk/i18n';
 import { MobileBottomSheet, MobileButton, MobileIcon, MobileInput, tokens, useMobileTheme } from '@nestyk/ui/native';
 import { createAgentTenant, tenantRoomOptions } from '../lib/agent-tenants-api';
 import {
@@ -103,7 +103,7 @@ export function ReserveRoomSheet({
   /** False when the caller closes the sheet on success and shows the result itself. */
   showBookedState?: boolean;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const c = t.agent.tenants;
   const { theme, isDark } = useMobileTheme();
   const [form, setForm] = useState<TenantProfileForm>(() => (lead ? tenantProfileFromLead(lead) : EMPTY_FORM));
@@ -216,7 +216,7 @@ export function ReserveRoomSheet({
       if (showBookedState) setBooked(tenant);
       onReserved(tenant);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(localizedError(err, t.common.errorGeneric, locale));
     } finally {
       saving.current = false;
       setBusy(false);

@@ -10,6 +10,7 @@ import {
   type TenantDetailActions,
   type TenantDetailState,
   type TenantEntry,
+  type TenantListView,
 } from '../components/AgentTenantsScreen';
 import { PartyContractsScreen, type PartyContractRoom } from '../components/PartyContractsScreen';
 import { TenantBillsScreen } from '../components/TenantBillsScreen';
@@ -77,7 +78,9 @@ import {
   MOCK_ACTIVITY_NOTIFICATIONS,
   MOCK_MESSAGE_NOTIFICATIONS,
   MOCK_SERVICE_TICKETS,
+  type DemoNotification,
 } from '../lib/mock-data';
+import { localeTag } from '../lib/lead-format';
 
 function getScreenTitle(tab: MobileAppTab, t: ReturnType<typeof useLocale>['t']): string {
   switch (tab) {
@@ -151,13 +154,30 @@ export default function AppHomeScreen() {
   const [contractHistory, setContractHistory] = useState(false);
   const [openedPartyContract, setOpenedPartyContract] = useState<PartyContract | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState(MOCK_ACTIVITY_NOTIFICATIONS);
-  const [messages, setMessages] = useState(MOCK_MESSAGE_NOTIFICATIONS);
+  const [notificationsRead, setNotificationsRead] = useState(false);
+  const [notifications, messages] = useMemo(() => {
+    const time = new Intl.DateTimeFormat(localeTag(locale), {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const show = (items: DemoNotification[]) =>
+      items.map(({ text, at, unread, ...item }) => ({
+        ...item,
+        text: t.mobile.notifications.demo[text],
+        time: time.format(new Date(at)),
+        unread: unread && !notificationsRead,
+      }));
+    return [show(MOCK_ACTIVITY_NOTIFICATIONS), show(MOCK_MESSAGE_NOTIFICATIONS)];
+  }, [t, locale, notificationsRead]);
   const [createLeadBusy, setCreateLeadBusy] = useState(false);
   const [leadsWorkFilter, setLeadsWorkFilter] = useState<'lead_follow_up' | null>(null);
   const [clientsWorkFilter, setClientsWorkFilter] = useState<
     'overdue_payment' | 'awaiting_signature' | 'renewal' | 'lead_follow_up' | null
   >(null);
+  const [clientsView, setClientsView] = useState<TenantListView>('work');
+  const clearClientsWorkFilter = useCallback(() => setClientsWorkFilter(null), []);
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
   const [pageRefreshing, setPageRefreshing] = useState(false);
   const refreshSequence = useRef(0);
@@ -247,7 +267,7 @@ export default function AppHomeScreen() {
       setActiveRole('guest');
       setActiveTab('home');
     } else if (hostOrPath.includes('viewing')) {
-      Alert.alert('Schedule Viewing', `Open viewing request from link: ${url}`);
+      Alert.alert(t.common.scheduleViewing, t.mobile.demoAlerts.viewingLink.replace('{url}', url));
     }
   };
 
@@ -587,14 +607,24 @@ export default function AppHomeScreen() {
               : isCreateTenant
                 ? t.agent.tenants.create
               : isTenantDetail
-                ? t.agent.tenants.detailTitle
+                ? tenantDetail.title || t.agent.tenants.detailTitle
               : isLeadPage
                 ? getScreenTitle(activeTab, t)
                 : isSecondary
                   ? createListingHeaderTitle || t.agent.listings.addRoom
                   : getScreenTitle(activeTab, t)
           }
-          workspaceLabel={isSecondary ? undefined : workspace}
+          workspaceLabel={
+            isTenantDetail
+              ? tenantDetail.subtitle || undefined
+              : isSecondary
+                ? undefined
+                : activeTab === 'clients'
+                  ? clientsView === 'work'
+                    ? t.agent.tenants.list.subtitleWork
+                    : t.agent.tenants.list.subtitleAll
+                  : workspace
+          }
           accentColor={accent}
           leading={isSecondary ? 'back' : 'menu'}
           onMenuPress={openMenu}
@@ -817,7 +847,7 @@ export default function AppHomeScreen() {
           <Text style={[styles.listingSub, secondaryText]}>{item.roomType} • {item.floor}</Text>
           <View style={styles.listingActionRow}>
             <View style={{ flex: 1 }}>
-              <MobileButton variant="outline" onPress={() => Alert.alert('Schedule Viewing', item.title)}>
+              <MobileButton variant="outline" onPress={() => Alert.alert(t.common.scheduleViewing, item.title)}>
                 <View style={styles.buttonRow}>
                   <MobileIcon name="calendar-plus" size={16} color={tokens.colors.primary} />
                   <Text style={styles.buttonLabel}>{t.common.schedule}</Text>
@@ -825,7 +855,7 @@ export default function AppHomeScreen() {
               </MobileButton>
             </View>
             <View style={{ flex: 1 }}>
-              <MobileButton onPress={() => Alert.alert('Details', item.title)}>{t.common.viewDetails}</MobileButton>
+              <MobileButton onPress={() => Alert.alert(t.common.viewDetails, item.title)}>{t.common.viewDetails}</MobileButton>
             </View>
           </View>
         </View>
@@ -1035,45 +1065,13 @@ export default function AppHomeScreen() {
     }
 
     if (activeTab === 'clients') {
-      const dash = t.agent.dashboard;
-      const clientsFilterLabel =
-        clientsWorkFilter === 'overdue_payment'
-          ? dash.clientsFilterOverdue
-          : clientsWorkFilter === 'awaiting_signature'
-            ? dash.clientsFilterSigning
-            : clientsWorkFilter === 'renewal'
-              ? dash.clientsFilterRenewal
-              : clientsWorkFilter === 'lead_follow_up'
-                ? dash.leadsFollowUp
-                : null;
       // One wrapper for both layouts so the tenants screen keeps its state when the form closes.
       return (
         <View style={creatingTenant ? [styles.wizardBody, styles.fullBleedBody] : styles.bodyContainer}>
-          {!creatingTenant && !tenantDetail.open && clientsFilterLabel ? (
-            <View
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 10,
-                marginBottom: 12,
-                padding: 12,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: accentColor,
-                backgroundColor: theme.surface,
-                minHeight: 44,
-              }}
-            >
-              <Text style={{ flex: 1, color: theme.textHeading, fontSize: 13, lineHeight: 19 }}>
-                {dash.filterActive.replace('{label}', clientsFilterLabel)}
-              </Text>
-              <MobileButton variant="outline" onPress={() => setClientsWorkFilter(null)}>
-                {dash.clearFilter}
-              </MobileButton>
-            </View>
-          ) : null}
           <AgentTenantsScreen
             workFilter={clientsWorkFilter}
+            onWorkFilterHandled={clearClientsWorkFilter}
+            onListViewChange={setClientsView}
             reloadToken={billsReloadToken}
             onReloadSettled={finishPageRefresh}
             creating={creatingTenant}
@@ -1163,11 +1161,13 @@ export default function AppHomeScreen() {
           <MobileServiceCatalogBody
             currentRole={activeRole}
             activeTickets={MOCK_SERVICE_TICKETS}
-            onRequestService={(cat) => Alert.alert('Service Request', `Requested: ${cat}`)}
+            onRequestService={(cat) =>
+              Alert.alert(t.mobile.demoAlerts.serviceRequestTitle, t.mobile.demoAlerts.serviceRequested.replace('{category}', t.services[cat]))
+            }
             onHubAction={(id) => {
-              if (id === 'tickets') Alert.alert('My Tickets', `${MOCK_SERVICE_TICKETS.length} open tickets`);
-              if (id === 'emergency') Alert.alert('Emergency', 'Call NESTYK 24h support');
-              if (id === 'move') Alert.alert('Move-in / Move-out', 'Schedule inspection and cleaning');
+              if (id === 'tickets') Alert.alert(t.services.myTickets, t.mobile.demoAlerts.openTickets.replace('{count}', String(MOCK_SERVICE_TICKETS.length)));
+              if (id === 'emergency') Alert.alert(t.services.emergency, t.mobile.demoAlerts.emergencyBody);
+              if (id === 'move') Alert.alert(t.mobile.demoAlerts.moveTitle, t.mobile.demoAlerts.moveBody);
             }}
           />
         </View>
@@ -1258,7 +1258,7 @@ export default function AppHomeScreen() {
               config={defaultOwnerListingConfig}
               searchPlaces={handleSearchPlaces}
               getPlaceDetails={handleGetPlaceDetails}
-              onSubmitListing={(data) => Alert.alert('Listing Published', JSON.stringify(data))}
+              onSubmitListing={() => Alert.alert(t.mobile.demoAlerts.listingPublished)}
             />
           </View>
         );
@@ -1333,10 +1333,12 @@ export default function AppHomeScreen() {
             <MobileSectionHeader
               title={
                 selectedPartyRoom
-                  ? (selectedPartyRoom.room ? `ห้อง ${selectedPartyRoom.room}` : selectedPartyRoom.property)
+                  ? (selectedPartyRoom.room
+                      ? t.mobile.partyContracts.room.replace('{room}', selectedPartyRoom.room)
+                      : selectedPartyRoom.property)
                   : contractHistory && partyRole === 'tenant'
                     ? tenantWorkspaceCopy(locale).roomHistory
-                    : (partyRole === 'tenant' ? tenantWorkspaceCopy(locale).myContracts : "สัญญาของฉัน")
+                    : (partyRole === 'tenant' ? tenantWorkspaceCopy(locale).myContracts : t.mobile.partyContracts.title)
               }
               workspaceLabel={
                 selectedPartyRoom?.room
@@ -1481,10 +1483,10 @@ export default function AppHomeScreen() {
               setPartyInbox(true);
               return;
             }
-            Alert.alert('Open', action.path);
+            Alert.alert(t.mobile.demoAlerts.comingSoon);
             return;
           }
-          Alert.alert('Action', action.id);
+          Alert.alert(t.mobile.demoAlerts.comingSoon);
         }}
       />
 
@@ -1497,8 +1499,7 @@ export default function AppHomeScreen() {
           messageItems={messages}
           onBack={() => setNotificationsOpen(false)}
           onClearAll={() => {
-            setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
-            setMessages((prev) => prev.map((n) => ({ ...n, unread: false })));
+            setNotificationsRead(true);
           }}
         />
       </MobileNotificationsPanel>

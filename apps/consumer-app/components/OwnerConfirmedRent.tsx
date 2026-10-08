@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { useLocale } from "@nestyk/i18n";
+import { localizedError, useLocale } from "@nestyk/i18n";
 import { MobileBottomSheet, MobileButton, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { TenantBill } from "@nestyk/types";
 import { billFormatters } from "../lib/bill-format";
@@ -31,7 +31,7 @@ export function OwnerConfirmedRent({
         if (!cancelled) setRows(next.filter((bill) => bill.status === "paid"));
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
+        if (!cancelled) setError(localizedError(e, copy.loadFailed, locale));
       })
       .finally(() => {
         if (cancelled) return;
@@ -49,7 +49,7 @@ export function OwnerConfirmedRent({
       const { url } = await openReceivedBillSlip(bill.id);
       setPreview({ url, title: bill.documentNo });
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
+      setError(localizedError(e, copy.loadFailed, locale));
     }
   }
 

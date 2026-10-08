@@ -142,7 +142,7 @@ export const MobileBottomTabBar: React.FC<MobileBottomTabBarProps> = ({
 
   return (
     <View
-      accessibilityRole="tabbar"
+      accessibilityRole="tablist"
       style={
         floating
           ? [styles.floating, floatingShadow, { backgroundColor: theme.surface, borderColor: theme.border }]

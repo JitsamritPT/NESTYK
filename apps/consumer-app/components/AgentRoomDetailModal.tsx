@@ -3,7 +3,7 @@ import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { SafeAreaView, SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 import { MobileAgentRoomBody, type AgentRoomDetail, type RoomShareVisibility } from '@nestyk/feature-listing';
 import { MobileButton, MobileIcon, MobileSectionHeader, tokens, useMobileTheme } from '@nestyk/ui/native';
-import { useLocale } from '@nestyk/i18n';
+import { localizedError, useLocale } from '@nestyk/i18n';
 import { AgentRoomEditor } from './AgentRoomEditor';
 import {
   fetchAgentRoom,
@@ -27,7 +27,7 @@ export function AgentRoomDetailModal({
   onClose: () => void;
   onSaved?: () => void;
 }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const { theme } = useMobileTheme();
   const copy = t.agent.listings;
 
@@ -85,7 +85,7 @@ export function AgentRoomDetailModal({
         }
       })
       .catch((err) => {
-        if (!cancelled) setDetailError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setDetailError(localizedError(err, copy.loadError, locale));
       });
     return () => {
       cancelled = true;

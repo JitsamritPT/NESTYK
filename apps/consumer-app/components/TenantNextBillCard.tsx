@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { useLocale } from "@nestyk/i18n";
+import { localizedError, useLocale } from "@nestyk/i18n";
 import { MobileButton, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { TenantNextBill } from "@nestyk/types";
 import { getMyNextBill } from "../lib/tenant-bills-api";
@@ -36,7 +36,7 @@ export function TenantNextBillCard({
         if (!cancelled) setNext(row);
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error && e.message ? e.message : copy.loadFailed);
+        if (!cancelled) setError(localizedError(e, copy.loadFailed, locale));
       })
       .finally(() => {
         if (cancelled) return;
