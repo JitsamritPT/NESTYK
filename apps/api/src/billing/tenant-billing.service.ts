@@ -177,6 +177,7 @@ export class TenantBillingService {
       graceUntil: b.grace_until,
       amount: Number(b.amount),
       status: b.status === "paid" ? "paid" : today > b.grace_until ? "overdue" : "pending",
+      leaseActive: c?.status === "active",
       paidAt: b.paid_at ? new Date(b.paid_at).toISOString() : null,
       hasPaymentSlip: !!b.payment_slip_path,
       slipSubmitted: !!b.slip_submitted_at,

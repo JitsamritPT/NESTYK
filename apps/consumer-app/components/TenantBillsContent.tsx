@@ -99,6 +99,9 @@ export function TenantBillsContent({
   onUpload,
   onViewSlip,
   onSubmit,
+  roomHistory = false,
+  selectedRoom = null,
+  onSelectRoom,
 }: {
   rows: TenantBill[];
   next: TenantNextBill | null;
@@ -109,13 +112,16 @@ export function TenantBillsContent({
   onUpload: (bill: TenantBill, source: "documents" | "photos") => void;
   onViewSlip: (bill: TenantBill) => void;
   onSubmit: (bill: TenantBill) => void;
+  roomHistory?: boolean;
+  selectedRoom?: { property: string; room: string | null } | null;
+  onSelectRoom?: (room: { property: string; room: string | null }) => void;
 }) {
   const { theme } = useMobileTheme();
   const { t, locale } = useLocale();
   const copy = t.tenant.bills;
   const labels = tenantWorkspaceCopy(locale);
   const format = billFormatters(locale);
-  const [filter, setFilter] = useState<"recent" | "paid">("recent");
+  const [filter, setFilter] = useState<"unpaid" | "paid">("unpaid");
   const [selected, setSelected] = useState<{
     id: number;
     payment: boolean;
@@ -126,13 +132,60 @@ export function TenantBillsContent({
     error: string;
   } | null>(null);
   const [confirmBill, setConfirmBill] = useState<TenantBill | null>(null);
-  const open = rows
+  const scoped = selectedRoom
+    ? rows.filter(
+        (bill) =>
+          (bill.property?.trim() || labels.room) === selectedRoom.property &&
+          (bill.room ?? "") === (selectedRoom.room ?? ""),
+      )
+    : rows;
+  const roomGroups = [
+    ...scoped
+      .reduce((groups, bill) => {
+        const property = bill.property?.trim() || labels.room;
+        const key = `${property}\u0000${bill.room ?? ""}`;
+        const current = groups.get(key) ?? {
+          property,
+          room: bill.room,
+          bills: [] as TenantBill[],
+        };
+        current.bills.push(bill);
+        groups.set(key, current);
+        return groups;
+      }, new Map<string, { property: string; room: string | null; bills: TenantBill[] }>())
+      .values(),
+  ].sort((a, b) => {
+    const staying = (group: { bills: TenantBill[] }) =>
+      group.bills.some((bill) => bill.leaseActive);
+    const latest = (group: { bills: TenantBill[] }) =>
+      group.bills.reduce((max, bill) => (bill.period > max ? bill.period : max), "");
+    return (
+      Number(staying(b)) - Number(staying(a)) ||
+      latest(b).localeCompare(latest(a)) ||
+      a.property.localeCompare(b.property, locale)
+    );
+  });
+  const listed = selectedRoom ? scoped : rows.filter((bill) => bill.leaseActive);
+  const open = listed
     .filter((bill) => bill.status !== "paid")
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.id - b.id);
-  const history = rows
+  const history = listed
     .filter((bill) => bill.status === "paid")
     .sort((a, b) => b.period.localeCompare(a.period) || b.id - a.id);
-  const selectedBill = rows.find((bill) => bill.id === selected?.id);
+  const upcomingHere =
+    next?.status === "upcoming" &&
+    (!selectedRoom ||
+      (next.property === selectedRoom.property &&
+        (next.room ?? "") === (selectedRoom.room ?? "")));
+  const roomKey = selectedRoom
+    ? `${selectedRoom.property}\u0000${selectedRoom.room ?? ""}`
+    : "";
+  const unpaidLocked =
+    !!selectedRoom && !scoped.some((bill) => bill.leaseActive) && open.length === 0;
+  useEffect(() => {
+    setFilter(unpaidLocked ? "paid" : "unpaid");
+  }, [roomKey, unpaidLocked]);
+  const selectedBill = scoped.find((bill) => bill.id === selected?.id);
   useEffect(() => {
     if (
       confirmBill &&
@@ -141,7 +194,7 @@ export function TenantBillsContent({
       setConfirmBill(null);
   }, [rows, confirmBill]);
   const rooms = [
-    ...new Map(rows.map((bill) => [bill.leaseContractId, bill])).values(),
+    ...new Map(listed.map((bill) => [bill.leaseContractId, bill])).values(),
   ];
   const ink = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
@@ -270,6 +323,62 @@ export function TenantBillsContent({
     );
   }
 
+  if (roomHistory && !selectedRoom) {
+    return (
+      <View style={s.root}>
+        <Text style={[s.body, muted]}>{labels.billHistoryHint}</Text>
+        {roomGroups.length ? (
+          roomGroups.map((group) => {
+            const current = group.bills.some((bill) => bill.leaseActive);
+            return (
+            <Pressable
+              key={`${group.property}\u0000${group.room ?? ""}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${group.property} ${group.room ?? ""}`}
+              onPress={() => onSelectRoom?.({ property: group.property, room: group.room })}
+              style={({ pressed }) => [s.room, surface, pressed && s.pressed]}
+            >
+              <View
+                style={[
+                  s.roomIcon,
+                  {
+                    backgroundColor: current
+                      ? "rgba(0, 198, 141, 0.14)"
+                      : "rgba(100, 116, 139, 0.14)",
+                  },
+                ]}
+              >
+                <MobileIcon
+                  name="home"
+                  size={22}
+                  color={current ? tokens.colors.roles.tenant : tokens.colors.textSecondary}
+                />
+              </View>
+              <View style={s.flex}>
+                <Text style={[s.roomTitle, ink]}>{group.property}</Text>
+                {group.room ? (
+                  <Text style={[s.caption, muted]}>
+                    {labels.room} {group.room}
+                  </Text>
+                ) : null}
+                <Text style={[s.caption, muted]}>
+                  {current ? labels.currentStay : labels.pastStay}
+                </Text>
+              </View>
+              <Text style={[s.caption, muted]}>
+                {labels.billCount.replace("{count}", String(group.bills.length))}
+              </Text>
+              <MobileIcon name="chevron-right" size={18} color={tokens.colors.divider} />
+            </Pressable>
+            );
+          })
+        ) : (
+          <Text style={[s.body, muted]}>{labels.emptyHistory}</Text>
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={s.root}>
       {rooms.length === 1 && (
@@ -288,7 +397,22 @@ export function TenantBillsContent({
         </View>
       )}
 
-      {filter === "recent" &&
+      <Text style={[s.sectionTitle, ink]}>{labels.billsList}</Text>
+      <View style={s.filters}>
+        <MobileFilterChip
+          label={labels.unpaid}
+          selected={filter === "unpaid"}
+          disabled={unpaidLocked}
+          onPress={() => setFilter("unpaid")}
+        />
+        <MobileFilterChip
+          label={labels.paid}
+          selected={filter === "paid"}
+          onPress={() => setFilter("paid")}
+        />
+      </View>
+
+      {filter === "unpaid" &&
         open.map((bill) => (
           <View key={bill.id} style={[s.bill, surface]}>
             <View style={s.header}>
@@ -395,7 +519,7 @@ export function TenantBillsContent({
           </View>
         ))}
 
-      {filter === "recent" && next?.status === "upcoming" && (
+      {filter === "unpaid" && upcomingHere && next && (
         <View style={[s.upcoming, surface]}>
           <MobileIcon name="calendar" size={16} color={theme.textSecondary} />
           <View style={[s.flex, s.upcomingCopy]}>
@@ -418,25 +542,14 @@ export function TenantBillsContent({
         </View>
       )}
 
-      <Text style={[s.sectionTitle, ink]}>{labels.billsList}</Text>
-      <View style={s.filters}>
-        <MobileFilterChip
-          label={labels.allBills}
-          selected={filter === "recent"}
-          onPress={() => setFilter("recent")}
-        />
-        <MobileFilterChip
-          label={labels.paid}
-          selected={filter === "paid"}
-          onPress={() => setFilter("paid")}
-        />
-      </View>
-      {!history.length ? (
-        <Text style={[s.body, muted]}>
-          {filter === "paid" ? labels.noPaidBills : labels.noBills}
-        </Text>
+      {filter === "unpaid" && !open.length && !upcomingHere ? (
+        <Text style={[s.body, muted]}>{labels.noUnpaidBills}</Text>
       ) : null}
-      {history.map((bill) => (
+      {filter === "paid" && !history.length ? (
+        <Text style={[s.body, muted]}>{labels.noPaidBills}</Text>
+      ) : null}
+      {filter === "paid" &&
+        history.map((bill) => (
         <Pressable
           key={bill.id}
           accessibilityRole="button"

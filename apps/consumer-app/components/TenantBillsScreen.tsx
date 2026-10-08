@@ -26,11 +26,17 @@ export function TenantBillsScreen({
   reloadToken = 0,
   onReloadSettled,
   accentColor = mode === "owner" ? tokens.colors.roles.owner : tokens.colors.roles.tenant,
+  roomHistory = false,
+  selectedRoom = null,
+  onSelectRoom,
 }: {
   mode?: "tenant" | "owner";
   reloadToken?: number;
   onReloadSettled?: (token: number) => void;
   accentColor?: string;
+  roomHistory?: boolean;
+  selectedRoom?: { property: string; room: string | null } | null;
+  onSelectRoom?: (room: { property: string; room: string | null }) => void;
 }) {
   const { theme } = useMobileTheme();
   const { t, locale } = useLocale();
@@ -183,6 +189,9 @@ export function TenantBillsScreen({
         onUpload={(bill, source) => void uploadSlip(bill, source)}
         onViewSlip={(bill) => void viewSlip(bill)}
         onSubmit={(bill) => void submitSlip(bill)}
+        roomHistory={roomHistory}
+        selectedRoom={selectedRoom}
+        onSelectRoom={onSelectRoom}
       /> : null) : <>
       {open.length ? <Text style={[styles.section, heading]}>{copy.current}</Text> : null}
       {open.map((bill) => (

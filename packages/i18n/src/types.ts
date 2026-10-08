@@ -543,6 +543,15 @@ export interface TranslationSchema {
         slipBill: string;
         slipSubmittedAt: string;
         confirmPayment: string;
+        confirmPaymentTitle: string;
+        confirmPaymentBody: string;
+        rejectPayment: string;
+        rejectPaymentTitle: string;
+        rejectPaymentBody: string;
+        rejectReason: string;
+        rejectReasonPlaceholder: string;
+        rejectedNotice: string;
+        rejectFailed: string;
         confirmedNotice: string;
         history: string;
         reservationFee: string;

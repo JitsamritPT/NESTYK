@@ -152,6 +152,8 @@ export default function AppHomeScreen() {
   const [partyInbox, setPartyInbox] = useState(false);
   const [selectedPartyRoom, setSelectedPartyRoom] = useState<PartyContractRoom | null>(null);
   const [contractHistory, setContractHistory] = useState(false);
+  const [billHistory, setBillHistory] = useState(false);
+  const [selectedBillRoom, setSelectedBillRoom] = useState<{ property: string; room: string | null } | null>(null);
   const [openedPartyContract, setOpenedPartyContract] = useState<PartyContract | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
@@ -485,6 +487,22 @@ export default function AppHomeScreen() {
   useEffect(() => {
     if (!partyInbox) setContractHistory(false);
   }, [partyInbox]);
+
+  useEffect(() => {
+    if (activeRole === 'tenant' && activeTab === 'bills') return;
+    setBillHistory(false);
+    setSelectedBillRoom(null);
+  }, [activeRole, activeTab]);
+
+  useEffect(() => {
+    if (activeRole !== 'tenant' || activeTab !== 'bills' || (!billHistory && !selectedBillRoom)) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (selectedBillRoom) setSelectedBillRoom(null);
+      else setBillHistory(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [activeRole, activeTab, billHistory, selectedBillRoom]);
 
   useEffect(() => {
     if (!partyInbox || openedPartyContract || (!selectedPartyRoom && !contractHistory)) return;
@@ -865,7 +883,13 @@ export default function AppHomeScreen() {
 
   const renderBillsBody = () => (
     <View style={styles.bodyContainer}>
-      <TenantBillsScreen reloadToken={billsReloadToken} onReloadSettled={finishPageRefresh} />
+      <TenantBillsScreen
+        reloadToken={billsReloadToken}
+        onReloadSettled={finishPageRefresh}
+        roomHistory={billHistory}
+        selectedRoom={selectedBillRoom}
+        onSelectRoom={setSelectedBillRoom}
+      />
     </View>
   );
 
@@ -1332,23 +1356,25 @@ export default function AppHomeScreen() {
           ) : partyInbox ? (
             <MobileSectionHeader
               title={
-                selectedPartyRoom
+                contractHistory && selectedPartyRoom?.tenant
+                  ? selectedPartyRoom.tenant
+                  : selectedPartyRoom
                   ? (selectedPartyRoom.room
                       ? t.mobile.partyContracts.room.replace('{room}', selectedPartyRoom.room)
                       : selectedPartyRoom.property)
-                  : contractHistory && partyRole === 'tenant'
-                    ? tenantWorkspaceCopy(locale).roomHistory
-                    : (partyRole === 'tenant' ? tenantWorkspaceCopy(locale).myContracts : t.mobile.partyContracts.title)
+                  : contractHistory
+                    ? tenantWorkspaceCopy(locale)[partyRole === 'owner' ? 'tenantHistory' : 'roomHistory']
+                    : tenantWorkspaceCopy(locale).myContracts
               }
               workspaceLabel={
-                selectedPartyRoom?.room
-                  ? selectedPartyRoom.property
-                  : contractHistory && partyRole === 'tenant'
+                selectedPartyRoom?.room || (contractHistory && selectedPartyRoom?.tenant)
+                  ? selectedPartyRoom?.property
+                  : contractHistory
                     ? tenantWorkspaceCopy(locale).myContracts
                     : t.roles[partyRole]
               }
               accentColor={tokens.colors.roles[partyRole]}
-              leading={selectedPartyRoom || (contractHistory && partyRole === 'tenant') ? "back" : "menu"}
+              leading={selectedPartyRoom || contractHistory ? "back" : "menu"}
               onBackPress={() => {
                 setOpenedPartyContract(null);
                 if (selectedPartyRoom) setSelectedPartyRoom(null);
@@ -1356,7 +1382,7 @@ export default function AppHomeScreen() {
               }}
               onMenuPress={() => setDrawerOpen(true)}
               onActionPress={
-                partyRole === 'tenant' && !selectedPartyRoom && !contractHistory
+                !selectedPartyRoom && !contractHistory
                   ? () => {
                       setOpenedPartyContract(null);
                       setSelectedPartyRoom(null);
@@ -1365,8 +1391,8 @@ export default function AppHomeScreen() {
                   : undefined
               }
               actionLabel={
-                partyRole === 'tenant' && !selectedPartyRoom && !contractHistory
-                  ? tenantWorkspaceCopy(locale).roomHistory
+                !selectedPartyRoom && !contractHistory
+                  ? tenantWorkspaceCopy(locale)[partyRole === 'owner' ? 'tenantHistory' : 'roomHistory']
                   : undefined
               }
               actionIcon="archive"
@@ -1374,10 +1400,40 @@ export default function AppHomeScreen() {
             />
           ) : isTenantWorkspace ? (
             <MobileSectionHeader
-              title={t.mobile.tabs.bills}
-              workspaceLabel={t.roles.tenant}
+              title={
+                selectedBillRoom
+                  ? (selectedBillRoom.room
+                      ? t.mobile.partyContracts.room.replace('{room}', selectedBillRoom.room)
+                      : selectedBillRoom.property)
+                  : billHistory
+                    ? tenantWorkspaceCopy(locale).paymentHistory
+                    : t.mobile.tabs.bills
+              }
+              workspaceLabel={
+                selectedBillRoom?.room
+                  ? selectedBillRoom.property
+                  : billHistory
+                    ? t.mobile.tabs.bills
+                    : t.roles.tenant
+              }
               accentColor={tokens.colors.roles.tenant}
+              leading={billHistory || selectedBillRoom ? 'back' : 'menu'}
+              onBackPress={() => {
+                if (selectedBillRoom) setSelectedBillRoom(null);
+                else setBillHistory(false);
+              }}
               onMenuPress={() => setDrawerOpen(true)}
+              onActionPress={
+                !billHistory && !selectedBillRoom
+                  ? () => {
+                      setSelectedBillRoom(null);
+                      setBillHistory(true);
+                    }
+                  : undefined
+              }
+              actionLabel={!billHistory && !selectedBillRoom ? tenantWorkspaceCopy(locale).paymentHistory : undefined}
+              actionIcon="archive"
+              actionVariant="icon"
             />
           ) : (
             <MobileHeaderActions
@@ -1443,7 +1499,7 @@ export default function AppHomeScreen() {
               onOpenedChange={setOpenedPartyContract}
               selectedRoom={selectedPartyRoom}
               onSelectedRoomChange={setSelectedPartyRoom}
-              history={partyRole === 'tenant' && contractHistory}
+              history={contractHistory}
               accentColor={tokens.colors.roles[partyRole]}
               reloadToken={partyContractsReloadToken}
               onReloadSettled={finishPageRefresh}

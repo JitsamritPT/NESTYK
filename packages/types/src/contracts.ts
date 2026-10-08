@@ -35,6 +35,8 @@ export interface TenantBill {
   graceUntil: string;
   amount: number;
   status: TenantBillStatus;
+  /** The lease that issued this bill is still the tenant's current stay. */
+  leaseActive: boolean;
   paidAt: string | null;
   hasPaymentSlip: boolean;
   /** True after the tenant confirms and the slip is waiting for the agent. */
