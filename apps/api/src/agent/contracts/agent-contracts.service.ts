@@ -1799,6 +1799,20 @@ export class AgentContractsService {
       brokerSignaturePng: "",
     };
   }
+  async listOwnedRooms(userId: number) {
+    const rooms = await this.db.getRepository(RentRoomEntity).find({
+      where: { owner_id: userId },
+      relations: { property: true },
+      order: { id: "ASC" },
+    });
+    return rooms.map((room) => ({
+      property:
+        room.property?.name?.trim() ||
+        room.listing_title?.trim() ||
+        "ไม่ระบุโครงการ",
+      room: room.room_id?.trim() || null,
+    }));
+  }
   async listForUser(userId: number) {
     const rows = await this.inboxQuery()
       .andWhere(

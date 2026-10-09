@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -9,7 +9,9 @@ import {
 import { useLocale } from "@nestyk/i18n";
 import {
   MobileButton,
+  MobileFilterChip,
   MobileIcon,
+  MobileListSearchRow,
   MobileStatusPill,
   tokens,
   useMobileTheme,
@@ -20,10 +22,19 @@ import type {
 } from "@nestyk/types";
 import type { PartyContractRoom } from "./PartyContractsScreen";
 import { billFormatters } from "../lib/bill-format";
+import {
+  ownerContractRoomCard,
+  ownerRoomMatches,
+  ownerTenantStayDates,
+  ownedRoomsMissingFrom,
+  type OwnedRoomRef,
+  type OwnerRoomAction,
+} from "../lib/owner-contract-rooms";
 import { tenantWorkspaceCopy } from "../lib/tenant-workspace-copy";
 
 export function TenantContractList({
   rows,
+  ownedRooms = [],
   selectedRoom,
   history = false,
   mode = "tenant",
@@ -31,6 +42,7 @@ export function TenantContractList({
   onOpen,
 }: {
   rows: PartyContract[];
+  ownedRooms?: OwnedRoomRef[];
   selectedRoom: PartyContractRoom | null;
   history?: boolean;
   mode?: "tenant" | "owner";
@@ -40,6 +52,9 @@ export function TenantContractList({
   const { theme } = useMobileTheme();
   const { t, locale } = useLocale();
   const copy = tenantWorkspaceCopy(locale);
+  const [roomQuery, setRoomQuery] = useState("");
+  const [tenantQuery, setTenantQuery] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState<"all" | "action">("all");
   const format = billFormatters(locale);
   const ink = { color: theme.textHeading };
   const muted = { color: theme.textSecondary };
@@ -57,6 +72,18 @@ export function TenantContractList({
         room: { key, property: row.property?.trim() || "—", room: row.room },
         contracts: [row],
       });
+  }
+  if (mode === "owner") {
+    for (const owned of ownedRoomsMissingFrom(
+      [...grouped.values()].map((group) => group.room),
+      ownedRooms,
+    )) {
+      const key = `${owned.property}\u0000${owned.room ?? ""}`;
+      grouped.set(key, {
+        room: { key, property: owned.property, room: owned.room },
+        contracts: [],
+      });
+    }
   }
   const staying = (contracts: PartyContract[]) =>
     contracts.some((row) => row.formKind === "lease" && row.status === "active");
@@ -131,12 +158,12 @@ export function TenantContractList({
               {copy.room} {room.room}
             </Text>
           ) : null}
-          {mode === "owner" && (occupant(contracts) || (history ? selectedRoom?.tenant?.trim() : "")) ? (
+          {mode === "owner" && (occupant(contracts) || selectedRoom?.tenant?.trim()) ? (
             <Text style={[s.caption, muted]}>
               {copy.tenant} {occupant(contracts) || selectedRoom?.tenant?.trim()}
             </Text>
           ) : null}
-          {mode === "owner" && !history && !occupant(contracts) ? (
+          {mode === "owner" && !occupant(contracts) && !selectedRoom?.tenant?.trim() ? (
             <Text style={[s.caption, muted]}>{copy.noCurrentTenant}</Text>
           ) : null}
           {history ? (
@@ -191,12 +218,204 @@ export function TenantContractList({
       </View>
     );
   }
-  if (!group && mode === "owner" && history && !selectedRoom)
+  if (!group && mode === "owner" && !history && !selectedRoom) {
+    const chipTone = { bg: "#E8F0FE", fg: tokens.colors.roles.owner, dot: tokens.colors.roles.owner };
+    const actionLabel: Record<OwnerRoomAction, string> = {
+      renewal: copy.renewalAction,
+      reservation: copy.reservation,
+      lease: copy.lease,
+      broker: copy.broker,
+    };
+    const statusLabel = {
+      active: copy.status.active,
+      awaiting_owner: copy.status.awaiting_signatures,
+      awaiting_agent: copy.awaitingAgentSignature,
+      idle: copy.noActiveContract,
+    };
+    const searched = listed
+      .filter(({ room, contracts }) => ownerRoomMatches(room.property, room.room, contracts, roomQuery))
+      .map(({ room, contracts }) => ({
+        room,
+        contracts,
+        summary: ownerContractRoomCard(contracts),
+      }));
+    const waitingCount = searched.filter(({ summary }) => summary.needsOwner).length;
+    const cards = ownerFilter === "all" ? searched : searched.filter(({ summary }) => summary.needsOwner);
     return (
       <View style={s.root}>
+        <MobileListSearchRow
+          value={roomQuery}
+          onChangeText={setRoomQuery}
+          placeholder={copy.searchRooms}
+          onClear={() => setRoomQuery("")}
+          clearAccessibilityLabel={copy.clearSearch}
+        />
+        <View style={s.filters}>
+          <MobileFilterChip
+            label={copy.allRooms}
+            selected={ownerFilter === "all"}
+            onPress={() => setOwnerFilter("all")}
+            tone={chipTone}
+            showDot={false}
+          />
+          <MobileFilterChip
+            label={`${copy.waitingOnYou} · ${waitingCount}`}
+            selected={ownerFilter === "action"}
+            onPress={() => setOwnerFilter("action")}
+            tone={chipTone}
+            showDot={false}
+          />
+        </View>
+        <View style={s.sectionRow}>
+          <Text style={[s.sectionTitle, ink, s.flex]}>{copy.roomsWithContracts}</Text>
+          <Text style={[s.caption, muted]}>
+            {copy.roomCount.replace("{count}", String(cards.length))}
+          </Text>
+        </View>
+        {cards.length ? (
+          cards.map(({ room, contracts, summary }) => {
+            const currentName = occupant(contracts);
+            const actionInk = summary.action ? "#B45309" : theme.textSecondary;
+            return (
+              <Pressable
+                key={room.key}
+                accessibilityRole="button"
+                accessibilityLabel={`${room.property} ${room.room ?? ""}`}
+                onPress={() => onSelectRoom(room)}
+                style={({ pressed }) => [s.hubCard, surface, pressed && s.pressed]}
+              >
+                <View style={s.hubTop}>
+                  <View style={[s.hubIcon, { backgroundColor: roleTint }]}>
+                    <MobileIcon name="file-text" size={20} color={roleAccent} />
+                  </View>
+                  <View style={s.flex}>
+                    <Text style={[s.roomTitle, ink]} numberOfLines={1}>
+                      {room.property}
+                    </Text>
+                  </View>
+                  <MobileIcon name="chevron-right" size={18} color={tokens.colors.divider} />
+                </View>
+                <View style={s.hubMid}>
+                  <Text style={[s.caption, muted, s.flex]} numberOfLines={1}>
+                    {copy.unitNo} {room.room || "-"}
+                  </Text>
+                  <MobileStatusPill label={statusLabel[summary.status]} tone={summary.tone} />
+                </View>
+                <View style={[s.hubFoot, { borderTopColor: theme.border }]}>
+                  <Text style={[s.body, ink, s.flex]} numberOfLines={1}>
+                    {currentName || copy.noCurrentTenant}
+                  </Text>
+                  <Text style={[s.caption, { color: actionInk }]} numberOfLines={1}>
+                    {summary.action
+                      ? `${actionLabel[summary.action]} · ${copy.waitingYourSignature}`
+                      : copy.pendingDocs.replace("{count}", String(summary.pendingCount))}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })
+        ) : (
+          <Text style={[s.body, muted]}>
+            {roomQuery.trim() || ownerFilter === "action" ? copy.noMatchingRooms : copy.emptyContracts}
+          </Text>
+        )}
+      </View>
+    );
+  }
+
+  if (mode === "owner" && !history && selectedRoom && !selectedRoom.tenant?.trim() && group) {
+    const people = [
+      ...group.contracts.reduce((stays, row) => {
+        const tenant = row.tenant?.trim() || "—";
+        const current = stays.get(tenant) ?? { tenant, contracts: [] as PartyContract[] };
+        current.contracts.push(row);
+        stays.set(tenant, current);
+        return stays;
+      }, new Map<string, { tenant: string; contracts: PartyContract[] }>()).values(),
+    ].sort(
+      (a, b) =>
+        Number(staying(b.contracts)) - Number(staying(a.contracts)) ||
+        latestStart(b.contracts).localeCompare(latestStart(a.contracts)) ||
+        a.tenant.localeCompare(b.tenant, locale),
+    );
+    return (
+      <View style={s.root}>
+        <View style={s.sectionRow}>
+          <Text style={[s.sectionTitle, ink, s.flex]}>{copy.roomTenants}</Text>
+          <Text style={[s.caption, muted]}>
+            {copy.peopleCount.replace("{count}", String(people.length))}
+          </Text>
+        </View>
+        {people.length ? (
+          people.map((person) => {
+            const current = staying(person.contracts);
+            const dates = ownerTenantStayDates(person.contracts);
+            return (
+              <Pressable
+                key={person.tenant}
+                accessibilityRole="button"
+                accessibilityLabel={person.tenant}
+                onPress={() => onSelectRoom({ ...group.room, tenant: person.tenant })}
+                style={({ pressed }) => [s.room, surface, pressed && s.pressed]}
+              >
+                <View
+                  style={[
+                    s.roomIcon,
+                    { backgroundColor: current ? roleTint : "rgba(100, 116, 139, 0.14)" },
+                  ]}
+                >
+                  <MobileIcon
+                    name="user"
+                    size={22}
+                    color={current ? roleAccent : tokens.colors.textSecondary}
+                  />
+                </View>
+                <View style={s.flex}>
+                  <Text style={[s.roomTitle, ink]}>{person.tenant}</Text>
+                  <Text style={[s.caption, muted]}>
+                    {current ? copy.currentStay : copy.pastStay}
+                  </Text>
+                  <Text style={[s.caption, muted]}>
+                    {copy.stayDates
+                      .replace("{moveIn}", dates.moveIn ? format.date(dates.moveIn) : "—")
+                      .replace("{moveOut}", dates.moveOut ? format.date(dates.moveOut) : "—")}
+                  </Text>
+                </View>
+                <Text style={[s.caption, muted]}>
+                  {copy.contractCount.replace("{count}", String(person.contracts.length))}
+                </Text>
+                <MobileIcon name="chevron-right" size={18} color={tokens.colors.divider} />
+              </Pressable>
+            );
+          })
+        ) : (
+          <Text style={[s.body, muted]}>{copy.emptyRoomTenants}</Text>
+        )}
+      </View>
+    );
+  }
+
+  if (!group && mode === "owner" && history && !selectedRoom) {
+    const q = tenantQuery.trim().toLowerCase();
+    const visibleStays = q
+      ? tenantStays.filter(
+          (stay) =>
+            stay.tenant.toLowerCase().includes(q) ||
+            ownerRoomMatches(stay.room.property, stay.room.room, stay.contracts, q),
+        )
+      : tenantStays;
+    return (
+      <View style={s.root}>
+        <MobileListSearchRow
+          value={tenantQuery}
+          onChangeText={setTenantQuery}
+          placeholder={copy.searchTenants}
+          onClear={() => setTenantQuery("")}
+          clearAccessibilityLabel={copy.clearSearch}
+        />
         <Text style={[s.body, muted]}>{copy.tenantHistoryHint}</Text>
-        {tenantStays.length ? (
-          tenantStays.map((stay) => {
+        {visibleStays.length ? (
+          visibleStays.map((stay) => {
             const current = staying(stay.contracts);
             return (
               <Pressable
@@ -237,10 +456,13 @@ export function TenantContractList({
             );
           })
         ) : (
-          <Text style={[s.body, muted]}>{copy.emptyTenantHistory}</Text>
+          <Text style={[s.body, muted]}>
+            {q ? copy.noMatchingTenants : copy.emptyTenantHistory}
+          </Text>
         )}
       </View>
     );
+  }
 
   if (!group)
     return (
@@ -291,7 +513,9 @@ export function TenantContractList({
     ? (selectedRoom?.tenant?.trim() || occupant(group.contracts))
     : "";
   const visibleContracts = mode === "owner"
-    ? group.contracts.filter((row) => focusTenant && row.tenant?.trim() === focusTenant)
+    ? focusTenant
+      ? group.contracts.filter((row) => row.tenant?.trim() === focusTenant)
+      : group.contracts
     : group.contracts;
   const leases = visibleContracts
     .filter((row) => row.formKind === "lease")
@@ -306,6 +530,9 @@ export function TenantContractList({
       <View style={[s.room, surface]}>
         {roomHeader(group.room, visibleContracts.length, visibleContracts)}
       </View>
+      {mode === "owner" && visibleContracts.length === 0 ? (
+        <Text style={[s.body, muted]}>{copy.emptyRoom}</Text>
+      ) : null}
       {leases.map((row) => {
         const canSign =
           row.myParties.includes(mode === "owner" ? "owner" : "tenant") &&
@@ -483,6 +710,25 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  filters: { flexDirection: "row", gap: 8 },
+  sectionRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  hubCard: { padding: 14, borderWidth: 1, borderRadius: 16, gap: 12 },
+  hubTop: { flexDirection: "row", alignItems: "center", gap: 10 },
+  hubIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  hubMid: { flexDirection: "row", alignItems: "center", gap: 8 },
+  hubFoot: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderTopWidth: 1,
+    paddingTop: 10,
   },
   roomIcon: {
     width: 48,

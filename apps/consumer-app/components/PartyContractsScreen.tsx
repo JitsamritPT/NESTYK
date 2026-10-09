@@ -4,7 +4,7 @@ import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from "react-nati
 import { MobileSectionHeader, tokens, useMobileTheme } from "@nestyk/ui/native";
 import type { PartyContract } from "@nestyk/types";
 import { localizedError, useLocale } from "@nestyk/i18n";
-import { listMyContracts } from "../lib/party-contracts-api";
+import { listMyContracts, listMyOwnedRooms, type OwnedRoom } from "../lib/party-contracts-api";
 import { PartyContractDetail } from "./PartyContractDetail";
 import { TenantContractList } from "./TenantContractList";
 
@@ -42,6 +42,7 @@ export function PartyContractsScreen({
   const { t, locale } = useLocale();
   const pc = t.contracts.party;
   const [rows, setRows] = useState<PartyContract[]>([]);
+  const [ownedRooms, setOwnedRooms] = useState<OwnedRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const openedRef = useRef(opened);
@@ -62,10 +63,14 @@ export function PartyContractsScreen({
     let cancelled = false;
     setLoading(true);
     setError("");
-    listMyContracts()
-      .then((next) => {
+    Promise.all([
+      listMyContracts(),
+      mode === "owner" ? listMyOwnedRooms().catch(() => [] as OwnedRoom[]) : Promise.resolve([] as OwnedRoom[]),
+    ])
+      .then(([next, rooms]) => {
         if (!cancelled) {
           setRows(next);
+          setOwnedRooms(rooms);
           const current = openedRef.current;
           if (current) {
             onOpenedChangeRef.current(next.find((row) => row.id === current.id) ?? current);
@@ -85,7 +90,7 @@ export function PartyContractsScreen({
     return () => {
       cancelled = true;
     };
-  }, [reloadToken]);
+  }, [reloadToken, mode]);
 
   return (
     <View style={styles.root}>
@@ -99,6 +104,7 @@ export function PartyContractsScreen({
         <TenantContractList
           mode={mode}
           rows={rows}
+          ownedRooms={ownedRooms}
           selectedRoom={selectedRoom}
           history={history}
           onSelectRoom={onSelectedRoomChange}

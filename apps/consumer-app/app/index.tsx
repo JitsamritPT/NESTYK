@@ -507,12 +507,17 @@ export default function AppHomeScreen() {
   useEffect(() => {
     if (!partyInbox || openedPartyContract || (!selectedPartyRoom && !contractHistory)) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (selectedPartyRoom) setSelectedPartyRoom(null);
-      else setContractHistory(false);
+      if (selectedPartyRoom?.tenant && !contractHistory) {
+        setSelectedPartyRoom({ ...selectedPartyRoom, tenant: null });
+      } else if (selectedPartyRoom) setSelectedPartyRoom(null);
+      else if (contractHistory && activeRole !== 'tenant') {
+        setContractHistory(false);
+        setPartyInbox(false);
+      } else setContractHistory(false);
       return true;
     });
     return () => sub.remove();
-  }, [partyInbox, selectedPartyRoom, openedPartyContract, contractHistory]);
+  }, [partyInbox, selectedPartyRoom, openedPartyContract, contractHistory, activeRole]);
 
   const handleRoleChange = (role: UserRole) => {
     if (roleRequiresAuth(role) && !isAuthenticated) {
@@ -1356,7 +1361,7 @@ export default function AppHomeScreen() {
           ) : partyInbox ? (
             <MobileSectionHeader
               title={
-                contractHistory && selectedPartyRoom?.tenant
+                selectedPartyRoom?.tenant
                   ? selectedPartyRoom.tenant
                   : selectedPartyRoom
                   ? (selectedPartyRoom.room
@@ -1364,25 +1369,40 @@ export default function AppHomeScreen() {
                       : selectedPartyRoom.property)
                   : contractHistory
                     ? tenantWorkspaceCopy(locale)[partyRole === 'owner' ? 'tenantHistory' : 'roomHistory']
-                    : tenantWorkspaceCopy(locale).myContracts
+                    : partyRole === 'owner'
+                      ? tenantWorkspaceCopy(locale).contractsAndTenants
+                      : tenantWorkspaceCopy(locale).myContracts
               }
               workspaceLabel={
-                selectedPartyRoom?.room || (contractHistory && selectedPartyRoom?.tenant)
-                  ? selectedPartyRoom?.property
+                selectedPartyRoom?.tenant
+                  ? [selectedPartyRoom.property, selectedPartyRoom.room
+                      ? t.mobile.partyContracts.room.replace('{room}', selectedPartyRoom.room)
+                      : null].filter(Boolean).join(' · ')
+                  : selectedPartyRoom?.room
+                  ? selectedPartyRoom.property
                   : contractHistory
-                    ? tenantWorkspaceCopy(locale).myContracts
-                    : t.roles[partyRole]
+                    ? partyRole === 'owner'
+                      ? tenantWorkspaceCopy(locale).ownerWorkspace
+                      : tenantWorkspaceCopy(locale).myContracts
+                    : partyRole === 'owner'
+                      ? tenantWorkspaceCopy(locale).ownerWorkspace
+                      : t.roles[partyRole]
               }
               accentColor={tokens.colors.roles[partyRole]}
               leading={selectedPartyRoom || contractHistory ? "back" : "menu"}
               onBackPress={() => {
                 setOpenedPartyContract(null);
-                if (selectedPartyRoom) setSelectedPartyRoom(null);
-                else setContractHistory(false);
+                if (selectedPartyRoom?.tenant && !contractHistory) {
+                  setSelectedPartyRoom({ ...selectedPartyRoom, tenant: null });
+                } else if (selectedPartyRoom) setSelectedPartyRoom(null);
+                else if (contractHistory && partyRole === 'owner') {
+                  setContractHistory(false);
+                  setPartyInbox(false);
+                } else setContractHistory(false);
               }}
               onMenuPress={() => setDrawerOpen(true)}
               onActionPress={
-                !selectedPartyRoom && !contractHistory
+                partyRole === 'tenant' && !selectedPartyRoom && !contractHistory
                   ? () => {
                       setOpenedPartyContract(null);
                       setSelectedPartyRoom(null);
@@ -1391,8 +1411,8 @@ export default function AppHomeScreen() {
                   : undefined
               }
               actionLabel={
-                !selectedPartyRoom && !contractHistory
-                  ? tenantWorkspaceCopy(locale)[partyRole === 'owner' ? 'tenantHistory' : 'roomHistory']
+                partyRole === 'tenant' && !selectedPartyRoom && !contractHistory
+                  ? tenantWorkspaceCopy(locale).roomHistory
                   : undefined
               }
               actionIcon="archive"
@@ -1532,10 +1552,19 @@ export default function AppHomeScreen() {
             return;
           }
           if (action.type === 'route') {
+            if (action.path === '/owner/tenants') {
+              setDrawerOpen(false);
+              setOpenedPartyContract(null);
+              setSelectedPartyRoom(null);
+              setContractHistory(true);
+              setPartyInbox(true);
+              return;
+            }
             if (action.path === '/tenant/contract' || action.path === '/owner/contracts') {
               setDrawerOpen(false);
               setOpenedPartyContract(null);
               setSelectedPartyRoom(null);
+              setContractHistory(false);
               setPartyInbox(true);
               return;
             }
