@@ -13,6 +13,7 @@ import { PropertyOwnerEntity } from "../../entities/property-owner.entity";
 import { UserEntity } from "../../entities/user.entity";
 import { validateAgreementData } from "./agreement-data";
 import { MasterAgreementTypeEntity } from "../../entities/master-agreement-type.entity";
+import { MasterContractEndReasonEntity } from "../../entities/master-contract-end-reason.entity";
 import {
   BadRequestException,
   ConflictException,
@@ -600,6 +601,11 @@ export class AgentContractsService {
           : null,
       monthlyRent: c.monthly_rent == null ? null : Number(c.monthly_rent),
       deposit: c.deposit == null ? null : Number(c.deposit),
+      endReasonId: c.end_reason_id ?? null,
+      endReasonNote: c.end_reason_note ?? null,
+      effectiveEndDate: c.effective_end_date ?? null,
+      endRecordedAt: c.end_recorded_at?.toISOString() ?? null,
+      endRecordedByUserId: c.end_recorded_by_user_id ?? null,
       notes: c.notes,
       ownerSignedAt: c.owner_signed_at?.toISOString() || null,
       tenantSignedAt: c.tenant_signed_at?.toISOString() || null,
@@ -2445,9 +2451,19 @@ export class AgentContractsService {
       });
       if (!c) throw new NotFoundException("ไม่พบสัญญา");
       this.assertDraft(c);
+      const endReason = await manager.findOneBy(MasterContractEndReasonEntity, {
+        code: "draft_cancelled", is_active: true,
+      });
+      if (!endReason) throw new BadRequestException("ไม่พบเหตุผลยกเลิกฉบับร่างที่เปิดใช้งาน");
+      const cancelledAt = new Date();
       await manager.update(LeaseContractEntity, { id }, {
         status: "cancelled",
-        data: { ...c.data, draftCancellation: { reason: reason.trim(), at: new Date().toISOString(), by: agentId } },
+        end_reason_id: endReason.id,
+        end_reason_note: reason.trim(),
+        effective_end_date: bangkokToday(cancelledAt),
+        end_recorded_at: cancelledAt,
+        end_recorded_by_user_id: agentId,
+        data: { ...c.data, draftCancellation: { reason: reason.trim(), at: cancelledAt.toISOString(), by: agentId } },
       });
       await this.revokeDraftInvites(manager, id);
     });
@@ -2763,7 +2779,19 @@ export class AgentContractsService {
         throw new ConflictException(
           "ห้องนี้มีสัญญาประเภทเดียวกันในช่วงวันที่เลือกแล้ว กรุณาตรวจสอบรายการสัญญา",
         );
-      const tenancy = existing ? { id: existing.room_tenancy_id } : await manager.save(
+      let continuedTenancy: RoomTenancyEntity | null = null;
+      if (!existing && previous?.end_date && previous.room_tenancy_id) {
+        const nextDay = new Date(`${previous.end_date}T00:00:00.000Z`);
+        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+        if (contractInput.startDate === nextDay.toISOString().slice(0, 10)) {
+          const occupancy = await manager.findOne(RoomTenancyEntity, {
+            where: { id: previous.room_tenancy_id, tenant_id: tenant.id, rent_room_id: room.id,
+              created_by_user_id: agentId }, lock: { mode: "pessimistic_write" },
+          });
+          if (occupancy?.status === "active") continuedTenancy = occupancy;
+        }
+      }
+      const tenancy = existing ? { id: existing.room_tenancy_id } : continuedTenancy ?? await manager.save(
         RoomTenancyEntity,
         manager.create(RoomTenancyEntity, {
           rent_room_id: room.id,

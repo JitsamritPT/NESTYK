@@ -8,6 +8,7 @@ import { TenantEntity } from "./tenant.entity";
 import { LeadEntity } from "./lead.entity";
 import { PropertyOwnerEntity } from "./property-owner.entity";
 import { UserEntity } from "./user.entity";
+import { MasterContractEndReasonEntity } from "./master-contract-end-reason.entity";
 
 export type LeaseContractStatus =
   | "draft"
@@ -147,6 +148,16 @@ export class LeaseContractEntity extends SerialTimestampEntity {
 
   @Column({ type: "timestamptz", nullable: true })
   terminated_at: Date | null;
+
+  @Column({ type: "int", nullable: true }) end_reason_id: number | null;
+  @ManyToOne(() => MasterContractEndReasonEntity, { onDelete: "RESTRICT", nullable: true })
+  @JoinColumn({ name: "end_reason_id" }) end_reason: MasterContractEndReasonEntity | null;
+  @Column({ type: "text", nullable: true }) end_reason_note: string | null;
+  @Column({ type: "date", nullable: true }) effective_end_date: string | null;
+  @Column({ type: "timestamptz", nullable: true }) end_recorded_at: Date | null;
+  @Column({ type: "int", nullable: true }) end_recorded_by_user_id: number | null;
+  @ManyToOne(() => UserEntity, { onDelete: "RESTRICT", nullable: true })
+  @JoinColumn({ name: "end_recorded_by_user_id" }) end_recorded_by: UserEntity | null;
 
   @Column({ type: "text", nullable: true })
   notes: string | null;

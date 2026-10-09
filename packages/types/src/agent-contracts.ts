@@ -50,6 +50,11 @@ export interface AgentContract {
   moveInDate: string | null;
   monthlyRent: number | null;
   deposit: number | null;
+  endReasonId?: number | null;
+  endReasonNote?: string | null;
+  effectiveEndDate?: string | null;
+  endRecordedAt?: string | null;
+  endRecordedByUserId?: number | null;
   notes: string | null;
   ownerSignedAt: string | null;
   tenantSignedAt: string | null;
